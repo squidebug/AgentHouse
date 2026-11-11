@@ -1,5 +1,5 @@
 import { argbFromHex, hexFromArgb, Hct, MaterialDynamicColors as M, SchemeTonalSpot, type DynamicColor } from '@material/material-color-utilities';
-import type { ThemeMode } from '@agenthouse/protocol';
+import { TERMINAL_COLORS, type ThemeMode } from '@agenthouse/protocol';
 
 /** One seed color; every other role comes from Material 3's tonal palettes. */
 export const SEED = '#2b5ea7';
@@ -49,9 +49,9 @@ function build(dark: boolean): Tokens {
     onWarnContainer: dark ? '#ffdcc2' : '#4f2600',
     done: dark ? '#9ccfb4' : '#2f6a52',
     dropBg: dark ? 'rgba(169, 199, 255, 0.10)' : 'rgba(43, 94, 167, 0.07)',
-    // Must match the server's THEME_COLORS, which answers the CLI's color queries.
-    termBg: dark ? '#12151a' : '#fbfcfe',
-    termOn: dark ? '#dfe2ea' : '#1f2328',
+    // What the session host also tells a CLI that asks for the terminal colors.
+    termBg: TERMINAL_COLORS[dark ? 'dark' : 'light'].background,
+    termOn: TERMINAL_COLORS[dark ? 'dark' : 'light'].foreground,
     termDim: dark ? '#9ba1ae' : '#5a5f6c',
   };
 }

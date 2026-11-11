@@ -1,4 +1,4 @@
-import type { ComposeResult } from '@agenthouse/protocol';
+import { isAsking, type ComposeResult } from '@agenthouse/protocol';
 
 export interface SendOutcome {
   sent: number;
@@ -17,7 +17,7 @@ export function summarizeSend(ids: string[], results: PromiseSettledResult<Compo
     if (result.status === 'fulfilled' && result.value.submitted) {
       outcome.sent += 1;
       if (id) outcome.delivered.push(id);
-    } else if (result.status === 'fulfilled' && (result.value.reason === 'awaiting_permission' || result.value.reason === 'awaiting_input')) {
+    } else if (result.status === 'fulfilled' && isAsking(result.value.reason)) {
       outcome.held += 1;
     } else {
       outcome.failed += 1;

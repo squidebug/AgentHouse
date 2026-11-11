@@ -44,6 +44,12 @@ process.stdin.on('data', (chunk) => {
   });
   if (!rest) return;
   out(`IN ${JSON.stringify(rest)}\r\n`);
+  // A burst far larger than any viewer may fall behind by.
+  if (rest.includes('flood')) {
+    const line = `${'x'.repeat(150)}\r\n`;
+    for (let i = 0; i < 40_000; i += 1) out(line);
+    out('flood done\r\n');
+  }
   // Stands in for a turn in progress: output keeps coming for two seconds.
   if (rest.includes('stream')) {
     let tick = 0;

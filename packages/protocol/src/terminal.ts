@@ -1,3 +1,5 @@
+import type { ThemeMode } from './session';
+
 // Terminals answer some escape-sequence queries on their own: cursor position,
 // device attributes, colors. Only the server-side mirror may answer them.
 // Otherwise a session nobody is watching stalls on its startup queries, and a
@@ -22,6 +24,15 @@ export interface TerminalColors {
   foreground: string;
   background: string;
 }
+
+/**
+ * The browser terminal's colors per app theme. The session host answers a
+ * CLI's color queries with these, so they must be what the browser draws.
+ */
+export const TERMINAL_COLORS: Record<ThemeMode, TerminalColors> = {
+  light: { foreground: '#1f2328', background: '#fbfcfe' },
+  dark: { foreground: '#dfe2ea', background: '#12151a' },
+};
 
 const COLOR_REPORT = /^\x1b\](?:1[01]);rgb:/;
 const COLOR_QUERY = /\x1b\](1[01]);\?(\x07|\x1b\\)/g;

@@ -1,5 +1,5 @@
-import { timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
+import { sameSecret } from '../../shared/compare';
 
 export const COOKIE = 'ah_token';
 
@@ -40,10 +40,7 @@ export class AccessControl {
   }
 
   tokenMatches(candidate: string | null | undefined): boolean {
-    if (!candidate) return false;
-    const a = Buffer.from(candidate);
-    const b = Buffer.from(this.token);
-    return a.length === b.length && timingSafeEqual(a, b);
+    return Boolean(candidate) && sameSecret(candidate!, this.token);
   }
 
   authenticated(req: IncomingMessage): boolean {

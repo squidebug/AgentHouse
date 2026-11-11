@@ -1,13 +1,14 @@
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { WebSocketServer, type WebSocket } from 'ws';
-import type { AccountLimits, SessionInfo, TerminalClientMessage, Vendor } from '@agenthouse/protocol';
-import { THEME_COLORS } from './colors';
-import { Session } from './session';
-import { limitsFrom, type HookEvent, type StatusLineInput } from '../claude/status';
+import { TERMINAL_COLORS, type AccountLimits, type SessionInfo, type TerminalClientMessage, type Vendor } from '@agenthouse/protocol';
+import { sameSecret } from '../shared/compare';
 import { HOST_PROTOCOL, HostRequestError, hostProof, type HostMessage, type HostRequest, type SpawnSpec } from '../shared/host-protocol';
 import { clearState, removeTree, runDir, writeState } from '../shared/state';
+import { receiveFromRelay } from './hooks';
+import { ClaudeObserver, Observer } from './observer';
+import { Session } from './session';
 
 export interface HostOptions {
   stateDir: string;
@@ -23,15 +24,6 @@ export interface SessionHost {
   /** Settles when the host should exit: idle for idleExitMs, or asked to shut down. */
   done: Promise<'idle' | 'shutdown'>;
   close(): Promise<void>;
-}
-
-// Hook events carry tool input and output; a huge one is dropped, not buffered.
-const MAX_EVENT_BYTES = 8 * 1024 * 1024;
-
-function sameSecret(candidate: string, secret: string): boolean {
-  const a = Buffer.from(candidate);
-  const b = Buffer.from(secret);
-  return a.length === b.length && timingSafeEqual(a, b);
 }
 
 const sameWindow = (a: AccountLimits['fiveHour'], b: AccountLimits['fiveHour']) => a?.usedPct === b?.usedPct && a?.resetsAt === b?.resetsAt;
@@ -107,14 +99,15 @@ export async function createSessionHost(options: HostOptions): Promise<SessionHo
         env: spec.env,
         cols: spec.cols,
         rows: spec.rows,
-        colors: THEME_COLORS[spec.theme],
+        colors: TERMINAL_COLORS[spec.theme],
         model: spec.model,
         effort: spec.effort,
         permissionMode: spec.permissionMode,
         cliVersion: spec.cliVersion,
-        vendorSessionId: spec.vendorSessionId,
-        hookToken: spec.hookToken,
-        agentsCommand: spec.agentsCommand,
+        observe: (pid) =>
+          spec.hookToken
+            ? new ClaudeObserver({ token: spec.hookToken, vendorSessionId: spec.vendorSessionId, agentsCommand: spec.agentsCommand, env: spec.env, pid })
+            : new Observer(spec.vendorSessionId),
         cleanup: removeTemp,
       });
     } catch (error) {
@@ -200,51 +193,25 @@ export async function createSessionHost(options: HostOptions): Promise<SessionHo
       if (message.type === 'input' && typeof message.data === 'string') session.input(message.data, message.binary === true);
       else if (message.type === 'resize' && Number.isFinite(message.cols) && Number.isFinite(message.rows)) session.resize(viewer, message.cols, message.rows);
       else if (message.type === 'claim') session.claim(viewer);
-      else if (message.type === 'theme' && (message.mode === 'light' || message.mode === 'dark')) session.setColors(THEME_COLORS[message.mode]);
+      else if (message.type === 'theme' && (message.mode === 'light' || message.mode === 'dark')) session.setColors(TERMINAL_COLORS[message.mode]);
     });
     ws.on('close', () => session.detach(viewer));
   };
 
-  // POST /hook and /status from a session's relay. The hook token picks the
-  // session; browsers (which always send Origin) are refused like on /control.
+  const inbox = {
+    find: (token: string) => {
+      for (const session of sessions.values()) {
+        if (session.observer instanceof ClaudeObserver && session.observer.ownsHookToken(token)) return session.observer;
+      }
+      return undefined;
+    },
+    limits: (update: Omit<AccountLimits, 'vendor'>) => updateLimits('claude', update),
+  };
   const server = http.createServer((req, res) => {
-    const route = req.method === 'POST' ? req.url : undefined;
-    const bearer = req.headers.authorization?.match(/^Bearer (.+)$/)?.[1];
-    const session =
-      (route === '/hook' || route === '/status') && req.headers.origin === undefined && bearer
-        ? [...sessions.values()].find((s) => s.ownsHookToken(bearer))
-        : undefined;
-    if (!session) {
-      res.writeHead(route === '/hook' || route === '/status' ? 401 : 404);
-      res.end();
-      req.resume();
-      return;
-    }
-    const chunks: Buffer[] = [];
-    let size = 0;
-    req.on('data', (chunk: Buffer) => {
-      size += chunk.length;
-      if (size <= MAX_EVENT_BYTES) chunks.push(chunk);
-    });
-    req.on('end', () => {
-      res.writeHead(size > MAX_EVENT_BYTES ? 413 : 204);
-      res.end();
-      if (size > MAX_EVENT_BYTES) return;
-      let payload: unknown;
-      try {
-        payload = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-      } catch {
-        return;
-      }
-      if (!payload || typeof payload !== 'object') return;
-      if (route === '/hook') {
-        session.onHook(payload as HookEvent);
-        return;
-      }
-      session.onStatusLine(payload as StatusLineInput);
-      const update = session.vendor === 'claude' ? limitsFrom(payload as StatusLineInput) : null;
-      if (update) updateLimits('claude', update);
-    });
+    if (receiveFromRelay(req, res, inbox)) return;
+    res.writeHead(404);
+    res.end();
+    req.resume();
   });
   const wss = new WebSocketServer({ noServer: true, maxPayload: 8 * 1024 * 1024 });
 

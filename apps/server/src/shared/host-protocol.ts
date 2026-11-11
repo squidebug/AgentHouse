@@ -1,5 +1,6 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHmac } from 'node:crypto';
 import type { AccountLimits, ComposeRequest, SessionInfo, SessionVendor, ThemeMode } from '@agenthouse/protocol';
+import { sameSecret } from './compare';
 
 /**
  * Web server ↔ session host. Bump when either side could misread the other:
@@ -17,10 +18,7 @@ export function hostProof(token: string, nonce: string): string {
 }
 
 export function validHostProof(token: string, nonce: string, proof: unknown): boolean {
-  if (typeof proof !== 'string') return false;
-  const expected = Buffer.from(hostProof(token, nonce));
-  const actual = Buffer.from(proof);
-  return expected.length === actual.length && timingSafeEqual(expected, actual);
+  return typeof proof === 'string' && sameSecret(proof, hostProof(token, nonce));
 }
 
 /** Written by the host once it listens: how web servers find it and prove they may use it. */

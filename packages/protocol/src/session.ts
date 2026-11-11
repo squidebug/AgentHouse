@@ -3,6 +3,8 @@ export type Vendor = 'claude' | 'codex';
 /** `fake` is a test double that exists only when the server runs with --allow-fake. */
 export type SessionVendor = Vendor | 'fake';
 
+export const VENDOR_NAMES: Record<SessionVendor, string> = { claude: 'Claude Code', codex: 'Codex CLI', fake: 'fake-agent' };
+
 export type ThemeMode = 'light' | 'dark';
 
 export const CLAUDE_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
@@ -30,6 +32,15 @@ export interface SessionExit {
 
 /** `running`: the process runs but reports no turns (no hooks: Codex until M8, hooks blocked by policy). */
 export type StatusValue = 'starting' | 'running' | 'idle' | 'working' | 'awaiting_permission' | 'awaiting_input' | 'exited';
+
+/**
+ * Waiting for the user: an approval, or the answer to a question. Text and
+ * Enter typed now would answer the dialog, so nothing is sent to such a session.
+ * Takes a status value or a compose result's reason.
+ */
+export function isAsking(value: string | null | undefined): boolean {
+  return value === 'awaiting_permission' || value === 'awaiting_input';
+}
 
 /** What the agent is doing, from confirmed signals only (hooks, the process exiting). */
 export interface SessionStatus {

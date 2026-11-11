@@ -1,5 +1,5 @@
 import os from 'node:os';
-import type { CliInstall, CliStatus, EnvMessage, EnvReport, Vendor } from '@agenthouse/protocol';
+import { VENDOR_NAMES, type CliInstall, type CliStatus, type EnvMessage, type EnvReport, type Vendor } from '@agenthouse/protocol';
 import { claudeHookBlocker, gitBashPath } from '../claude/settings';
 import { claudeLoggedIn, codexLoggedIn, detectVersion } from './cli/probe';
 import { findOnPath, resolveCli } from './cli/resolve';
@@ -17,8 +17,6 @@ const LOGIN_COMMAND: Record<Vendor, string> = {
   claude: 'claude auth login',
   codex: 'codex login',
 };
-
-const NAME: Record<Vendor, string> = { claude: 'Claude Code', codex: 'Codex CLI' };
 
 function windowsBuild(): number | null {
   if (process.platform !== 'win32') return null;
@@ -53,7 +51,7 @@ function messagesFor(report: Omit<EnvReport, 'messages'>, hooks: HookReach): Env
     messages.push({ id: 'ENV_NO_CLI', level: 'error', text: 'Claude Code 또는 Codex CLI가 필요합니다.', command: INSTALL_COMMAND.claude });
   }
   for (const status of [claude, codex]) {
-    const name = NAME[status.vendor];
+    const name = VENDOR_NAMES[status.vendor];
     if (!status.installs.length) {
       if (claude.installs.length || codex.installs.length) {
         messages.push({ id: `ENV_${status.vendor.toUpperCase()}_MISSING`, level: 'info', text: `${name}가 설치되어 있지 않습니다.`, command: INSTALL_COMMAND[status.vendor] });

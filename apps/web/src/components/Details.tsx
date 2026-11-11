@@ -1,5 +1,5 @@
 import { Box, Typography } from '@mui/material';
-import type { SessionInfo, SessionStatus } from '@agenthouse/protocol';
+import { isAsking, type SessionInfo, type SessionStatus } from '@agenthouse/protocol';
 import { t } from '../strings';
 import { v } from '../theme/tokens';
 
@@ -29,7 +29,7 @@ export function statusText(status: SessionStatus): string {
 /** What a collapsed row adds after the model: only states worth a glance. */
 export function activity(session: SessionInfo): { text: string; color: string } | null {
   const { status } = session;
-  if (status.value === 'awaiting_permission' || status.value === 'awaiting_input') return { text: statusText(status), color: v.warn };
+  if (isAsking(status.value)) return { text: statusText(status), color: v.warn };
   if (status.error && status.value !== 'exited') return { text: statusText(status), color: v.error };
   if (status.value === 'working') return { text: statusText(status), color: v.primary };
   return null;

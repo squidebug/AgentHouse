@@ -1,7 +1,7 @@
 import { Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, Typography } from '@mui/material';
 import { useColorScheme } from '@mui/material/styles';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import type { SessionInfo, ThemeMode } from '@agenthouse/protocol';
+import { isAsking, type SessionInfo, type ThemeMode } from '@agenthouse/protocol';
 import { api } from './api/client';
 import { useEnv, useSessions } from './api/hooks';
 import { Composer } from './components/Composer';
@@ -58,7 +58,7 @@ export function App() {
 
   // Sessions waiting for an approval or an answer: counted in the tab title, and
   // announced by a notification while the tab is in the background.
-  const asking = useMemo(() => sessions.filter((s) => s.status.value === 'awaiting_permission' || s.status.value === 'awaiting_input'), [sessions]);
+  const asking = useMemo(() => sessions.filter((s) => isAsking(s.status.value)), [sessions]);
   useEffect(() => {
     document.title = asking.length ? `(${asking.length}) ${t.appName}` : t.appName;
   }, [asking.length]);

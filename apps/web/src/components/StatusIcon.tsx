@@ -1,4 +1,4 @@
-import type { SessionStatus } from '@agenthouse/protocol';
+import { isAsking, type SessionStatus } from '@agenthouse/protocol';
 import { v } from '../theme/tokens';
 import { statusText } from './Details';
 
@@ -9,7 +9,7 @@ import { statusText } from './Details';
  */
 export function StatusIcon({ status, size = 14 }: { status: SessionStatus; size?: number }) {
   const value = status.value;
-  const asking = value === 'awaiting_permission' || value === 'awaiting_input';
+  const asking = isAsking(value);
   const color = status.error ? v.error : asking ? v.warn : value === 'working' ? v.primary : v.on2;
   return (
     <svg role="img" aria-label={statusText(status)} width={size} height={size} viewBox="0 0 16 16" style={{ flex: 'none' }}>

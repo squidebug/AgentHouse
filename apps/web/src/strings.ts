@@ -1,3 +1,5 @@
+import { VENDOR_NAMES } from '@agenthouse/protocol';
+
 // UI text in one place so an English catalog can be added later.
 export const t = {
   appName: 'AgentHouse',
@@ -57,5 +59,5 @@ export const t = {
   fiveHour: '5시간',
   sevenDay: '주간',
   resetsAt: '초기화',
-  vendorName: { claude: 'Claude Code', codex: 'Codex', fake: 'fake-agent' } as Record<string, string>,
+  vendorName: VENDOR_NAMES as Record<string, string>,
 } as const;
