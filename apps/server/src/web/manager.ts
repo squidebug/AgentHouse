@@ -9,6 +9,8 @@ import type { HostClient } from './host-client';
 import { HostRequestError, type CloseResult, type ComposeOutcome } from '../shared/host-protocol';
 import { removeTree } from '../shared/state';
 import { childEnv } from '../shared/child-env';
+import { registryFile, SessionRegistry } from './registry';
+import { LimitsLog, stillValid } from './usage-log';
 
 const MISSING_TEXT: Record<Vendor, string> = {
   claude: 'Claude Code가 설치되어 있지 않습니다.',
@@ -50,18 +52,45 @@ async function resolveCwd(requested: string | undefined, fallback: string): Prom
 
 /**
  * The web server's side of the sessions: it prepares each launch (folder, CLI,
- * flags, environment) and hands it to the session host, which runs it.
+ * flags, environment) and hands it to the session host, which runs it. It also
+ * keeps the session registry and the usage log, so the list and the last plan
+ * usage outlive a host restart.
  */
 export class SessionManager extends EventEmitter {
+  private readonly registry: SessionRegistry;
+  private readonly usage: LimitsLog;
+  /** Plan usage from the log, until sessions report again. */
+  private readonly logged: AccountLimits[];
+  private readonly onChange: () => void;
+  private readonly onLimits: () => void;
+
   constructor(private readonly options: ManagerOptions) {
     super();
-    options.host.on('change', () => this.emit('change'));
-    options.host.on('limits', () => this.emit('limits'));
+    const { host } = options;
+    this.registry = new SessionRegistry(registryFile(host.stateDir));
+    this.usage = new LimitsLog(path.join(host.stateDir, 'usage'));
+    this.logged = this.usage.last();
+    this.registry.record(host.sessions());
+    this.onChange = () => {
+      this.registry.record(host.sessions());
+      this.emit('change');
+    };
+    this.onLimits = () => {
+      this.usage.append(host.limits());
+      this.emit('limits');
+    };
+    host.on('change', this.onChange);
+    host.on('limits', this.onLimits);
   }
 
-  /** Plan usage per vendor account, from the sessions' status lines. */
+  /** Plan usage per vendor account: the newest a session reported, or the log's; windows that reset since are dropped. */
   limits(): AccountLimits[] {
-    return this.options.host.limits();
+    const newest = new Map<string, AccountLimits>();
+    for (const entry of [...this.logged, ...this.options.host.limits()]) {
+      const before = newest.get(entry.vendor);
+      if (!before || entry.at >= before.at) newest.set(entry.vendor, entry);
+    }
+    return [...newest.values()].map((entry) => stillValid(entry)).filter((entry): entry is AccountLimits => entry !== null);
   }
 
   async create(opts: LaunchOptions): Promise<SessionInfo> {
@@ -114,16 +143,28 @@ export class SessionManager extends EventEmitter {
   }
 
   get(id: string): SessionInfo | undefined {
-    return this.options.host.get(id);
+    return this.options.host.get(id) ?? this.registry.get(id);
   }
 
+  /** The host's sessions and the ended ones from earlier hosts, in the order they started. */
   list(): SessionInfo[] {
-    return this.options.host.sessions();
+    const live = this.options.host.sessions();
+    return [...live, ...this.registry.past(live)].sort((a, b) => a.startedAt - b.startedAt);
   }
 
   /** Ends the session (if still running) and removes it from the list. */
-  remove(id: string): Promise<CloseResult> {
-    return this.options.host.closeSession(id);
+  async remove(id: string): Promise<CloseResult> {
+    const result = this.options.host.get(id) ? await this.options.host.closeSession(id) : { exited: true, stillAlive: false };
+    this.registry.remove(id);
+    this.emit('change');
+    return result;
+  }
+
+  /** Saves what is pending and stops following the host; the web server is closing. */
+  close(): void {
+    this.options.host.off('change', this.onChange);
+    this.options.host.off('limits', this.onLimits);
+    this.registry.flush();
   }
 
   compose(id: string, request: ComposeRequest): Promise<ComposeOutcome> {

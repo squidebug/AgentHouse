@@ -89,7 +89,8 @@ export class Session extends EventEmitter {
   readonly observer: Observer;
   cols: number;
   rows: number;
-  exit: SessionExit | null = null;
+  /** The host always knows how its own CLIs ended. */
+  exit: (SessionExit & { code: number }) | null = null;
   lastOutputAt = 0;
 
   private readonly viewers = new Set<Viewer>();
@@ -331,6 +332,7 @@ export class Session extends EventEmitter {
       startedAt: this.startedAt,
       state: this.exit ? 'exited' : 'running',
       exit: this.exit,
+      screen: true,
       status: this.observer.status,
       telemetry: this.observer.telemetry,
       transcripts: this.observer.transcripts,

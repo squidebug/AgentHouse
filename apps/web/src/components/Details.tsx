@@ -71,7 +71,7 @@ export function sessionDetails(session: SessionInfo): Detail[] {
   list.push({ k: '경로', v: session.cwd, path: true });
   list.push({ k: '크기', v: `${session.cols}×${session.rows}` });
   list.push({ k: 'PID', v: String(session.pid) });
-  if (session.exit) list.push({ k: '종료 코드', v: String(session.exit.code) });
+  if (session.exit?.code != null) list.push({ k: '종료 코드', v: String(session.exit.code) });
   return list;
 }
 

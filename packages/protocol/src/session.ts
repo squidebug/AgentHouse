@@ -25,7 +25,8 @@ export interface LaunchOptions {
 }
 
 export interface SessionExit {
-  code: number;
+  /** null: unknown, the session host ended while the CLI ran. */
+  code: number | null;
   signal: number | null;
   at: number;
 }
@@ -107,6 +108,8 @@ export interface SessionInfo {
   startedAt: number;
   state: 'running' | 'exited';
   exit: SessionExit | null;
+  /** The session host still has its terminal: it runs, or it ended while that host stayed up. */
+  screen: boolean;
   status: SessionStatus;
   telemetry: SessionTelemetry;
   /** The transcripts this session wrote, oldest first; empty when the CLI reports none. */

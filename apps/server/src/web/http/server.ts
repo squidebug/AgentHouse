@@ -257,7 +257,8 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
       return;
     }
     const sessionId = url.pathname === '/ws/session' ? (url.searchParams.get('id') ?? '') : '';
-    if (!sessionId || !manager.get(sessionId)) return reject(404);
+    // Only the session host has terminals; an ended session from an earlier host has none.
+    if (!sessionId || !manager.get(sessionId)?.screen) return reject(404);
     wss.handleUpgrade(req, socket, head, (ws) => {
       terminals.add(ws);
       ws.on('close', () => terminals.delete(ws));
@@ -284,6 +285,7 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
     async close() {
       manager.off('change', broadcastSessions);
       manager.off('limits', broadcastLimits);
+      manager.close();
       for (const ws of eventClients) ws.close();
       for (const ws of terminals) ws.terminate();
       wss.close();

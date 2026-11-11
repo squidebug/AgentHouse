@@ -167,7 +167,11 @@ function PaneView({ pane, session, state, dispatch, dnd, mode, windowsBuild }: P
         </Box>
       )}
       <Box sx={{ flex: 1, minHeight: 0, m: '0 12px 12px', p: '8px 4px 4px 10px', borderRadius: '10px', bgcolor: v.termBg, overflow: 'hidden' }}>
-        <TerminalView sessionId={session.id} mode={mode} windowsBuild={windowsBuild} onFocus={() => dispatch({ type: 'focus', paneId: pane.id })} />
+        {session.screen ? (
+          <TerminalView sessionId={session.id} mode={mode} windowsBuild={windowsBuild} onFocus={() => dispatch({ type: 'focus', paneId: pane.id })} />
+        ) : (
+          <Typography sx={{ p: 1, color: v.termDim }}>{t.noScreen}</Typography>
+        )}
       </Box>
       {dnd.isOver(target) && (
         <Box

@@ -4,6 +4,9 @@ import type { AccountLimits, RateWindow } from '@agenthouse/protocol';
 import { t } from '../strings';
 import { v } from '../theme/tokens';
 
+/** A window whose reset time has passed no longer tells the usage. */
+const fresh = (window: RateWindow | null, now: number) => (window && (window.resetsAt === null || window.resetsAt > now) ? window : null);
+
 const tone = (pct: number) => (pct >= 90 ? v.error : pct >= 75 ? v.warn : v.primary);
 
 function resetText(at: number, now: number): string {
@@ -49,9 +52,12 @@ export function LimitsChip({ limits }: { limits: AccountLimits[] }) {
   }, [anchor]);
 
   const claude = limits.find((l) => l.vendor === 'claude');
+  const at = Math.max(now, Date.now());
+  const fiveHour = fresh(claude?.fiveHour ?? null, at);
+  const sevenDay = fresh(claude?.sevenDay ?? null, at);
   const windows: Array<{ label: string; window: RateWindow }> = [];
-  if (claude?.fiveHour) windows.push({ label: t.fiveHour, window: claude.fiveHour });
-  if (claude?.sevenDay) windows.push({ label: t.sevenDay, window: claude.sevenDay });
+  if (fiveHour) windows.push({ label: t.fiveHour, window: fiveHour });
+  if (sevenDay) windows.push({ label: t.sevenDay, window: sevenDay });
   const top = [...windows].sort((a, b) => b.window.usedPct - a.window.usedPct)[0];
   if (!claude || !top) return null;
   const pct = Math.round(top.window.usedPct);
@@ -79,8 +85,8 @@ export function LimitsChip({ limits }: { limits: AccountLimits[] }) {
         <Typography sx={{ fontSize: 14, fontWeight: 600 }}>
           {t.vendorName.claude} {t.usage}
         </Typography>
-        <WindowRow label={t.fiveHour} window={claude.fiveHour} now={now} />
-        <WindowRow label={t.sevenDay} window={claude.sevenDay} now={now} />
+        <WindowRow label={t.fiveHour} window={fiveHour} now={now} />
+        <WindowRow label={t.sevenDay} window={sevenDay} now={now} />
       </Popover>
     </>
   );

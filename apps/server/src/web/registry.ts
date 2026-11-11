@@ -1,0 +1,117 @@
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+import type { SessionInfo } from '@agenthouse/protocol';
+
+const FILE_VERSION = 1;
+// Ended sessions stay listed until removed; beyond this many the oldest go.
+const MAX_ENDED = 50;
+const SAVE_DELAY_MS = 1000;
+
+export const registryFile = (stateDir: string) => path.join(stateDir, 'sessions.json');
+
+/** A session the host no longer has: ended, with no screen left, everything else as last seen. */
+function asEnded(info: SessionInfo): SessionInfo {
+  if (info.state === 'exited' && !info.screen) return info;
+  const at = info.exit?.at ?? info.status.at;
+  return {
+    ...info,
+    state: 'exited',
+    screen: false,
+    exit: info.exit ?? { code: null, signal: null, at },
+    status: info.status.value === 'exited' ? info.status : { value: 'exited', reason: null, tool: null, error: false, at },
+  };
+}
+
+function isEntry(value: unknown): value is SessionInfo {
+  const s = value as Partial<SessionInfo> | null;
+  return (
+    typeof s?.id === 'string' &&
+    typeof s.vendor === 'string' &&
+    typeof s.title === 'string' &&
+    typeof s.cwd === 'string' &&
+    typeof s.startedAt === 'number' &&
+    typeof s.status === 'object' &&
+    Array.isArray(s.transcripts)
+  );
+}
+
+/**
+ * The sessions of this state folder, kept by the web server in sessions.json
+ * so they outlive the session host. A session the host no longer lists has
+ * ended (the host restarted, or another web server removed it) and stays
+ * listed, with its transcripts, until the user removes it.
+ */
+export class SessionRegistry {
+  private readonly sessions = new Map<string, SessionInfo>();
+  private saveTimer: NodeJS.Timeout | undefined;
+  private saved = '';
+
+  constructor(private readonly file: string) {
+    try {
+      const data = JSON.parse(readFileSync(file, 'utf8')) as { version?: unknown; sessions?: unknown };
+      if (data.version === FILE_VERSION && Array.isArray(data.sessions)) {
+        for (const entry of data.sessions) if (isEntry(entry)) this.sessions.set(entry.id, entry);
+      }
+    } catch {
+      // none yet, or unreadable: start over
+    }
+    this.saved = this.serialize();
+  }
+
+  /** The host's current list. Sessions missing from it have ended. */
+  record(live: SessionInfo[]): void {
+    const ids = new Set(live.map((s) => s.id));
+    for (const info of live) this.sessions.set(info.id, info);
+    for (const [id, info] of this.sessions) if (!ids.has(id)) this.sessions.set(id, asEnded(info));
+    const ended = [...this.sessions.values()].filter((s) => !ids.has(s.id)).sort((a, b) => (b.exit?.at ?? 0) - (a.exit?.at ?? 0));
+    for (const old of ended.slice(MAX_ENDED)) this.sessions.delete(old.id);
+    this.saveSoon();
+  }
+
+  /** Ended sessions the host no longer has, oldest first. */
+  past(live: SessionInfo[]): SessionInfo[] {
+    const ids = new Set(live.map((s) => s.id));
+    return [...this.sessions.values()].filter((s) => !ids.has(s.id)).sort((a, b) => a.startedAt - b.startedAt);
+  }
+
+  get(id: string): SessionInfo | undefined {
+    return this.sessions.get(id);
+  }
+
+  remove(id: string): void {
+    if (this.sessions.delete(id)) this.saveSoon();
+  }
+
+  /** Writes what is pending now (the web server is closing). */
+  flush(): void {
+    clearTimeout(this.saveTimer);
+    this.saveTimer = undefined;
+    this.save();
+  }
+
+  private serialize(): string {
+    return JSON.stringify({ version: FILE_VERSION, sessions: [...this.sessions.values()] });
+  }
+
+  private saveSoon(): void {
+    this.saveTimer ??= setTimeout(() => {
+      this.saveTimer = undefined;
+      this.save();
+    }, SAVE_DELAY_MS);
+  }
+
+  // Replaced atomically: a reader never sees half a file.
+  private save(): void {
+    const text = this.serialize();
+    if (text === this.saved) return;
+    try {
+      mkdirSync(path.dirname(this.file), { recursive: true, mode: 0o700 });
+      const temp = `${this.file}.${process.pid}.tmp`;
+      writeFileSync(temp, text, { mode: 0o600 });
+      renameSync(temp, this.file);
+      this.saved = text;
+    } catch {
+      // kept in memory; the next change tries again
+    }
+  }
+}
