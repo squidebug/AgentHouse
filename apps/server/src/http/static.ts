@@ -16,6 +16,17 @@ const TYPES: Record<string, string> = {
   '.webmanifest': 'application/manifest+json',
 };
 
+// Defense in depth for a page that can type into shells: only the app's own
+// scripts run (no inline or injected ones), it cannot be framed, and it sends
+// no referrer. Styles stay inline-capable because MUI injects <style> tags.
+const SECURITY_HEADERS = {
+  'content-security-policy':
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; " +
+    "connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+  'referrer-policy': 'no-referrer',
+  'x-frame-options': 'DENY',
+};
+
 async function isFile(file: string): Promise<boolean> {
   try {
     return (await stat(file)).isFile();
@@ -26,7 +37,12 @@ async function isFile(file: string): Promise<boolean> {
 
 /** Serves the built web app; unknown paths get index.html so client routes work. */
 export async function serveStatic(root: string, pathname: string, res: ServerResponse): Promise<boolean> {
-  const decoded = decodeURIComponent(pathname);
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {
+    return false;
+  }
   const target = path.resolve(root, `.${decoded}`);
   if (target !== root && !target.startsWith(root + path.sep)) return false;
 
@@ -41,6 +57,7 @@ export async function serveStatic(root: string, pathname: string, res: ServerRes
     'content-type': TYPES[path.extname(file).toLowerCase()] ?? 'application/octet-stream',
     'cache-control': hashed ? 'public, max-age=31536000, immutable' : 'no-cache',
     'x-content-type-options': 'nosniff',
+    ...SECURITY_HEADERS,
   });
   res.end(await readFile(file));
   return true;
