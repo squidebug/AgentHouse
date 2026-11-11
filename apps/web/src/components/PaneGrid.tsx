@@ -3,9 +3,10 @@ import type { SessionInfo, ThemeMode } from '@agenthouse/protocol';
 import { t } from '../strings';
 import { v } from '../theme/tokens';
 import type { Dnd } from '../workspace/dnd';
-import { MAX_PANES, type Action, type Pane, type WorkspaceState } from '../workspace/state';
+import { MAX_PANES, type Action, type Pane, type PaneMode, type WorkspaceState } from '../workspace/state';
+import { ConversationView } from './ConversationView';
 import { Details, SessionSubtitle, sessionDetails } from './Details';
-import { ChevronIcon, CloseIcon, Grip, PlusIcon } from './icons';
+import { ChatIcon, ChevronIcon, CloseIcon, Grip, PlusIcon, TerminalIcon } from './icons';
 import { StatusIcon } from './StatusIcon';
 import { TerminalView } from './TerminalView';
 
@@ -62,7 +63,7 @@ export function PaneGrid({ state, dispatch, dnd, sessionById, mode, windowsBuild
         {state.panes.map((pane) => {
           const session = sessionById(pane.sessionId);
           return session ? (
-            <PaneView key={pane.id} pane={pane} session={session} state={state} dispatch={dispatch} dnd={dnd} mode={mode} windowsBuild={windowsBuild} />
+            <PaneView key={pane.id} pane={pane} session={session} state={state} dispatch={dispatch} dnd={dnd} theme={mode} windowsBuild={windowsBuild} />
           ) : null;
         })}
       </Box>
@@ -93,21 +94,50 @@ export function PaneGrid({ state, dispatch, dnd, sessionById, mode, windowsBuild
   );
 }
 
+const MODES = [
+  { mode: 'terminal', label: t.terminal, Icon: TerminalIcon },
+  { mode: 'conversation', label: t.conversation, Icon: ChatIcon },
+] as const;
+
+/** Terminal or conversation, as a two-part switch in the pane header. */
+function ModeSwitch({ mode, onChange }: { mode: PaneMode; onChange: (mode: PaneMode) => void }) {
+  return (
+    <Box role="group" sx={{ flex: 'none', display: 'inline-flex', p: '2px', borderRadius: '10px', bgcolor: v.surface2 }}>
+      {MODES.map(({ mode: value, label, Icon }) => (
+        <Tooltip key={value} title={label}>
+          <IconButton
+            aria-label={label}
+            aria-pressed={mode === value}
+            onClick={() => onChange(value)}
+            sx={{ width: 30, height: 28, borderRadius: '8px', color: mode === value ? v.on : v.on2, bgcolor: mode === value ? v.surface : 'transparent', '&:hover': { bgcolor: mode === value ? v.surface : v.surface3 } }}
+          >
+            <Icon size={16} />
+          </IconButton>
+        </Tooltip>
+      ))}
+    </Box>
+  );
+}
+
 interface PaneViewProps {
   pane: Pane;
   session: SessionInfo;
   state: WorkspaceState;
   dispatch: (action: Action) => void;
   dnd: Dnd;
-  mode: ThemeMode;
+  theme: ThemeMode;
   windowsBuild: number | null;
 }
 
-function PaneView({ pane, session, state, dispatch, dnd, mode, windowsBuild }: PaneViewProps) {
+function PaneView({ pane, session, state, dispatch, dnd, theme, windowsBuild }: PaneViewProps) {
   const active = pane.id === state.active;
   const open = Boolean(state.paneOpen[pane.id]);
   const target = { type: 'pane' as const, id: pane.id };
   const dragged = dnd.dragging?.kind === 'pane' && dnd.dragging.id === pane.id;
+  const hasConversation = session.transcripts.length > 0;
+  // An ended session from an earlier host has only its conversation left.
+  const mode: PaneMode = !session.screen ? 'conversation' : hasConversation ? (state.paneMode[pane.id] ?? 'terminal') : 'terminal';
+  const focus = () => dispatch({ type: 'focus', paneId: pane.id });
 
   return (
     <Box
@@ -149,6 +179,7 @@ function PaneView({ pane, session, state, dispatch, dnd, mode, windowsBuild }: P
             {t.exited}
           </Box>
         )}
+        {session.screen && hasConversation && <ModeSwitch mode={mode} onChange={(next) => dispatch({ type: 'setMode', paneId: pane.id, mode: next })} />}
         <IconButton
           aria-label={`${session.title} ${t.details}`}
           aria-expanded={open}
@@ -166,9 +197,14 @@ function PaneView({ pane, session, state, dispatch, dnd, mode, windowsBuild }: P
           <Details items={sessionDetails(session)} />
         </Box>
       )}
-      <Box sx={{ flex: 1, minHeight: 0, m: '0 12px 12px', p: '8px 4px 4px 10px', borderRadius: '10px', bgcolor: v.termBg, overflow: 'hidden' }}>
-        {session.screen ? (
-          <TerminalView sessionId={session.id} mode={mode} windowsBuild={windowsBuild} onFocus={() => dispatch({ type: 'focus', paneId: pane.id })} />
+      <Box
+        onPointerDown={mode === 'conversation' ? focus : undefined}
+        sx={{ flex: 1, minHeight: 0, m: '0 12px 12px', p: mode === 'conversation' ? '4px 4px 4px 14px' : '8px 4px 4px 10px', borderRadius: '10px', bgcolor: v.termBg, overflow: 'hidden' }}
+      >
+        {mode === 'conversation' && hasConversation ? (
+          <ConversationView sessionId={session.id} />
+        ) : session.screen ? (
+          <TerminalView sessionId={session.id} mode={theme} windowsBuild={windowsBuild} onFocus={focus} />
         ) : (
           <Typography sx={{ p: 1, color: v.termDim }}>{t.noScreen}</Typography>
         )}

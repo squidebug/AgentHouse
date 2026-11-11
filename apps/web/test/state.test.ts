@@ -107,6 +107,18 @@ test('the pane layout survives a reload; bad or missing storage falls back to em
   assert.deepEqual(loadWorkspace(undefined), initialWorkspace);
 });
 
+test('a pane remembers whether it shows the terminal or the conversation, across a reload', () => {
+  const store = new Map<string, string>();
+  const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, val: string) => void store.set(k, val) };
+  let s = run(initialWorkspace, { type: 'open', sessionId: 'a' }, { type: 'openNew', sessionId: 'b' }, { type: 'setMode', paneId: 'p2', mode: 'conversation' });
+  assert.deepEqual(s.paneMode, { p2: 'conversation' });
+  saveWorkspace(s, storage);
+  assert.deepEqual(loadWorkspace(storage).paneMode, { p2: 'conversation' });
+  s = run(s, { type: 'closePane', paneId: 'p2' });
+  saveWorkspace(s, storage);
+  assert.deepEqual(loadWorkspace(storage).paneMode, {}, 'a closed pane is forgotten');
+});
+
 test('hovering the same target twice keeps the same state object', () => {
   const s1 = run(initialWorkspace, { type: 'dragStart', drag: { kind: 'session', id: 'a' } }, { type: 'dragOver', over: { type: 'slot' } });
   const s2 = reducer(s1, { type: 'dragOver', over: { type: 'slot' } }, ctx);

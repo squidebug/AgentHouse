@@ -30,8 +30,8 @@ export function App() {
   const ctxRef = useRef<DropContext>({ runningIds: [] });
   const [state, dispatch] = useReducer((s: WorkspaceState, a: Action) => reducer(s, a, ctxRef.current), undefined, () => loadWorkspace());
 
-  const { panes, active, nextPane } = state;
-  useEffect(() => saveWorkspace({ ...state, panes, active, nextPane }), [panes, active, nextPane]);
+  const { panes, active, nextPane, paneMode } = state;
+  useEffect(() => saveWorkspace({ ...state, panes, active, nextPane, paneMode }), [panes, active, nextPane, paneMode]);
 
   const byId = useMemo(() => {
     const map = new Map<string, SessionInfo>(Object.entries(launched));

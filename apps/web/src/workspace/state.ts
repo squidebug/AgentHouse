@@ -8,6 +8,9 @@ export interface Pane {
   sessionId: string;
 }
 
+/** What a pane shows of its session: the live terminal, or the conversation read from the transcript. */
+export type PaneMode = 'terminal' | 'conversation';
+
 export type Drag = { kind: 'session'; id: string } | { kind: 'pane'; id: string };
 export type DropTarget = { type: 'pane'; id: string } | { type: 'slot' } | { type: 'composer' };
 
@@ -20,6 +23,8 @@ export interface WorkspaceState {
   targets: string[];
   rowOpen: Record<string, boolean>;
   paneOpen: Record<string, boolean>;
+  /** Per pane; a pane not listed shows the terminal. */
+  paneMode: Record<string, PaneMode>;
 }
 
 export const initialWorkspace: WorkspaceState = {
@@ -31,6 +36,7 @@ export const initialWorkspace: WorkspaceState = {
   targets: [],
   rowOpen: {},
   paneOpen: {},
+  paneMode: {},
 };
 
 const LAYOUT_KEY = 'ah-layout';
@@ -43,7 +49,8 @@ export function loadWorkspace(storage: Pick<Storage, 'getItem'> | undefined = gl
     const panes = saved.panes.filter((p): p is Pane => typeof p?.id === 'string' && typeof p?.sessionId === 'string').slice(0, MAX_PANES);
     const active = panes.some((p) => p.id === saved.active) ? (saved.active as string) : (panes[0]?.id ?? null);
     const nextPane = Math.max(Number(saved.nextPane) || 1, ...panes.map((p) => Number(p.id.slice(1)) + 1 || 1));
-    return { ...initialWorkspace, panes, active, nextPane };
+    const paneMode = Object.fromEntries(panes.filter((p) => saved.paneMode?.[p.id] === 'conversation').map((p) => [p.id, 'conversation' as const]));
+    return { ...initialWorkspace, panes, active, nextPane, paneMode };
   } catch {
     return initialWorkspace;
   }
@@ -51,7 +58,8 @@ export function loadWorkspace(storage: Pick<Storage, 'getItem'> | undefined = gl
 
 export function saveWorkspace(state: WorkspaceState, storage: Pick<Storage, 'setItem'> | undefined = globalThis.localStorage): void {
   try {
-    storage?.setItem(LAYOUT_KEY, JSON.stringify({ panes: state.panes, active: state.active, nextPane: state.nextPane }));
+    const paneMode = Object.fromEntries(state.panes.filter((p) => state.paneMode[p.id]).map((p) => [p.id, state.paneMode[p.id]]));
+    storage?.setItem(LAYOUT_KEY, JSON.stringify({ panes: state.panes, active: state.active, nextPane: state.nextPane, paneMode }));
   } catch {
     // private windows and blocked storage: the layout just isn't remembered
   }
@@ -69,6 +77,7 @@ export type Action =
   | { type: 'drop'; target: DropTarget }
   | { type: 'toggleRow'; id: string }
   | { type: 'togglePane'; id: string }
+  | { type: 'setMode'; paneId: string; mode: PaneMode }
   | { type: 'removeTarget'; id: string }
   | { type: 'sync'; sessionIds: string[]; runningIds: string[] };
 
@@ -164,6 +173,8 @@ export function reducer(state: WorkspaceState, action: Action, ctx: DropContext 
       return { ...state, rowOpen: toggle(state.rowOpen, action.id) };
     case 'togglePane':
       return { ...state, paneOpen: toggle(state.paneOpen, action.id) };
+    case 'setMode':
+      return { ...state, paneMode: { ...state.paneMode, [action.paneId]: action.mode } };
     case 'removeTarget':
       return { ...state, targets: state.targets.filter((t) => t !== action.id) };
     case 'sync': {

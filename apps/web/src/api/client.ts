@@ -1,4 +1,4 @@
-import type { ApiError, ComposeRequest, ComposeResult, EnvReport, LaunchOptions, SessionInfo } from '@agenthouse/protocol';
+import type { ApiError, ComposeRequest, ComposeResult, EntryDetail, EnvReport, LaunchOptions, SessionInfo } from '@agenthouse/protocol';
 
 export class RequestError extends Error {
   constructor(
@@ -32,6 +32,7 @@ export const api = {
   launch: (opts: LaunchOptions) => call<SessionInfo>('POST', '/api/sessions', opts),
   remove: (id: string) => call<unknown>('DELETE', `/api/sessions/${encodeURIComponent(id)}`),
   compose: (id: string, req: ComposeRequest) => call<ComposeResult>('POST', `/api/sessions/${encodeURIComponent(id)}/compose`, req),
+  entry: (id: string, entryId: string) => call<EntryDetail>('GET', `/api/sessions/${encodeURIComponent(id)}/conversation/${encodeURIComponent(entryId)}`),
 };
 
 export function socketUrl(path: string): string {

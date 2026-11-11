@@ -31,12 +31,23 @@ let sessionId = flag('--session-id') ?? randomUUID();
 const projects = process.env.CLAUDE_CONFIG_DIR ? path.join(process.env.CLAUDE_CONFIG_DIR, 'projects', process.cwd().replace(/[^A-Za-z0-9]/g, '-')) : null;
 const transcript = () => (projects ? path.join(projects, `${sessionId}.jsonl`) : null);
 
+// One at a time, in order: real hooks fire at moments far enough apart to arrive in order.
+let sent = Promise.resolve();
 function post(route, body) {
-  if (!relay) return;
+  if (!relay) return sent;
   const data = Buffer.from(JSON.stringify(body));
-  const req = http.request({ host: '127.0.0.1', port: relay.port, path: route, method: 'POST', headers: { authorization: `Bearer ${relay.token}`, 'content-type': 'application/json', 'content-length': data.length } });
-  req.on('error', () => {});
-  req.end(data);
+  sent = sent.then(
+    () =>
+      new Promise((resolve) => {
+        const req = http.request(
+          { host: '127.0.0.1', port: relay.port, path: route, method: 'POST', headers: { authorization: `Bearer ${relay.token}`, 'content-type': 'application/json', 'content-length': data.length } },
+          (res) => res.resume().on('end', resolve),
+        );
+        req.on('error', resolve);
+        req.end(data);
+      }),
+  );
+  return sent;
 }
 const hook = (name, extra = {}) => post('/hook', { hook_event_name: name, session_id: sessionId, cwd: process.cwd(), ...(transcript() ? { transcript_path: transcript() } : {}), ...extra });
 

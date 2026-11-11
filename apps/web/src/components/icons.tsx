@@ -72,6 +72,29 @@ export const CopyIcon = (p: IconProps) => (
   </Svg>
 );
 
+export const TerminalIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="3" y="4.5" width="18" height="15" rx="2.5" />
+    <path d="M7.5 9.5 L10.5 12 L7.5 14.5 M12.5 15 H16.5" />
+  </Svg>
+);
+
+export const ChatIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M5 5.5 H19 A1.5 1.5 0 0 1 20.5 7 V15 A1.5 1.5 0 0 1 19 16.5 H10 L6 19.5 V16.5 H5 A1.5 1.5 0 0 1 3.5 15 V7 A1.5 1.5 0 0 1 5 5.5 Z" />
+    <path d="M7.5 9.5 H16.5 M7.5 12.5 H13.5" />
+  </Svg>
+);
+
+export const BranchIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <circle cx="6.5" cy="6" r="2" />
+    <circle cx="6.5" cy="18" r="2" />
+    <circle cx="17.5" cy="12" r="2" />
+    <path d="M6.5 8 V16 M6.5 12 C6.5 12 9 12 15.5 12" />
+  </Svg>
+);
+
 export function Grip({ className }: { className?: string }) {
   return (
     <svg className={className} width="8" height="14" viewBox="0 0 8 14" aria-hidden="true" style={{ flex: 'none', fill: 'currentColor' }}>

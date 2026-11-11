@@ -17,12 +17,16 @@
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm -r --if-present test",
     "licenses:check": "node scripts/check-licenses.mjs",
-    "canary:claude": "node scripts/canary-claude.mjs"
+    "canary:claude": "node scripts/canary-claude.mjs",
+    "ui:check": "node scripts/ui-check.mjs"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
       "esbuild",
       "node-pty"
     ]
+  },
+  "devDependencies": {
+    "playwright-core": "1.65.0"
   }
 }
