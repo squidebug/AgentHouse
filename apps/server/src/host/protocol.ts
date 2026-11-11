@@ -1,10 +1,27 @@
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { AccountLimits, ComposeRequest, SessionInfo, SessionVendor, ThemeMode } from '@agenthouse/protocol';
 
 /**
  * Web server ↔ session host. Bump when either side could misread the other:
  * a web server only talks to a host of its own protocol version.
  */
-export const HOST_PROTOCOL = 2;
+export const HOST_PROTOCOL = 3;
+
+/**
+ * The host's answer to a web server's nonce. A process squatting on a dead
+ * host's port (left in a stale state file) cannot produce it, so the web
+ * server sends nothing to it and adopts nothing from it.
+ */
+export function hostProof(token: string, nonce: string): string {
+  return createHmac('sha256', token).update(`agenthouse-host:${nonce}`).digest('base64url');
+}
+
+export function validHostProof(token: string, nonce: string, proof: unknown): boolean {
+  if (typeof proof !== 'string') return false;
+  const expected = Buffer.from(hostProof(token, nonce));
+  const actual = Buffer.from(proof);
+  return expected.length === actual.length && timingSafeEqual(expected, actual);
+}
 
 /** Written by the host once it listens: how web servers find it and prove they may use it. */
 export interface HostState {
@@ -63,7 +80,7 @@ export type HostRequest =
  * (per-session hook token).
  */
 export type HostMessage =
-  | { type: 'hello'; protocol: number; pid: number; webToken: string; sessions: SessionInfo[]; limits: AccountLimits[] }
+  | { type: 'hello'; protocol: number; pid: number; proof: string; webToken: string; sessions: SessionInfo[]; limits: AccountLimits[] }
   | { type: 'sessions'; sessions: SessionInfo[] }
   | { type: 'limits'; limits: AccountLimits[] }
   | { type: 'reply'; id: number; ok: true; result: unknown }

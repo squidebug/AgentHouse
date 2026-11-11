@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {
@@ -105,7 +105,7 @@ export async function buildLaunch(
   opts: LaunchOptions,
   install: Pick<CliInstall, 'file' | 'args'>,
   cwd: string,
-  observe?: ObserveTarget,
+  { observe, tempRoot = os.tmpdir() }: { observe?: ObserveTarget; tempRoot?: string } = {},
 ): Promise<LaunchSpec> {
   const title = sessionTitle(opts.title, cwd);
   const args = [...install.args];
@@ -124,7 +124,8 @@ export async function buildLaunch(
 
     const tempPaths: string[] = [];
     if (opts.theme || observe) {
-      const dir = await mkdtemp(path.join(os.tmpdir(), 'agenthouse-'));
+      await mkdir(tempRoot, { recursive: true, mode: 0o700 });
+      const dir = await mkdtemp(path.join(tempRoot, 'agenthouse-'));
       tempPaths.push(dir);
       const settings: Record<string, unknown> = {};
       // Windows' ConPTY never forwards background-color queries, so Claude's

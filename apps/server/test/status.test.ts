@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, test } from 'node:test';
 import type { SessionStatus } from '@agenthouse/protocol';
 import {
@@ -9,6 +11,7 @@ import {
   exitedStatus,
   initialStatus,
   initialTelemetry,
+  isClaudeTranscript,
   limitsFrom,
   type HookEvent,
 } from '../src/sessions/status';
@@ -116,6 +119,19 @@ describe('claude agents --json', () => {
     assert.equal(applyAgents(waiting, { status: 'waiting', waitingFor: 'permission prompt' }), waiting, 'unchanged');
     assert.equal(applyAgents(working, { status: 'waiting', waitingFor: 'question' }).value, 'awaiting_input');
     assert.equal(applyAgents(working, { status: 'something new' }), working);
+  });
+});
+
+describe('transcript paths from hook payloads', () => {
+  const config = path.join(os.tmpdir(), 'claude-config');
+  test('only .jsonl files under the projects folder are opened', () => {
+    assert.equal(isClaudeTranscript(path.join(config, 'projects', 'C--work', 'abc.jsonl'), config), true);
+    assert.equal(isClaudeTranscript(path.join(config, 'projects', '..', 'settings.jsonl'), config), false, 'no climbing out');
+    assert.equal(isClaudeTranscript(path.join(os.tmpdir(), 'elsewhere.jsonl'), config), false);
+    assert.equal(isClaudeTranscript(path.join(config, 'projects', 'C--work', 'abc.json'), config), false);
+    assert.equal(isClaudeTranscript('\\\\attacker\\share\\abc.jsonl', config), false, 'UNC: Windows would send credentials');
+    assert.equal(isClaudeTranscript('//attacker/share/abc.jsonl', config), false);
+    assert.equal(isClaudeTranscript('projects/abc.jsonl', config), false, 'relative');
   });
 });
 

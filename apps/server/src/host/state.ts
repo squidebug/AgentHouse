@@ -1,4 +1,5 @@
 import { appendFileSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { HOST_PROTOCOL, type HostState } from './protocol';
@@ -10,6 +11,13 @@ export function defaultStateDir(): string {
 
 export const stateFile = (dir: string) => path.join(dir, `host-${HOST_PROTOCOL}.json`);
 export const logFile = (dir: string) => path.join(dir, 'logs', 'host.log');
+/** Per-session files (settings, relay config) for hosts of this protocol; the host clears it when it starts. */
+export const runDir = (dir: string) => path.join(dir, 'run', String(HOST_PROTOCOL));
+
+/** Removes a folder, retrying while Windows still holds a file in it (a CLI that just exited, a relay reading its config). */
+export function removeTree(target: string): Promise<void> {
+  return rm(target, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+}
 
 export function readState(dir: string): HostState | null {
   try {

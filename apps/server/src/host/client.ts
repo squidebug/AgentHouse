@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { createRequire } from 'node:module';
 import os from 'node:os';
@@ -11,6 +12,7 @@ import { isAlive } from '../util/kill-tree';
 import {
   HOST_PROTOCOL,
   HostRequestError,
+  validHostProof,
   type CloseResult,
   type ComposeOutcome,
   type HostMessage,
@@ -18,7 +20,7 @@ import {
   type HostState,
   type SpawnSpec,
 } from './protocol';
-import { logFile, readState } from './state';
+import { logFile, readState, runDir } from './state';
 
 export class HostUnavailableError extends Error {
   constructor() {
@@ -72,10 +74,17 @@ function startHost(options: ConnectOptions): void {
   launcher.unref();
 }
 
-/** Opens the control channel and waits for the host's hello; null if nothing usable answers. */
+/**
+ * Opens the control channel and waits for the host's hello; null if nothing
+ * usable answers. The hello must prove the host knows the token, before
+ * anything is sent to it or taken from it.
+ */
 function openControl(state: HostState, timeoutMs: number): Promise<Omit<Link, 'state'> | null> {
   return new Promise((resolve) => {
-    const ws = new WebSocket(`ws://127.0.0.1:${state.port}/control`, { headers: { authorization: `Bearer ${state.token}` } });
+    const nonce = randomBytes(24).toString('base64url');
+    const ws = new WebSocket(`ws://127.0.0.1:${state.port}/control`, {
+      headers: { authorization: `Bearer ${state.token}`, 'x-agenthouse-nonce': nonce },
+    });
     const fail = () => {
       clearTimeout(timer);
       ws.removeAllListeners();
@@ -92,7 +101,7 @@ function openControl(state: HostState, timeoutMs: number): Promise<Omit<Link, 's
       } catch {
         // not a host
       }
-      if (message?.type !== 'hello' || message.protocol !== HOST_PROTOCOL) return fail();
+      if (message?.type !== 'hello' || message.protocol !== HOST_PROTOCOL || !validHostProof(state.token, nonce, message.proof)) return fail();
       clearTimeout(timer);
       ws.removeAllListeners();
       ws.on('error', () => {});
@@ -167,6 +176,11 @@ export class HostClient extends EventEmitter {
   /** Where the CLIs' hook relays reach the host. */
   get port(): number {
     return this.link.state.port;
+  }
+
+  /** Where a session's files (settings, relay config) go; the host removes them when it ends. */
+  get runDir(): string {
+    return runDir(this.options.stateDir);
   }
 
   limits(): AccountLimits[] {

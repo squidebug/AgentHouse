@@ -1,3 +1,4 @@
+import path from 'node:path';
 import type { AccountLimits, RateWindow, SessionStatus, SessionTelemetry, StatusValue } from '@agenthouse/protocol';
 
 /** The fields of a Claude Code hook event that status tracking reads; everything else is dropped. */
@@ -163,6 +164,20 @@ export function limitsFrom(line: StatusLineInput, at = Date.now()): Omit<Account
   const fiveHour = rateWindow(line.rate_limits?.five_hour);
   const sevenDay = rateWindow(line.rate_limits?.seven_day);
   return fiveHour || sevenDay ? { fiveHour, sevenDay, at } : null;
+}
+
+/**
+ * Whether a path from a hook payload is one of Claude's transcripts: a .jsonl
+ * file under `<config>/projects/`. Anything holding a session's hook token can
+ * send a payload (commands the agent runs can read the token), and the host
+ * opens this path; a UNC path (\\host\share) would make Windows send the
+ * user's credentials to that host, so such paths and device paths are refused.
+ */
+export function isClaudeTranscript(file: string, configDir: string): boolean {
+  if (/^(\\\\|\/\/)/.test(file) || !path.isAbsolute(file) || !file.toLowerCase().endsWith('.jsonl')) return false;
+  const projects = path.resolve(configDir, 'projects') + path.sep;
+  const resolved = path.resolve(file);
+  return process.platform === 'win32' ? resolved.toLowerCase().startsWith(projects.toLowerCase()) : resolved.startsWith(projects);
 }
 
 /**

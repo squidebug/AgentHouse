@@ -1,12 +1,13 @@
 import { randomBytes } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { rm, stat } from 'node:fs/promises';
+import { stat } from 'node:fs/promises';
 import path from 'node:path';
 import type { AccountLimits, ComposeRequest, LaunchOptions, SessionInfo, Vendor } from '@agenthouse/protocol';
 import { buildLaunch, LaunchError } from '../cli/launch';
 import { EnvService, INSTALL_COMMAND } from '../env/report';
 import type { HostClient } from '../host/client';
 import { HostRequestError, type CloseResult, type ComposeOutcome } from '../host/protocol';
+import { removeTree } from '../host/state';
 import { childEnv } from './env';
 
 const MISSING_TEXT: Record<Vendor, string> = {
@@ -79,7 +80,10 @@ export class SessionManager extends EventEmitter {
     // Claude reports its status through hooks and its status line; the relay
     // proves which session it speaks for with this token.
     const hookToken = opts.vendor === 'claude' ? randomBytes(24).toString('base64url') : null;
-    const spec = await buildLaunch(opts, install, cwd, hookToken ? { port: this.options.host.port, token: hookToken } : undefined);
+    const spec = await buildLaunch(opts, install, cwd, {
+      ...(hookToken ? { observe: { port: this.options.host.port, token: hookToken } } : {}),
+      tempRoot: this.options.host.runDir,
+    });
     try {
       return await this.options.host.spawn({
         vendor: opts.vendor,
@@ -103,7 +107,7 @@ export class SessionManager extends EventEmitter {
     } catch (error) {
       // The host refused it, so nothing reads the temporary files. After a
       // timeout the host may have started it after all; they stay then.
-      if (error instanceof HostRequestError) await Promise.all(spec.tempPaths.map((p) => rm(p, { recursive: true, force: true })));
+      if (error instanceof HostRequestError) await Promise.all(spec.tempPaths.map(removeTree));
       throw error;
     }
   }

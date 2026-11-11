@@ -1,5 +1,4 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { rm } from 'node:fs/promises';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { WebSocketServer, type WebSocket } from 'ws';
@@ -7,8 +6,8 @@ import type { AccountLimits, SessionInfo, TerminalClientMessage, Vendor } from '
 import { THEME_COLORS } from '../sessions/colors';
 import { Session } from '../sessions/session';
 import { limitsFrom, type HookEvent, type StatusLineInput } from '../sessions/status';
-import { HOST_PROTOCOL, HostRequestError, type HostMessage, type HostRequest, type SpawnSpec } from './protocol';
-import { clearState, writeState } from './state';
+import { HOST_PROTOCOL, HostRequestError, hostProof, type HostMessage, type HostRequest, type SpawnSpec } from './protocol';
+import { clearState, removeTree, runDir, writeState } from './state';
 
 export interface HostOptions {
   stateDir: string;
@@ -95,7 +94,7 @@ export async function createSessionHost(options: HostOptions): Promise<SessionHo
 
   const start = (spec: SpawnSpec): SessionInfo => {
     const removeTemp = async () => {
-      await Promise.all(spec.tempPaths.map((p) => rm(p, { recursive: true, force: true })));
+      await Promise.all(spec.tempPaths.map(removeTree));
     };
     let session: Session;
     try {
@@ -162,10 +161,11 @@ export async function createSessionHost(options: HostOptions): Promise<SessionHo
     }
   }
 
-  const attachControl = (ws: WebSocket) => {
+  const attachControl = (ws: WebSocket, nonce: string) => {
     controls.add(ws);
     clearTimeout(idleTimer);
-    send(ws, { type: 'hello', protocol: HOST_PROTOCOL, pid: process.pid, webToken, sessions: list(), limits: [...limits.values()] });
+    const proof = hostProof(token, nonce);
+    send(ws, { type: 'hello', protocol: HOST_PROTOCOL, pid: process.pid, proof, webToken, sessions: list(), limits: [...limits.values()] });
     ws.on('message', async (raw) => {
       let request: HostRequest;
       try {
@@ -258,7 +258,9 @@ export async function createSessionHost(options: HostOptions): Promise<SessionHo
     if (req.headers.origin !== undefined || !sameSecret(bearer, token)) return reject(401);
     const url = new URL(req.url ?? '/', 'http://localhost');
     if (url.pathname === '/control') {
-      wss.handleUpgrade(req, socket, head, attachControl);
+      const nonce = req.headers['x-agenthouse-nonce'];
+      if (typeof nonce !== 'string' || nonce.length < 16 || nonce.length > 128) return reject(400);
+      wss.handleUpgrade(req, socket, head, (ws) => attachControl(ws, nonce));
       return;
     }
     if (url.pathname === '/terminal') {
@@ -278,6 +280,9 @@ export async function createSessionHost(options: HostOptions): Promise<SessionHo
     });
   });
   writeState(options.stateDir, { protocol: HOST_PROTOCOL, pid: process.pid, port, token, startedAt: Date.now() });
+  // Session files a previous host of this protocol left behind (it was killed,
+  // or Windows still held a file when it tried): nobody reads them any more.
+  removeTree(runDir(options.stateDir)).catch(() => {});
   checkIdle();
 
   return {

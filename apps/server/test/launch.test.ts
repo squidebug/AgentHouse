@@ -43,7 +43,7 @@ test('an observed claude session gets relay hooks and keeps the user status line
   const previous = process.env.CLAUDE_CONFIG_DIR;
   process.env.CLAUDE_CONFIG_DIR = configDir;
   try {
-    const spec = await buildLaunch({ vendor: 'claude' }, install, cwd, { port: 4321, token: 'secret' });
+    const spec = await buildLaunch({ vendor: 'claude' }, install, cwd, { observe: { port: 4321, token: 'secret' } });
     const settingsPath = spec.args[spec.args.indexOf('--settings') + 1] ?? '';
     const settings = JSON.parse(readFileSync(settingsPath, 'utf8'));
     assert.deepEqual(Object.keys(settings.hooks).sort(), [...HOOK_EVENTS].sort());

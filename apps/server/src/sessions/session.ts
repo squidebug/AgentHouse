@@ -3,6 +3,8 @@ import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { open } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import os from 'node:os';
+import path from 'node:path';
 import pty, { type IPty } from 'node-pty';
 import type { WebSocket } from 'ws';
 import {
@@ -27,6 +29,7 @@ import {
   initialStatus,
   initialTelemetry,
   interruptedStatus,
+  isClaudeTranscript,
   runningStatus,
   type AgentsEntry,
   type HookEvent,
@@ -336,7 +339,10 @@ export class Session extends EventEmitter {
   onHook(event: HookEvent): void {
     if (this.exit) return;
     clearTimeout(this.hookWait);
-    if (typeof event.transcript_path === 'string') this.transcriptPath = event.transcript_path;
+    const transcript = event.transcript_path;
+    if (typeof transcript === 'string' && isClaudeTranscript(transcript, this.options.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'))) {
+      this.transcriptPath = transcript;
+    }
     let changed = false;
     if (event.hook_event_name === 'SessionStart' && typeof event.session_id === 'string' && event.session_id !== this.vendorSessionId) {
       this.vendorSessionId = event.session_id;

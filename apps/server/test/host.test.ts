@@ -1,14 +1,16 @@
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import type { AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, test } from 'node:test';
+import { WebSocketServer } from 'ws';
 import type { SessionInfo } from '@agenthouse/protocol';
-import { HostClient } from '../src/host/client';
-import type { SpawnSpec } from '../src/host/protocol';
+import { HostClient, HostUnavailableError } from '../src/host/client';
+import { HOST_PROTOCOL, hostProof, type SpawnSpec } from '../src/host/protocol';
 import { createSessionHost } from '../src/host/server';
-import { readState } from '../src/host/state';
+import { readState, runDir, writeState } from '../src/host/state';
 import { createAgentHouseServer } from '../src/http/server';
 import { childEnv } from '../src/sessions/env';
 import { isAlive, killTree } from '../src/util/kill-tree';
@@ -93,21 +95,42 @@ describe('session host', () => {
     }
   });
 
-  test('the host lets in only web servers that hold its token', async () => {
+  test('the host lets in only web servers that hold its token, and proves it holds it too', async () => {
     const stateDir = await tempStateDir();
+    const stale = path.join(runDir(stateDir), 'agenthouse-left-behind');
+    await mkdir(stale, { recursive: true });
     const host = await createSessionHost({ stateDir, idleExitMs: null });
     try {
       const state = readState(stateDir);
       assert.ok(state);
-      assert.equal((await openSocket(state.port, '/control', {})).status, 401, 'no token');
-      assert.equal((await openSocket(state.port, '/control', { authorization: 'Bearer wrong' })).status, 401, 'wrong token');
-      const browser = await openSocket(state.port, '/control', { authorization: `Bearer ${state.token}`, origin: 'http://127.0.0.1:7357' });
-      assert.equal(browser.status, 401, 'never a browser, even one with the token');
-      const allowed = await openSocket(state.port, '/control', { authorization: `Bearer ${state.token}` });
+      const nonce = 'a-nonce-from-the-web-server';
+      const auth = { authorization: `Bearer ${state.token}`, 'x-agenthouse-nonce': nonce };
+      assert.equal((await openSocket(state.port, '/control', { 'x-agenthouse-nonce': nonce })).status, 401, 'no token');
+      assert.equal((await openSocket(state.port, '/control', { ...auth, authorization: 'Bearer wrong' })).status, 401, 'wrong token');
+      assert.equal((await openSocket(state.port, '/control', { ...auth, origin: 'http://127.0.0.1:7357' })).status, 401, 'never a browser, even one with the token');
+      const allowed = await openSocket(state.port, '/control', auth);
       assert.equal(allowed.status, 101);
+      assert.ok(await waitFor(() => allowed.messages.length > 0, 2000));
+      assert.equal(allowed.messages[0]?.proof, hostProof(state.token, nonce), 'the hello proves the host knows the token');
       allowed.ws?.close();
+      assert.ok(await waitFor(() => !existsSync(stale), 3000), 'files a previous host left behind are cleared');
     } finally {
       await host.close();
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  test("a web server ignores something squatting on a dead host's port", async () => {
+    const stateDir = await tempStateDir();
+    // Whatever now listens where a host used to: it answers like a host but cannot prove the token.
+    const impostor = new WebSocketServer({ port: 0, host: '127.0.0.1' });
+    impostor.on('connection', (ws) => ws.send(JSON.stringify({ type: 'hello', protocol: HOST_PROTOCOL, pid: 1, proof: 'forged', webToken: 'chosen-by-them', sessions: [], limits: [] })));
+    try {
+      await new Promise<void>((resolve) => impostor.once('listening', resolve));
+      writeState(stateDir, { protocol: HOST_PROTOCOL, pid: process.pid, port: (impostor.address() as AddressInfo).port, token: 'the-real-token', startedAt: 1 });
+      await assert.rejects(HostClient.connect({ stateDir, spawn: false }), HostUnavailableError);
+    } finally {
+      impostor.close();
       await rm(stateDir, { recursive: true, force: true });
     }
   });
