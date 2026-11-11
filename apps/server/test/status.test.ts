@@ -16,7 +16,7 @@ import {
   type HookEvent,
 } from '../src/sessions/status';
 
-// Event sequences as Claude Code 2.1.322 sent them (see facts §2.2).
+// Event sequences as Claude Code 2.1.322 sent them in a recorded session.
 function run(events: HookEvent[], from: SessionStatus = initialStatus(0)): SessionStatus {
   return events.reduce((status, event, i) => applyHook(status, event, i + 1), from);
 }

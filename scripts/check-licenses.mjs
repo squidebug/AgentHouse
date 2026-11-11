@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// License gate for a public repository (plan §13). Fails when an installed
+// License gate for a public repository. Fails when an installed
 // dependency's license is outside the allowlist.
 //  - Production dependencies end up in what we publish (server code, the bundled
 //    web app), so they get the strict list.
