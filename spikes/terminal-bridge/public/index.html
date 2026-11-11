@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="ko" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AgentHouse · terminal spike</title>
+    <link rel="stylesheet" href="/vendor/xterm.css" />
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header class="bar">
+      <strong>AgentHouse</strong>
+      <span class="muted">Phase 0 · terminal bridge</span>
+      <span class="spacer"></span>
+      <button id="theme" type="button" class="tonal">라이트</button>
+    </header>
+
+    <section class="controls" aria-label="세션">
+      <label>CLI
+        <select id="preset">
+          <option value="claude">Claude Code</option>
+          <option value="codex">Codex</option>
+          <option value="fake">fake-agent</option>
+          <option value="shell">shell</option>
+        </select>
+      </label>
+      <label>작업 폴더 <input id="cwd" size="34" placeholder="비우면 저장소 루트" /></label>
+      <label>추가 인자 <input id="extra" size="26" placeholder="--model opus --effort high" /></label>
+      <label>Claude 테마
+        <select id="claudeTheme">
+          <option value="">기본값</option>
+          <option value="auto">auto</option>
+          <option value="light-ansi">light-ansi</option>
+          <option value="dark-ansi">dark-ansi</option>
+        </select>
+      </label>
+      <label><input type="checkbox" id="conptyDll" /> 번들 ConPTY</label>
+      <button id="start" type="button" class="filled">새 세션</button>
+      <select id="sessions" aria-label="열린 세션"></select>
+      <button id="kill" type="button" class="outlined">세션 종료</button>
+    </section>
+
+    <div id="notice" class="notice" role="alert" hidden></div>
+    <main id="term" aria-label="터미널"></main>
+
+    <section class="composer" aria-label="입력창">
+      <textarea id="text" rows="3" placeholder="Ctrl+Enter로 전송"></textarea>
+      <div class="composer-options">
+        <label><input type="checkbox" id="bracketed" checked /> bracketed paste</label>
+        <label>Enter 지연
+          <select id="delay"><option>0</option><option>100</option><option selected>300</option><option>600</option></select> ms
+        </label>
+        <label>출력 대기
+          <select id="quiet"><option>0</option><option selected>150</option><option>400</option></select> ms
+        </label>
+        <label><input type="checkbox" id="submit" checked /> Enter</label>
+        <button id="send" type="button" class="filled">전송</button>
+      </div>
+    </section>
+
+    <footer class="status" id="status">세션 없음</footer>
+    <script type="module" src="/app.mjs"></script>
+  </body>
+</html>

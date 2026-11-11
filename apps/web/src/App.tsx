@@ -1,0 +1,134 @@
+import { Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, Typography } from '@mui/material';
+import { useColorScheme } from '@mui/material/styles';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import type { SessionInfo, ThemeMode } from '@agenthouse/protocol';
+import { api } from './api/client';
+import { useEnv, useSessions } from './api/hooks';
+import { Composer } from './components/Composer';
+import { CopyCommand } from './components/CopyCommand';
+import { LaunchDialog } from './components/LaunchDialog';
+import { PaneGrid } from './components/PaneGrid';
+import { SessionTree } from './components/SessionTree';
+import { TopBar } from './components/TopBar';
+import { t } from './strings';
+import { v } from './theme/tokens';
+import { makeDnd } from './workspace/dnd';
+import { loadWorkspace, reducer, saveWorkspace, type Action, type DropContext, type WorkspaceState } from './workspace/state';
+
+export function App() {
+  const { mode, systemMode, setMode } = useColorScheme();
+  const resolved: ThemeMode = (mode === 'system' ? systemMode : mode) === 'dark' ? 'dark' : 'light';
+  const { env, loading: envLoading, refresh: refreshEnv } = useEnv();
+  const { sessions, connected, loaded } = useSessions();
+
+  // Sessions launched from this tab, until the live list includes them.
+  const [launched, setLaunched] = useState<Record<string, SessionInfo>>({});
+  const [launchOpen, setLaunchOpen] = useState(false);
+  const [ending, setEnding] = useState<SessionInfo | null>(null);
+
+  const ctxRef = useRef<DropContext>({ runningIds: [] });
+  const [state, dispatch] = useReducer((s: WorkspaceState, a: Action) => reducer(s, a, ctxRef.current), undefined, () => loadWorkspace());
+
+  const { panes, active, nextPane } = state;
+  useEffect(() => saveWorkspace({ ...state, panes, active, nextPane }), [panes, active, nextPane]);
+
+  const byId = useMemo(() => {
+    const map = new Map<string, SessionInfo>(Object.entries(launched));
+    for (const s of sessions) map.set(s.id, s);
+    return map;
+  }, [sessions, launched]);
+  const sessionById = useCallback((id: string) => byId.get(id), [byId]);
+  const runningIds = [...byId.values()].filter((s) => s.state === 'running').map((s) => s.id);
+  ctxRef.current = { runningIds };
+
+  useEffect(() => {
+    const listed = new Set(sessions.map((s) => s.id));
+    setLaunched((current) => {
+      const pending = Object.fromEntries(Object.entries(current).filter(([id]) => !listed.has(id)));
+      return Object.keys(pending).length === Object.keys(current).length ? current : pending;
+    });
+  }, [sessions]);
+
+  useEffect(() => {
+    // Until the first list arrives, every restored pane would look like a removed session.
+    if (!loaded) return;
+    dispatch({ type: 'sync', sessionIds: [...byId.keys()], runningIds: [...byId.values()].filter((s) => s.state === 'running').map((s) => s.id) });
+  }, [byId, loaded]);
+
+  const dnd = makeDnd(state, dispatch, ctxRef.current);
+  const activePane = state.panes.find((p) => p.id === state.active);
+  const activeSession = activePane ? byId.get(activePane.sessionId) : undefined;
+  const noCli = env?.messages.find((m) => m.id === 'ENV_NO_CLI');
+
+  const endSession = async (session: SessionInfo) => {
+    setEnding(null);
+    await api.remove(session.id).catch(() => {});
+  };
+
+  return (
+    <Box
+      onDragOver={() => dispatch({ type: 'clearOver' })}
+      onDragEnd={() => dispatch({ type: 'dragEnd' })}
+      sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', bgcolor: v.bg, color: v.on }}
+    >
+      <TopBar env={env} envLoading={envLoading} refreshEnv={() => refreshEnv().catch(() => {})} mode={resolved} onToggleMode={() => setMode(resolved === 'dark' ? 'light' : 'dark')} />
+
+      {(!connected || noCli) && (
+        <Box role="status" sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1.5, m: '12px 16px 0', p: '10px 14px', borderRadius: '12px', bgcolor: v.warnContainer, color: v.onWarnContainer }}>
+          <Typography>{connected ? noCli?.text : t.disconnected}</Typography>
+          {connected && noCli?.command && <CopyCommand command={noCli.command} />}
+        </Box>
+      )}
+
+      <Box sx={{ flex: 1, display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', gap: '12px 20px', p: '12px 16px 16px' }}>
+        <SessionTree
+          sessions={[...byId.values()]}
+          state={state}
+          dispatch={dispatch}
+          dnd={dnd}
+          onNew={() => setLaunchOpen(true)}
+          onEnd={(id) => setEnding(byId.get(id) ?? null)}
+          onRemove={(id) => api.remove(id).catch(() => {})}
+        />
+        <Box component="main" sx={{ flex: '999 1 560px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <PaneGrid
+            state={state}
+            dispatch={dispatch}
+            dnd={dnd}
+            sessionById={sessionById}
+            mode={resolved}
+            windowsBuild={env?.windowsBuild ?? null}
+            onNew={() => setLaunchOpen(true)}
+          />
+          <Composer state={state} dispatch={dispatch} dnd={dnd} sessionById={sessionById} activeSession={activeSession} />
+        </Box>
+      </Box>
+
+      <LaunchDialog
+        open={launchOpen}
+        env={env}
+        mode={resolved}
+        onClose={() => setLaunchOpen(false)}
+        onLaunched={(session) => {
+          setLaunched((current) => ({ ...current, [session.id]: session }));
+          dispatch({ type: 'openNew', sessionId: session.id });
+        }}
+      />
+
+      <Dialog open={Boolean(ending)} onClose={() => setEnding(null)} maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ fontSize: 18, fontWeight: 600 }}>{t.endSession}</DialogTitle>
+        <DialogContent>
+          <Typography>{ending?.title}</Typography>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button color="inherit" onClick={() => setEnding(null)}>
+            {t.cancel}
+          </Button>
+          <Button variant="contained" color="error" onClick={() => ending && endSession(ending)}>
+            {t.endSession}
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </Box>
+  );
+}

@@ -1,0 +1,30 @@
+{
+  "name": "@agenthouse/server",
+  "version": "0.0.0",
+  "private": true,
+  "description": "AgentHouse local server: runs agent CLIs in PTYs and serves the web app on 127.0.0.1",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "build": "esbuild src/main.ts --bundle --platform=node --format=esm --target=node18 --outfile=dist/main.js --external:node-pty --external:ws --external:@xterm/headless --external:@xterm/addon-serialize",
+    "start": "node dist/main.js",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node ../../scripts/run-tests.mjs test"
+  },
+  "dependencies": {
+    "@agenthouse/protocol": "workspace:*",
+    "@xterm/addon-serialize": "0.14.0",
+    "@xterm/headless": "6.0.0",
+    "node-pty": "1.1.0",
+    "ws": "8.22.2",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.6",
+    "@types/ws": "8.18.2",
+    "esbuild": "0.28.2",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2"
+  }
+}

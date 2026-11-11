@@ -1,0 +1,12 @@
+{
+  "prod": {
+    "MIT": [{ "name": "ok-mit", "versions": ["1.0.0"] }],
+    "(MIT OR GPL-3.0)": [{ "name": "ok-dual", "versions": ["1.0.0"] }],
+    "GPL-3.0": [{ "name": "bad-gpl", "versions": ["2.0.0"] }],
+    "MPL-2.0": [{ "name": "bad-mpl-in-prod", "versions": ["1.0.0"] }]
+  },
+  "dev": {
+    "MPL-2.0": [{ "name": "ok-mpl-in-dev", "versions": ["1.0.0"] }],
+    "AGPL-3.0": [{ "name": "bad-agpl-dev", "versions": ["1.0.0"] }]
+  }
+}

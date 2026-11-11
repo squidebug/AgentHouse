@@ -1,0 +1,20 @@
+{
+  "name": "@agenthouse/protocol",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Types and terminal helpers shared by the AgentHouse server and web app",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node ../../scripts/run-tests.mjs test"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.6",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2"
+  }
+}

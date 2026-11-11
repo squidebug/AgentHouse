@@ -1,0 +1,17 @@
+node_modules/
+dist/
+coverage/
+*.log
+.DS_Store
+Thumbs.db
+
+# Local state and secrets never belong in the public repo
+.agenthouse/
+.env
+.env.*
+
+# Raw transcripts copied for local debugging; only sanitized fixtures are committed
+fixtures/raw/
+
+# Local planning notes, kept out of the repo
+docs/

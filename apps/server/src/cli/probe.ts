@@ -1,0 +1,37 @@
+import { execFile } from 'node:child_process';
+import type { CliInstall } from '@agenthouse/protocol';
+
+interface QuickResult {
+  code: number | null;
+  stdout: string;
+}
+
+/** Runs a short-lived CLI command (version, login status) without a console window. */
+export function runQuick(file: string, args: string[], timeoutMs = 10_000): Promise<QuickResult> {
+  return new Promise((resolve) => {
+    execFile(file, args, { timeout: timeoutMs, windowsHide: true, encoding: 'utf8', maxBuffer: 1024 * 1024 }, (error, stdout) => {
+      const code = error ? (typeof error.code === 'number' ? error.code : null) : 0;
+      resolve({ code, stdout: String(stdout ?? '') });
+    });
+  });
+}
+
+export async function detectVersion(install: Pick<CliInstall, 'file' | 'args'>): Promise<string | null> {
+  const { stdout } = await runQuick(install.file, [...install.args, '--version']);
+  return stdout.match(/(\d+\.\d+\.\d+)/)?.[1] ?? null;
+}
+
+export async function claudeLoggedIn(install: Pick<CliInstall, 'file' | 'args'>): Promise<boolean | null> {
+  const { stdout } = await runQuick(install.file, [...install.args, 'auth', 'status', '--json']);
+  try {
+    return (JSON.parse(stdout) as { loggedIn?: boolean }).loggedIn === true;
+  } catch {
+    return null;
+  }
+}
+
+export async function codexLoggedIn(install: Pick<CliInstall, 'file' | 'args'>): Promise<boolean | null> {
+  const { code } = await runQuick(install.file, [...install.args, 'login', 'status']);
+  if (code === null) return null;
+  return code === 0;
+}
