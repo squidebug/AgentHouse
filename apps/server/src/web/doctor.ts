@@ -1,8 +1,10 @@
 import os from 'node:os';
 import { VENDOR_NAMES, type CliInstall, type CliStatus, type EnvMessage, type EnvReport, type Vendor } from '@agenthouse/protocol';
 import { claudeHookBlocker, gitBashPath } from '../claude/settings';
+import { hostBuildId } from '../shared/build';
 import { claudeLoggedIn, codexLoggedIn, detectVersion } from './cli/probe';
 import { findOnPath, resolveCli } from './cli/resolve';
+import { olderHosts } from './host-client';
 
 const CACHE_MS = 60_000;
 // Node lines whose security support has ended (as of 2026-11).
@@ -86,24 +88,64 @@ function messagesFor(report: Omit<EnvReport, 'messages'>, hooks: HookReach): Env
   return messages;
 }
 
+/** What the doctor asks the session host about. */
+export interface HostFacts {
+  /** The code the host started with. */
+  build: string;
+  stateDir: string;
+  /** How the user ends the host: `pnpm stop`, or `pnpm dev:stop` in development. */
+  stopCommand: string;
+}
+
+/** Checks that must be current on every report and are quick: the session host. */
+export async function hostMessages(host: HostFacts): Promise<EnvMessage[]> {
+  const messages: EnvMessage[] = [];
+  if (host.build !== hostBuildId()) {
+    messages.push({
+      id: 'ENV_HOST_OUTDATED',
+      level: 'warn',
+      text: '세션 호스트가 이전 코드로 실행 중입니다. 다시 시작하면 새 코드가 적용되고 실행 중인 세션은 끝납니다.',
+      command: host.stopCommand,
+    });
+  }
+  if (await olderHosts(host.stateDir)) {
+    messages.push({
+      id: 'ENV_HOST_OLDER_VERSION',
+      level: 'warn',
+      text: '이전 버전의 세션 호스트가 실행 중입니다. 그 세션은 여기에 보이지 않습니다.',
+      command: host.stopCommand,
+    });
+  }
+  return messages;
+}
+
 /** Detects the Node runtime and installed CLIs once a minute at most; CLI probes take a second or two. */
 export class EnvService {
   private cached: { at: number; report: EnvReport } | null = null;
   private inflight: Promise<EnvReport> | null = null;
 
-  constructor(private readonly defaultCwd: string) {}
+  constructor(
+    private readonly defaultCwd: string,
+    private readonly host?: HostFacts,
+  ) {}
 
   async report(refresh = false): Promise<EnvReport> {
-    if (!refresh && this.cached && Date.now() - this.cached.at < CACHE_MS) return this.cached.report;
+    const report = await this.cliReport(refresh);
+    if (!this.host) return report;
+    return { ...report, messages: [...report.messages, ...(await hostMessages(this.host))] };
+  }
+
+  async cli(vendor: Vendor): Promise<CliStatus> {
+    return (await this.cliReport(false)).clis[vendor];
+  }
+
+  private cliReport(refresh: boolean): Promise<EnvReport> {
+    if (!refresh && this.cached && Date.now() - this.cached.at < CACHE_MS) return Promise.resolve(this.cached.report);
     if (this.inflight) return this.inflight;
     this.inflight = this.build().finally(() => {
       this.inflight = null;
     });
     return this.inflight;
-  }
-
-  async cli(vendor: Vendor): Promise<CliStatus> {
-    return (await this.report()).clis[vendor];
   }
 
   private async build(): Promise<EnvReport> {

@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { open } from 'node:fs/promises';
-import { isAsking, type SessionStatus, type SessionTelemetry, type StatusValue } from '@agenthouse/protocol';
+import { isAsking, type SessionStatus, type SessionTelemetry, type StatusValue, type TranscriptSegment } from '@agenthouse/protocol';
 import { claudeConfigDir } from '../claude/settings';
 import {
   applyAgents,
@@ -13,7 +13,7 @@ import {
   initialTelemetry,
   interruptedStatus,
   isClaudeTranscript,
-  runningStatus,
+  unobservedStatus,
   type AgentsEntry,
   type HookEvent,
   type StatusLineInput,
@@ -64,8 +64,10 @@ export class Observer extends EventEmitter {
   telemetry: SessionTelemetry = initialTelemetry();
   /** The CLI's own session id; Claude starts a new one on /clear. */
   vendorSessionId: string | null;
+  /** Where the CLI keeps the conversation, one entry per conversation (Claude: a new one after /clear). */
+  transcripts: TranscriptSegment[] = [];
 
-  constructor(vendorSessionId: string | null, status: SessionStatus = runningStatus()) {
+  constructor(vendorSessionId: string | null, status: SessionStatus = unobservedStatus()) {
     super();
     this.vendorSessionId = vendorSessionId;
     this.status = status;
@@ -99,7 +101,6 @@ export interface ClaudeObserverOptions {
 
 /** A Claude Code session, observed through the hooks and status line its relay passes on. */
 export class ClaudeObserver extends Observer {
-  private transcriptPath: string | null = null;
   private recheckPending = false;
   private done = false;
   private readonly hookWait: NodeJS.Timeout;
@@ -107,7 +108,7 @@ export class ClaudeObserver extends Observer {
   constructor(private readonly options: ClaudeObserverOptions) {
     super(options.vendorSessionId, initialStatus());
     this.hookWait = setTimeout(() => {
-      if (this.status.value === 'starting') this.setStatus(runningStatus());
+      if (this.status.value === 'starting') this.setStatus(unobservedStatus());
     }, FIRST_HOOK_WAIT_MS);
     this.hookWait.unref();
   }
@@ -121,11 +122,7 @@ export class ClaudeObserver extends Observer {
   onHook(event: HookEvent): void {
     if (this.done) return;
     clearTimeout(this.hookWait);
-    const transcript = event.transcript_path;
-    if (typeof transcript === 'string' && isClaudeTranscript(transcript, claudeConfigDir(this.options.env))) {
-      this.transcriptPath = transcript;
-    }
-    let changed = false;
+    let changed = this.noteTranscript(event);
     if (event.hook_event_name === 'SessionStart' && typeof event.session_id === 'string' && event.session_id !== this.vendorSessionId) {
       this.vendorSessionId = event.session_id;
       changed = true;
@@ -138,6 +135,22 @@ export class ClaudeObserver extends Observer {
     if (next !== this.status) this.status = next;
     else if (!changed) return;
     this.emit('change');
+  }
+
+  /**
+   * A conversation starts with SessionStart: at launch, after /clear (a new
+   * file) and on /resume (another file). Only then does the transcript change;
+   * a payload from a sub-agent context may name other files. The path is opened
+   * later, so only Claude's own transcripts are taken.
+   */
+  private noteTranscript(event: HookEvent): boolean {
+    const file = event.transcript_path;
+    const last = this.transcripts.at(-1);
+    if (typeof file !== 'string' || (last && (event.hook_event_name !== 'SessionStart' || last.path === file))) return false;
+    if (!isClaudeTranscript(file, claudeConfigDir(this.options.env))) return false;
+    const vendorSessionId = typeof event.session_id === 'string' ? event.session_id : this.vendorSessionId;
+    this.transcripts = [...this.transcripts, { vendorSessionId, path: file, since: Date.now() }];
+    return true;
   }
 
   /** The CLI's status line input: model, effort, context use, cost. */
@@ -183,7 +196,8 @@ export class ClaudeObserver extends Observer {
   private async recheck(since: number): Promise<void> {
     const stale = () => this.done || this.status.at !== since || !BUSY.has(this.status.value);
     if (stale()) return;
-    if (this.transcriptPath && endsWithInterrupt(await readTail(this.transcriptPath, 64 * 1024))) {
+    const transcript = this.transcripts.at(-1)?.path;
+    if (transcript && endsWithInterrupt(await readTail(transcript, 64 * 1024))) {
       if (!stale()) this.setStatus(interruptedStatus());
       return;
     }

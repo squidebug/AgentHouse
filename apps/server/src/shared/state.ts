@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -19,15 +19,37 @@ export function removeTree(target: string): Promise<void> {
   return rm(target, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 }
 
-export function readState(dir: string): HostState | null {
+function readStateFile(file: string): HostState | null {
   try {
-    const state = JSON.parse(readFileSync(stateFile(dir), 'utf8')) as HostState;
-    const valid =
-      state.protocol === HOST_PROTOCOL && Number.isInteger(state.pid) && Number.isInteger(state.port) && typeof state.token === 'string';
+    const state = JSON.parse(readFileSync(file, 'utf8')) as HostState;
+    const valid = Number.isInteger(state.protocol) && Number.isInteger(state.pid) && Number.isInteger(state.port) && typeof state.token === 'string';
     return valid ? state : null;
   } catch {
     return null;
   }
+}
+
+/** The state of this protocol's host, if one was written. */
+export function readState(dir: string): HostState | null {
+  const state = readStateFile(stateFile(dir));
+  return state?.protocol === HOST_PROTOCOL ? state : null;
+}
+
+/** The states of hosts of every protocol version (an older one keeps running its sessions). */
+export function readAllStates(dir: string): HostState[] {
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return [];
+  }
+  const states: HostState[] = [];
+  for (const name of names) {
+    const protocol = name.match(/^host-(\d+)\.json$/)?.[1];
+    const state = protocol ? readStateFile(path.join(dir, name)) : null;
+    if (state && String(state.protocol) === protocol) states.push(state);
+  }
+  return states;
 }
 
 /** Replaced atomically and readable only by the user: the token controls every session. */

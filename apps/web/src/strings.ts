@@ -43,7 +43,7 @@ export const t = {
   heldFor: (n: number) => `${n}개는 승인·입력 대기라 보내지 않음`,
   status: {
     starting: '시작 중',
-    running: '실행 중',
+    unobserved: '실행 중',
     idle: '대기',
     working: '작업 중',
     awaiting_permission: '승인 대기',

@@ -3,6 +3,7 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { TERMINAL_COLORS, type AccountLimits, type SessionInfo, type TerminalClientMessage, type Vendor } from '@agenthouse/protocol';
+import { hostBuildId } from '../shared/build';
 import { sameSecret } from '../shared/compare';
 import { HOST_PROTOCOL, HostRequestError, hostProof, type HostMessage, type HostRequest, type SpawnSpec } from '../shared/host-protocol';
 import { clearState, removeTree, runDir, writeState } from '../shared/state';
@@ -36,6 +37,7 @@ const sameWindow = (a: AccountLimits['fiveHour'], b: AccountLimits['fiveHour']) 
 export async function createSessionHost(options: HostOptions): Promise<SessionHost> {
   const log = options.log ?? (() => {});
   const token = randomBytes(32).toString('base64url');
+  const build = hostBuildId();
   const webToken = options.webToken || randomBytes(24).toString('base64url');
   const sessions = new Map<string, Session>();
   const controls = new Set<WebSocket>();
@@ -85,12 +87,15 @@ export async function createSessionHost(options: HostOptions): Promise<SessionHo
   };
 
   const start = (spec: SpawnSpec): SessionInfo => {
+    if (typeof spec.id !== 'string' || !/^[\w-]{8,64}$/.test(spec.id)) throw new HostRequestError('세션 id가 올바르지 않습니다.', 'INVALID_REQUEST');
+    if (sessions.has(spec.id)) throw new HostRequestError('이미 있는 세션입니다.', 'DUPLICATE');
     const removeTemp = async () => {
       await Promise.all(spec.tempPaths.map(removeTree));
     };
     let session: Session;
     try {
       session = new Session({
+        id: spec.id,
         vendor: spec.vendor,
         title: spec.title,
         file: spec.file,
@@ -158,7 +163,7 @@ export async function createSessionHost(options: HostOptions): Promise<SessionHo
     controls.add(ws);
     clearTimeout(idleTimer);
     const proof = hostProof(token, nonce);
-    send(ws, { type: 'hello', protocol: HOST_PROTOCOL, pid: process.pid, proof, webToken, sessions: list(), limits: [...limits.values()] });
+    send(ws, { type: 'hello', protocol: HOST_PROTOCOL, pid: process.pid, proof, build, webToken, sessions: list(), limits: [...limits.values()] });
     ws.on('message', async (raw) => {
       let request: HostRequest;
       try {

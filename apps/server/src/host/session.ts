@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { createRequire } from 'node:module';
 import pty, { type IPty } from 'node-pty';
@@ -57,6 +56,8 @@ export class Viewer {
 }
 
 export interface SessionOptions {
+  /** Chosen by the web server, which keeps it in its session registry. */
+  id: string;
   vendor: SessionVendor;
   title: string;
   file: string;
@@ -82,7 +83,7 @@ export interface SessionOptions {
  * What the CLI is doing comes from its observer; 'status' fires when that changes.
  */
 export class Session extends EventEmitter {
-  readonly id = randomUUID();
+  readonly id: string;
   readonly startedAt = Date.now();
   readonly pid: number;
   readonly observer: Observer;
@@ -101,6 +102,7 @@ export class Session extends EventEmitter {
 
   constructor(private readonly options: SessionOptions) {
     super();
+    this.id = options.id;
     this.cols = options.cols;
     this.rows = options.rows;
     this.colors = new ColorQueryResponder(options.colors);
@@ -331,6 +333,7 @@ export class Session extends EventEmitter {
       exit: this.exit,
       status: this.observer.status,
       telemetry: this.observer.telemetry,
+      transcripts: this.observer.transcripts,
     };
   }
 }

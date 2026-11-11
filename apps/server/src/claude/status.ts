@@ -23,7 +23,7 @@ function status(value: StatusValue, at: number, extra: Partial<SessionStatus> = 
 
 export const initialStatus = (at = Date.now()) => status('starting', at);
 /** For a CLI that reports no turns: only that it runs. */
-export const runningStatus = (at = Date.now()) => status('running', at);
+export const unobservedStatus = (at = Date.now()) => status('unobserved', at);
 export const initialTelemetry = (): SessionTelemetry => ({ level: 'minimal', model: null, effort: null, contextPct: null, contextWindow: null, costUsd: null });
 
 // Tools that wait for the user instead of running.

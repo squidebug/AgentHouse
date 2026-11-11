@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { stat } from 'node:fs/promises';
 import path from 'node:path';
@@ -86,6 +86,7 @@ export class SessionManager extends EventEmitter {
     });
     try {
       return await this.options.host.spawn({
+        id: randomUUID(),
         vendor: opts.vendor,
         title: spec.title,
         file: spec.file,

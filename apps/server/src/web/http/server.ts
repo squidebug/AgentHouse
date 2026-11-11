@@ -23,6 +23,8 @@ export interface ServerOptions {
   fakeAgentPath?: string;
   /** Browser login token. Defaults to the host's, which outlives web server restarts. */
   token?: string;
+  /** How the user ends the session host, for the environment check (default `pnpm stop`). */
+  stopCommand?: string;
 }
 
 export interface AgentHouseServer {
@@ -134,7 +136,14 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
   const token = options.token ?? options.host.webToken;
   const access = new AccessControl(token, options.devOrigins ?? []);
   const defaultCwd = options.defaultCwd ?? process.cwd();
-  const env = new EnvService(defaultCwd);
+  const { host } = options;
+  const env = new EnvService(defaultCwd, {
+    get build() {
+      return host.build;
+    },
+    stateDir: host.stateDir,
+    stopCommand: options.stopCommand ?? 'pnpm stop',
+  });
   const manager = new SessionManager({ env, defaultCwd, host: options.host, ...(options.fakeAgentPath ? { fakeAgentPath: options.fakeAgentPath } : {}) });
   const eventClients = new Set<WebSocket>();
   const terminals = new Set<WebSocket>();

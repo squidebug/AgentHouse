@@ -15,7 +15,8 @@ AgentHouse is three programs plus a browser app. Know which one a file runs in b
 
 - `src/claude/` is what AgentHouse knows about Claude Code (hook events, status line, settings files); `src/shared/` is used by both servers.
 - The session host owns the PTYs, so sessions survive web server restarts. The web server prepares launches, checks the environment, serves the UI and relays terminals to the host.
-- Browser ↔ web server types: `packages/protocol`. Web server ↔ host messages: `apps/server/src/shared/host-protocol.ts`; bump `HOST_PROTOCOL` whenever they change.
+- Browser ↔ web server types: `packages/protocol`. Web server ↔ host messages: `apps/server/src/shared/host-protocol.ts`; bump `HOST_PROTOCOL` whenever they change, and keep the hello's proof and the `shutdown` request as they are, so `--stop` still reaches older hosts.
+- Until the host restarts after its code changed, the environment check warns (`shared/build.ts` hashes the files listed above).
 - Claude status comes from hooks (`claude/status.ts`: `STATUS_EVENTS` and its handler map are the single list the injected hooks are built from), the status line (model, effort, context, plan limits) and, when no hook can tell (Esc, a dialog answered in the terminal), the transcript and `claude agents --json`.
 
 ## State

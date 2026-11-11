@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
@@ -6,11 +7,38 @@ import { fileURLToPath } from 'node:url';
 import WebSocket from 'ws';
 import { HostClient } from '../src/web/host-client';
 import { createSessionHost, type SessionHost } from '../src/host/server';
+import { childEnv } from '../src/shared/child-env';
+import type { SpawnSpec } from '../src/shared/host-protocol';
 import { createAgentHouseServer, type AgentHouseServer } from '../src/web/http/server';
 
 export const fakeAgentPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'fake-agent.mjs');
 
 export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** The fake agent as the session host would start it; `extra` turns it into whatever a test needs. */
+export function fakeSpec(extra: Partial<SpawnSpec> = {}): SpawnSpec {
+  return {
+    id: randomUUID(),
+    vendor: 'fake',
+    title: 'fake',
+    file: process.execPath,
+    args: [fakeAgentPath],
+    cwd: os.tmpdir(),
+    env: childEnv(),
+    cols: 100,
+    rows: 30,
+    theme: 'dark',
+    model: null,
+    effort: null,
+    permissionMode: null,
+    cliVersion: null,
+    vendorSessionId: null,
+    tempPaths: [],
+    hookToken: null,
+    agentsCommand: null,
+    ...extra,
+  };
+}
 
 /** A state folder of the test's own, so tests never touch ~/.agenthouse or each other. */
 export function tempStateDir(): Promise<string> {

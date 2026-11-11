@@ -20,7 +20,7 @@ import {
   type HostState,
   type SpawnSpec,
 } from '../shared/host-protocol';
-import { logFile, readState, runDir } from '../shared/state';
+import { logFile, readAllStates, readState, runDir } from '../shared/state';
 
 export class HostUnavailableError extends Error {
   constructor() {
@@ -79,7 +79,7 @@ function startHost(options: ConnectOptions): void {
  * usable answers. The hello must prove the host knows the token, before
  * anything is sent to it or taken from it.
  */
-function openControl(state: HostState, timeoutMs: number): Promise<Omit<Link, 'state'> | null> {
+function openControl(state: HostState, timeoutMs: number, protocol = HOST_PROTOCOL): Promise<Omit<Link, 'state'> | null> {
   return new Promise((resolve) => {
     const nonce = randomBytes(24).toString('base64url');
     const ws = new WebSocket(`ws://127.0.0.1:${state.port}/control`, {
@@ -101,7 +101,7 @@ function openControl(state: HostState, timeoutMs: number): Promise<Omit<Link, 's
       } catch {
         // not a host
       }
-      if (message?.type !== 'hello' || message.protocol !== HOST_PROTOCOL || !validHostProof(state.token, nonce, message.proof)) return fail();
+      if (message?.type !== 'hello' || message.protocol !== protocol || !validHostProof(state.token, nonce, message.proof)) return fail();
       clearTimeout(timer);
       ws.removeAllListeners();
       ws.on('error', () => {});
@@ -112,9 +112,58 @@ function openControl(state: HostState, timeoutMs: number): Promise<Omit<Link, 's
 
 /** True when a host answers at this state (used by a starting host to avoid running twice). */
 export async function probeHost(state: HostState): Promise<boolean> {
-  const link = await openControl(state, 1500);
+  const link = await openControl(state, 1500, state.protocol);
   link?.ws.close();
   return Boolean(link);
+}
+
+/** Hosts of other protocol versions that still run (their sessions are not shown). */
+export async function olderHosts(stateDir: string): Promise<number> {
+  const others = readAllStates(stateDir).filter((state) => state.protocol !== HOST_PROTOCOL && isAlive(state.pid));
+  const alive = await Promise.all(others.map(probeHost));
+  return alive.filter(Boolean).length;
+}
+
+/** Sends `shutdown`, which every protocol version takes; resolves with how many sessions it ended. */
+function shutdownOver(ws: WebSocket): Promise<number> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(0), 60_000);
+    ws.on('message', (raw) => {
+      let message: { type?: unknown; id?: unknown; ok?: unknown; result?: { closed?: unknown } } | null = null;
+      try {
+        message = JSON.parse(raw.toString());
+      } catch {
+        return;
+      }
+      if (message?.type !== 'reply' || message.id !== 1) return;
+      clearTimeout(timer);
+      resolve(message.ok === true ? Number(message.result?.closed) || 0 : 0);
+    });
+    ws.on('close', () => {
+      clearTimeout(timer);
+      resolve(0);
+    });
+    ws.send(JSON.stringify({ id: 1, op: 'shutdown' }));
+  });
+}
+
+/**
+ * Ends every session host in this state folder, of any protocol version, with
+ * all their sessions. A protocol change leaves the older host running its
+ * sessions, out of sight of newer web servers; `--stop` reaches it too.
+ */
+export async function stopHosts(stateDir: string): Promise<{ hosts: number; sessions: number }> {
+  let hosts = 0;
+  let sessions = 0;
+  for (const state of readAllStates(stateDir)) {
+    if (!isAlive(state.pid)) continue;
+    const link = await openControl(state, 2000, state.protocol);
+    if (!link) continue;
+    sessions += await shutdownOver(link.ws);
+    link.ws.close();
+    hosts += 1;
+  }
+  return { hosts, sessions };
 }
 
 async function findOrStart(options: ConnectOptions): Promise<Link> {
@@ -173,6 +222,15 @@ export class HostClient extends EventEmitter {
     return this.link.state.pid;
   }
 
+  /** The code the host started with (hostBuildId); differs from the files on disk once they change. */
+  get build(): string {
+    return this.link.hello.build;
+  }
+
+  get stateDir(): string {
+    return this.options.stateDir;
+  }
+
   /** Where the CLIs' hook relays reach the host. */
   get port(): number {
     return this.link.state.port;
@@ -209,11 +267,6 @@ export class HostClient extends EventEmitter {
 
   compose(sessionId: string, request: ComposeRequest): Promise<ComposeOutcome> {
     return this.request({ op: 'compose', sessionId, request }) as Promise<ComposeOutcome>;
-  }
-
-  /** Ends every session and the host. */
-  shutdown(): Promise<{ closed: number }> {
-    return this.request({ op: 'shutdown' }, 60_000) as Promise<{ closed: number }>;
   }
 
   /** A socket to one session's terminal on the host, for the web server to relay to a browser. */

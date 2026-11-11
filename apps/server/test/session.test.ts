@@ -6,10 +6,9 @@ import { after, before, describe, test } from 'node:test';
 import type { SessionInfo } from '@agenthouse/protocol';
 import { createSessionHost, type SessionHost } from '../src/host/server';
 import { childEnv } from '../src/shared/child-env';
-import type { SpawnSpec } from '../src/shared/host-protocol';
 import { isAlive } from '../src/shared/kill-tree';
 import { HostClient } from '../src/web/host-client';
-import { fakeAgentPath, plain, request, screenText, sleep, tempStateDir, waitFor, type Socket } from './helpers';
+import { fakeSpec as spec, plain, request, screenText, sleep, tempStateDir, waitFor, type Socket } from './helpers';
 
 let stateDir: string;
 let host: SessionHost;
@@ -26,29 +25,6 @@ after(async () => {
   await host.close();
   await rm(stateDir, { recursive: true, force: true });
 });
-
-function spec(extra: Partial<SpawnSpec> = {}): SpawnSpec {
-  return {
-    vendor: 'fake',
-    title: 'fake',
-    file: process.execPath,
-    args: [fakeAgentPath],
-    cwd: os.tmpdir(),
-    env: childEnv(),
-    cols: 100,
-    rows: 30,
-    theme: 'dark',
-    model: null,
-    effort: null,
-    permissionMode: null,
-    cliVersion: null,
-    vendorSessionId: null,
-    tempPaths: [],
-    hookToken: null,
-    agentsCommand: null,
-    ...extra,
-  };
-}
 
 function watch(info: SessionInfo) {
   const ws = client.openTerminal(info.id);

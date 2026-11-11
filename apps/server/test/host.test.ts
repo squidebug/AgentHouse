@@ -8,13 +8,12 @@ import { describe, test } from 'node:test';
 import { WebSocketServer } from 'ws';
 import type { SessionInfo } from '@agenthouse/protocol';
 import { HostClient, HostUnavailableError } from '../src/web/host-client';
-import { HOST_PROTOCOL, hostProof, type SpawnSpec } from '../src/shared/host-protocol';
+import { HOST_PROTOCOL, hostProof } from '../src/shared/host-protocol';
 import { createSessionHost } from '../src/host/server';
 import { readState, runDir, writeState } from '../src/shared/state';
 import { createAgentHouseServer } from '../src/web/http/server';
-import { childEnv } from '../src/shared/child-env';
 import { isAlive, killTree } from '../src/shared/kill-tree';
-import { fakeAgentPath, login, openSocket, plain, request, screenText, sleep, tempStateDir, waitFor, type Socket } from './helpers';
+import { fakeAgentPath, fakeSpec, login, openSocket, plain, request, screenText, sleep, tempStateDir, waitFor, type Socket } from './helpers';
 
 async function webServer(stateDir: string) {
   const client = await HostClient.connect({ stateDir, spawn: false });
@@ -28,28 +27,6 @@ async function webServer(stateDir: string) {
       await app.close();
       client.close();
     },
-  };
-}
-
-function fakeSpec(tempPaths: string[] = []): SpawnSpec {
-  return {
-    vendor: 'fake',
-    title: 'fake',
-    file: process.execPath,
-    args: [fakeAgentPath],
-    cwd: os.tmpdir(),
-    env: childEnv(),
-    cols: 100,
-    rows: 30,
-    theme: 'dark',
-    model: null,
-    effort: null,
-    permissionMode: null,
-    cliVersion: null,
-    vendorSessionId: null,
-    tempPaths,
-    hookToken: null,
-    agentsCommand: null,
   };
 }
 
@@ -198,7 +175,7 @@ describe('session host', () => {
     const hostPid = client.pid;
     try {
       assert.notEqual(hostPid, process.pid, 'a separate process');
-      const info = await client.spawn(fakeSpec([tempDir]));
+      const info = await client.spawn(fakeSpec({ tempPaths: [tempDir] }));
       const terminal = client.openTerminal(info.id);
       const messages: Socket['messages'] = [];
       terminal.on('message', (raw) => messages.push(JSON.parse(raw.toString())));

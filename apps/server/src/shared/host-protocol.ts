@@ -4,9 +4,11 @@ import { sameSecret } from './compare';
 
 /**
  * Web server ↔ session host. Bump when either side could misread the other:
- * a web server only talks to a host of its own protocol version.
+ * a web server only talks to a host of its own protocol version. Two parts
+ * stay the same in every version, so `--stop` can end a host of any version:
+ * the hello's `protocol`, `pid` and `proof`, and the `shutdown` request.
  */
-export const HOST_PROTOCOL = 3;
+export const HOST_PROTOCOL = 4;
 
 /**
  * The host's answer to a web server's nonce. A process squatting on a dead
@@ -32,6 +34,8 @@ export interface HostState {
 
 /** One CLI to start. The web server has already resolved and validated everything in it. */
 export interface SpawnSpec {
+  /** The session's id, chosen by the web server, which keeps it in its session registry. */
+  id: string;
   vendor: SessionVendor;
   title: string;
   file: string;
@@ -78,7 +82,17 @@ export type HostRequest =
  * (per-session hook token).
  */
 export type HostMessage =
-  | { type: 'hello'; protocol: number; pid: number; proof: string; webToken: string; sessions: SessionInfo[]; limits: AccountLimits[] }
+  | {
+      type: 'hello';
+      protocol: number;
+      pid: number;
+      proof: string;
+      /** The host's code (hostBuildId) when it started. */
+      build: string;
+      webToken: string;
+      sessions: SessionInfo[];
+      limits: AccountLimits[];
+    }
   | { type: 'sessions'; sessions: SessionInfo[] }
   | { type: 'limits'; limits: AccountLimits[] }
   | { type: 'reply'; id: number; ok: true; result: unknown }

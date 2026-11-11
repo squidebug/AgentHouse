@@ -30,8 +30,8 @@ export interface SessionExit {
   at: number;
 }
 
-/** `running`: the process runs but reports no turns (no hooks: Codex until M8, hooks blocked by policy). */
-export type StatusValue = 'starting' | 'running' | 'idle' | 'working' | 'awaiting_permission' | 'awaiting_input' | 'exited';
+/** `unobserved`: the process runs but reports no turns (no hooks: Codex until M8, hooks blocked by policy). */
+export type StatusValue = 'starting' | 'unobserved' | 'idle' | 'working' | 'awaiting_permission' | 'awaiting_input' | 'exited';
 
 /**
  * Waiting for the user: an approval, or the answer to a question. Text and
@@ -81,6 +81,15 @@ export interface AccountLimits {
   at: number;
 }
 
+/** One conversation of a session in the CLI's own transcript file. Claude Code starts a new one on /clear. */
+export interface TranscriptSegment {
+  /** The CLI's session id for this conversation. */
+  vendorSessionId: string | null;
+  path: string;
+  /** When AgentHouse first saw it (epoch ms). */
+  since: number;
+}
+
 export interface SessionInfo {
   id: string;
   vendor: SessionVendor;
@@ -100,6 +109,8 @@ export interface SessionInfo {
   exit: SessionExit | null;
   status: SessionStatus;
   telemetry: SessionTelemetry;
+  /** The transcripts this session wrote, oldest first; empty when the CLI reports none. */
+  transcripts: TranscriptSegment[];
 }
 
 export interface CliInstall {

@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { findOnPath } from './web/cli/resolve';
-import { HostClient } from './web/host-client';
+import { HostClient, stopHosts } from './web/host-client';
 import { defaultStateDir } from './shared/state';
 import { createAgentHouseServer, type AgentHouseServer } from './web/http/server';
 import { systemTool } from './shared/system';
@@ -55,16 +55,14 @@ async function listen(args: Args, options: Omit<Parameters<typeof createAgentHou
   return createAgentHouseServer({ ...options, port: 0 });
 }
 
-/** `--stop`: ends every session and the session host. */
+/** `--stop`: ends every session and the session host, and hosts of older protocol versions too. */
 async function stopHost(): Promise<void> {
-  const host = await HostClient.connect({ stateDir: defaultStateDir(), spawn: false }).catch(() => null);
-  if (!host) {
+  const { hosts, sessions } = await stopHosts(defaultStateDir());
+  if (!hosts) {
     process.stdout.write('실행 중인 세션 호스트가 없습니다.\n');
     return;
   }
-  const { closed } = await host.shutdown();
-  host.close();
-  process.stdout.write(closed ? `세션 ${closed}개를 끝냈습니다.\n` : '세션 호스트를 끝냈습니다.\n');
+  process.stdout.write(sessions ? `세션 ${sessions}개를 끝냈습니다.\n` : '세션 호스트를 끝냈습니다.\n');
 }
 
 const running = (host: HostClient) => host.sessions().filter((s) => s.state === 'running').length;
@@ -91,6 +89,8 @@ async function main(): Promise<void> {
     host,
     ...(devToken ? { token: devToken } : {}),
     devOrigins: args.devOrigins,
+    // Only the dev runner passes --dev-origin; its sessions run in the dev host.
+    stopCommand: args.devOrigins.length ? 'pnpm dev:stop' : 'pnpm stop',
     defaultCwd: args.cwd ?? process.cwd(),
     ...(existsSync(path.join(webDist, 'index.html')) && !args.devOrigins.length ? { webDist } : {}),
     ...(args.allowFake ? { fakeAgentPath } : {}),
