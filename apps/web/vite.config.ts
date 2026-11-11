@@ -1,9 +1,10 @@
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
-// In development the AgentHouse server runs on 7357 and Vite proxies to it;
-// the server allows this origin only when started with --dev-origin.
-const server = 'http://127.0.0.1:7357';
+// In development Vite proxies to the dev server that scripts/dev.mjs starts (its
+// own port and state folder, apart from `pnpm start`); the server allows this
+// origin only when started with --dev-origin.
+const server = process.env.AGENTHOUSE_DEV_SERVER ?? 'http://127.0.0.1:7358';
 
 export default defineConfig({
   plugins: [react()],
