@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { findOnPath, resolveShim } from '../src/cli/resolve';
+import { findOnPath, resolveShim } from '../src/web/cli/resolve';
 
 const windowsOnly = { skip: process.platform !== 'win32' };
 

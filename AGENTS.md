@@ -9,13 +9,14 @@ AgentHouse is three programs plus a browser app. Know which one a file runs in b
 | Process | Files | Restart |
 |---|---|---|
 | Browser | `apps/web/src` (React + MUI) | reload |
-| Web server | `apps/server/src/main.ts`, `http/`, `cli/`, `env/`, `sessions/manager.ts`, `sessions/env.ts`, `host/client.ts` | freely; `tsx watch` restarts it in dev |
-| Session host | `apps/server/src/host/main.ts`, `host/server.ts`, `host/state.ts`, `sessions/session.ts`, `sessions/status.ts`, `sessions/colors.ts`, `util/`, `packages/protocol/src/terminal.ts` | ends every session: `pnpm dev:stop` (dev) or `pnpm stop` |
+| Web server | `apps/server/src/main.ts`, `src/web/` | freely; `tsx watch` restarts it in dev |
+| Session host | `apps/server/src/host/`, `packages/protocol/src/terminal.ts` | ends every session: `pnpm dev:stop` (dev) or `pnpm stop` |
+| Both servers | `apps/server/src/shared/`; `src/claude/` (what AgentHouse knows about Claude Code: `status.ts` runs in the host, `settings.ts` in the web server) | as for the session host |
 | Relay | `apps/server/src/relay/relay.cjs`, run by Claude Code for each hook and as its status line | per event |
 
 - The session host owns the PTYs, so sessions survive web server restarts. The web server prepares launches, checks the environment, serves the UI and relays terminals to the host.
-- Browser ↔ web server types: `packages/protocol`. Web server ↔ host messages: `apps/server/src/host/protocol.ts`; bump `HOST_PROTOCOL` whenever they change.
-- Claude status comes from hooks (`sessions/status.ts`: `STATUS_EVENTS` and its handler map are the single list the injected hooks are built from), the status line (model, effort, context, plan limits) and, when no hook can tell (Esc, a dialog answered in the terminal), the transcript and `claude agents --json`.
+- Browser ↔ web server types: `packages/protocol`. Web server ↔ host messages: `apps/server/src/shared/host-protocol.ts`; bump `HOST_PROTOCOL` whenever they change.
+- Claude status comes from hooks (`claude/status.ts`: `STATUS_EVENTS` and its handler map are the single list the injected hooks are built from), the status line (model, effort, context, plan limits) and, when no hook can tell (Esc, a dialog answered in the terminal), the transcript and `claude agents --json`.
 
 ## State
 

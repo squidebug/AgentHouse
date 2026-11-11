@@ -4,9 +4,9 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { buildLaunch, HOOK_EVENTS, LaunchError, sessionTitle } from '../src/cli/launch';
-import { STATUS_EVENTS } from '../src/sessions/status';
-import { versionAtLeast } from '../src/sessions/manager';
+import { buildLaunch, HOOK_EVENTS, LaunchError, sessionTitle } from '../src/web/cli/launch';
+import { STATUS_EVENTS } from '../src/claude/status';
+import { versionAtLeast } from '../src/web/manager';
 
 const install = { file: 'claude.exe', args: [] };
 const cwd = process.cwd();

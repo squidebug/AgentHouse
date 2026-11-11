@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { childEnv } from '../src/sessions/env';
+import { childEnv } from '../src/shared/child-env';
 
 test('sessions do not inherit the markers of an agent session AgentHouse runs inside', () => {
   const env = childEnv({

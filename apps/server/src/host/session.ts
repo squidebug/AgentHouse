@@ -19,7 +19,7 @@ import {
   type TerminalColors,
   type TerminalServerMessage,
 } from '@agenthouse/protocol';
-import { isAlive, killTree } from '../util/kill-tree';
+import { isAlive, killTree } from '../shared/kill-tree';
 import {
   applyAgents,
   applyHook,
@@ -34,7 +34,7 @@ import {
   type AgentsEntry,
   type HookEvent,
   type StatusLineInput,
-} from './status';
+} from '../claude/status';
 
 const require = createRequire(import.meta.url);
 const { Terminal: HeadlessTerminal } = require('@xterm/headless') as typeof import('@xterm/headless');

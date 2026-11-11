@@ -1,9 +1,9 @@
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { isAlive } from '../util/kill-tree';
-import { probeHost } from './client';
+import { isAlive } from '../shared/kill-tree';
+import { probeHost } from '../web/host-client';
 import { createSessionHost } from './server';
-import { defaultStateDir, hostLogger, readState } from './state';
+import { defaultStateDir, hostLogger, readState } from '../shared/state';
 
 // Long enough to ride out a web server restart, short enough not to linger.
 const DEFAULT_IDLE_EXIT_MS = 30_000;

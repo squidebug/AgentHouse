@@ -7,8 +7,8 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import WebSocket from 'ws';
 import type { AccountLimits, ComposeRequest, SessionInfo } from '@agenthouse/protocol';
-import { childEnv } from '../sessions/env';
-import { isAlive } from '../util/kill-tree';
+import { childEnv } from '../shared/child-env';
+import { isAlive } from '../shared/kill-tree';
 import {
   HOST_PROTOCOL,
   HostRequestError,
@@ -19,8 +19,8 @@ import {
   type HostRequest,
   type HostState,
   type SpawnSpec,
-} from './protocol';
-import { logFile, readState, runDir } from './state';
+} from '../shared/host-protocol';
+import { logFile, readState, runDir } from '../shared/state';
 
 export class HostUnavailableError extends Error {
   constructor() {
@@ -54,7 +54,7 @@ function hostCommand(): string[] {
   const here = fileURLToPath(import.meta.url);
   if (!here.endsWith('.ts')) return [path.join(path.dirname(here), 'host.js')];
   const tsx = createRequire(import.meta.url).resolve('tsx');
-  return ['--import', pathToFileURL(tsx).href, path.join(path.dirname(here), 'main.ts')];
+  return ['--import', pathToFileURL(tsx).href, path.join(path.dirname(here), '..', 'host', 'main.ts')];
 }
 
 function startHost(options: ConnectOptions): void {

@@ -1,8 +1,8 @@
 import os from 'node:os';
 import type { CliInstall, CliStatus, EnvMessage, EnvReport, Vendor } from '@agenthouse/protocol';
-import { claudeHookBlocker, gitBashPath } from '../cli/claude-settings';
-import { claudeLoggedIn, codexLoggedIn, detectVersion } from '../cli/probe';
-import { findOnPath, resolveCli } from '../cli/resolve';
+import { claudeHookBlocker, gitBashPath } from '../claude/settings';
+import { claudeLoggedIn, codexLoggedIn, detectVersion } from './cli/probe';
+import { findOnPath, resolveCli } from './cli/resolve';
 
 const CACHE_MS = 60_000;
 // Node lines whose security support has ended (as of 2026-11).

@@ -7,13 +7,13 @@ import path from 'node:path';
 import { describe, test } from 'node:test';
 import { WebSocketServer } from 'ws';
 import type { SessionInfo } from '@agenthouse/protocol';
-import { HostClient, HostUnavailableError } from '../src/host/client';
-import { HOST_PROTOCOL, hostProof, type SpawnSpec } from '../src/host/protocol';
+import { HostClient, HostUnavailableError } from '../src/web/host-client';
+import { HOST_PROTOCOL, hostProof, type SpawnSpec } from '../src/shared/host-protocol';
 import { createSessionHost } from '../src/host/server';
-import { readState, runDir, writeState } from '../src/host/state';
-import { createAgentHouseServer } from '../src/http/server';
-import { childEnv } from '../src/sessions/env';
-import { isAlive, killTree } from '../src/util/kill-tree';
+import { readState, runDir, writeState } from '../src/shared/state';
+import { createAgentHouseServer } from '../src/web/http/server';
+import { childEnv } from '../src/shared/child-env';
+import { isAlive, killTree } from '../src/shared/kill-tree';
 import { fakeAgentPath, login, openSocket, plain, request, screenText, sleep, tempStateDir, waitFor, type Socket } from './helpers';
 
 async function webServer(stateDir: string) {

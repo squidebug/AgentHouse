@@ -2,7 +2,7 @@ import { appendFileSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, 
 import { rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { HOST_PROTOCOL, type HostState } from './protocol';
+import { HOST_PROTOCOL, type HostState } from './host-protocol';
 
 /** `~/.agenthouse` unless AGENTHOUSE_HOME points elsewhere (tests use a temporary folder). */
 export function defaultStateDir(): string {

@@ -4,9 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import WebSocket from 'ws';
-import { HostClient } from '../src/host/client';
+import { HostClient } from '../src/web/host-client';
 import { createSessionHost, type SessionHost } from '../src/host/server';
-import { createAgentHouseServer, type AgentHouseServer } from '../src/http/server';
+import { createAgentHouseServer, type AgentHouseServer } from '../src/web/http/server';
 
 export const fakeAgentPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'fake-agent.mjs');
 

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
-import type { AgentHouseServer } from '../src/http/server';
-import { isAlive } from '../src/util/kill-tree';
+import type { AgentHouseServer } from '../src/web/http/server';
+import { isAlive } from '../src/shared/kill-tree';
 import { login, openSocket, plain, request, screenText, sleep, startServer, waitFor } from './helpers';
 
 let app: AgentHouseServer;

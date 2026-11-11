@@ -30,7 +30,7 @@ pnpm dev          # open the printed http://localhost:5173/auth?token=… addres
 pnpm dev:stop     # ends the dev sessions and the dev session host
 ```
 
-`pnpm dev` has its own state folder (`~/.agenthouse-dev`) and port (7358), so it never touches sessions started with `pnpm start`. The server restarts on code changes, but code that runs in the session host (`apps/server/src/host`, `src/sessions/session.ts` and `status.ts`, `src/util`, `packages/protocol/src/terminal.ts`) takes effect only after `pnpm dev:stop`, which ends the dev sessions.
+`pnpm dev` has its own state folder (`~/.agenthouse-dev`) and port (7358), so it never touches sessions started with `pnpm start`. The server restarts on code changes, but code that runs in the session host (`apps/server/src/host`, `src/shared`, `src/claude/status.ts`, `packages/protocol/src/terminal.ts`) takes effect only after `pnpm dev:stop`, which ends the dev sessions.
 
 ## Use
 

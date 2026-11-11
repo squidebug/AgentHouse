@@ -3,12 +3,12 @@ import { EventEmitter } from 'node:events';
 import { stat } from 'node:fs/promises';
 import path from 'node:path';
 import type { AccountLimits, ComposeRequest, LaunchOptions, SessionInfo, Vendor } from '@agenthouse/protocol';
-import { buildLaunch, LaunchError } from '../cli/launch';
-import { EnvService, INSTALL_COMMAND } from '../env/report';
-import type { HostClient } from '../host/client';
-import { HostRequestError, type CloseResult, type ComposeOutcome } from '../host/protocol';
-import { removeTree } from '../host/state';
-import { childEnv } from './env';
+import { buildLaunch, LaunchError } from './cli/launch';
+import { EnvService, INSTALL_COMMAND } from './doctor';
+import type { HostClient } from './host-client';
+import { HostRequestError, type CloseResult, type ComposeOutcome } from '../shared/host-protocol';
+import { removeTree } from '../shared/state';
+import { childEnv } from '../shared/child-env';
 
 const MISSING_TEXT: Record<Vendor, string> = {
   claude: 'Claude Code가 설치되어 있지 않습니다.',

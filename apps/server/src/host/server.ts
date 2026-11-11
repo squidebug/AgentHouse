@@ -3,11 +3,11 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { WebSocketServer, type WebSocket } from 'ws';
 import type { AccountLimits, SessionInfo, TerminalClientMessage, Vendor } from '@agenthouse/protocol';
-import { THEME_COLORS } from '../sessions/colors';
-import { Session } from '../sessions/session';
-import { limitsFrom, type HookEvent, type StatusLineInput } from '../sessions/status';
-import { HOST_PROTOCOL, HostRequestError, hostProof, type HostMessage, type HostRequest, type SpawnSpec } from './protocol';
-import { clearState, removeTree, runDir, writeState } from './state';
+import { THEME_COLORS } from './colors';
+import { Session } from './session';
+import { limitsFrom, type HookEvent, type StatusLineInput } from '../claude/status';
+import { HOST_PROTOCOL, HostRequestError, hostProof, type HostMessage, type HostRequest, type SpawnSpec } from '../shared/host-protocol';
+import { clearState, removeTree, runDir, writeState } from '../shared/state';
 
 export interface HostOptions {
   stateDir: string;

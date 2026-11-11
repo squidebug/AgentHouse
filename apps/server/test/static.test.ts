@@ -4,7 +4,7 @@ import type { ServerResponse } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { after, describe, test } from 'node:test';
-import { serveStatic } from '../src/http/static';
+import { serveStatic } from '../src/web/http/static';
 
 const parent = mkdtempSync(path.join(os.tmpdir(), 'agenthouse-static-'));
 const root = path.join(parent, 'dist');

@@ -9,9 +9,9 @@ import {
   type CliInstall,
   type LaunchOptions,
 } from '@agenthouse/protocol';
-import { relayPath } from '../relay/path';
-import { STATUS_EVENTS } from '../sessions/status';
-import { userStatusLine } from './claude-settings';
+import { relayPath } from '../../relay/path';
+import { STATUS_EVENTS } from '../../claude/status';
+import { userStatusLine } from '../../claude/settings';
 import { findOnPath } from './resolve';
 
 export class LaunchError extends Error {

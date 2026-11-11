@@ -30,7 +30,7 @@ pnpm dev          # 출력된 http://localhost:5173/auth?token=… 주소로 접
 pnpm dev:stop     # 개발용 세션과 개발용 세션 호스트를 끝냅니다
 ```
 
-`pnpm dev`는 상태 폴더(`~/.agenthouse-dev`)와 포트(7358)를 따로 쓰므로 `pnpm start`로 띄운 세션에 영향을 주지 않습니다. 코드를 고치면 서버는 다시 시작되지만, 세션 호스트에서 도는 코드(`apps/server/src/host`, `src/sessions/session.ts`·`status.ts`, `src/util`, `packages/protocol/src/terminal.ts`)는 `pnpm dev:stop` 뒤에야 반영되며, 이때 개발용 세션은 끝납니다.
+`pnpm dev`는 상태 폴더(`~/.agenthouse-dev`)와 포트(7358)를 따로 쓰므로 `pnpm start`로 띄운 세션에 영향을 주지 않습니다. 코드를 고치면 서버는 다시 시작되지만, 세션 호스트에서 도는 코드(`apps/server/src/host`, `src/shared`, `src/claude/status.ts`, `packages/protocol/src/terminal.ts`)는 `pnpm dev:stop` 뒤에야 반영되며, 이때 개발용 세션은 끝납니다.
 
 ## 사용법
 

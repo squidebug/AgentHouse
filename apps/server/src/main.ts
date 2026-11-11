@@ -2,11 +2,11 @@ import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { findOnPath } from './cli/resolve';
-import { HostClient } from './host/client';
-import { defaultStateDir } from './host/state';
-import { createAgentHouseServer, type AgentHouseServer } from './http/server';
-import { systemTool } from './util/system';
+import { findOnPath } from './web/cli/resolve';
+import { HostClient } from './web/host-client';
+import { defaultStateDir } from './shared/state';
+import { createAgentHouseServer, type AgentHouseServer } from './web/http/server';
+import { systemTool } from './shared/system';
 
 const DEFAULT_PORT = 7357;
 

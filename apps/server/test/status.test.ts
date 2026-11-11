@@ -14,7 +14,7 @@ import {
   isClaudeTranscript,
   limitsFrom,
   type HookEvent,
-} from '../src/sessions/status';
+} from '../src/claude/status';
 
 // Event sequences as Claude Code 2.1.322 sent them in a recorded session.
 function run(events: HookEvent[], from: SessionStatus = initialStatus(0)): SessionStatus {
