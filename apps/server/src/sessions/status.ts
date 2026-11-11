@@ -29,42 +29,66 @@ export const initialTelemetry = (): SessionTelemetry => ({ level: 'minimal', mod
 const ASKING_TOOLS: Record<string, string> = { AskUserQuestion: 'question', ExitPlanMode: 'plan' };
 
 /**
- * Status after one hook event (plan §7). Only confirmed signals move it; an
- * event this table does not know leaves it unchanged. Hook events can arrive
- * slightly out of order (they run async), which these rules tolerate: every
- * event states where the turn is, not how far it moved.
+ * Hook events the status reads. The launch settings subscribe to exactly
+ * these (plus the sub-agent events), and HANDLERS must cover each one, so a
+ * handled event can no longer go unsubscribed.
  */
+export const STATUS_EVENTS = [
+  'SessionStart',
+  'UserPromptSubmit',
+  'PreToolUse',
+  'PermissionRequest',
+  'Notification',
+  'PostToolUse',
+  'PostToolUseFailure',
+  'PermissionDenied',
+  'Elicitation',
+  'ElicitationResult',
+  'Stop',
+  'StopFailure',
+] as const;
+type StatusEvent = (typeof STATUS_EVENTS)[number];
+
+type Handler = (current: SessionStatus, event: HookEvent, at: number) => SessionStatus;
+const resumed: Handler = (_current, _event, at) => status('working', at);
+
+// Every event states where the turn is, not how far it moved, so the async
+// hooks arriving slightly out of order cannot leave a wrong state behind for long.
+const HANDLERS: Record<StatusEvent, Handler> = {
+  SessionStart: (_current, event, at) => status('idle', at, { reason: event.source === 'clear' ? 'cleared' : null }),
+  UserPromptSubmit: (_current, _event, at) => status('working', at),
+  PreToolUse: (_current, event, at) => {
+    const tool = text(event.tool_name);
+    if (tool && ASKING_TOOLS[tool]) return status('awaiting_input', at, { reason: ASKING_TOOLS[tool], tool });
+    return status('working', at, { tool });
+  },
+  // The immediate signal for a permission dialog; Notification(permission_prompt) only follows after ~6 s.
+  PermissionRequest: (_current, event, at) => status('awaiting_permission', at, { reason: text(event.tool_name), tool: text(event.tool_name) }),
+  Notification: (current, event, at) => {
+    if (event.notification_type === 'permission_prompt') {
+      return current.value === 'awaiting_permission' ? current : status('awaiting_permission', at, { reason: current.tool, tool: current.tool });
+    }
+    if (event.notification_type === 'elicitation_dialog') return status('awaiting_input', at, { reason: 'elicitation' });
+    if (event.notification_type === 'idle_prompt') return current.value === 'idle' ? current : status('idle', at);
+    return current;
+  },
+  PostToolUse: resumed,
+  PostToolUseFailure: resumed,
+  PermissionDenied: resumed,
+  // An MCP server asks the user for input, then gets the answer.
+  Elicitation: (_current, _event, at) => status('awaiting_input', at, { reason: 'elicitation' }),
+  ElicitationResult: resumed,
+  Stop: (_current, _event, at) => status('idle', at),
+  // An API error (e.g. a rate limit) ends the turn instead of Stop.
+  StopFailure: (_current, event, at) => status('idle', at, { error: true, reason: text(event.error_type) ?? text(event.error) ?? 'error' }),
+};
+
+/** Status after one hook event. Only confirmed signals move it; other events leave it unchanged. */
 export function applyHook(current: SessionStatus, event: HookEvent, at = Date.now()): SessionStatus {
   if (current.value === 'exited') return current;
-  const tool = text(event.tool_name);
-  switch (event.hook_event_name) {
-    case 'SessionStart':
-      return status('idle', at, { reason: event.source === 'clear' ? 'cleared' : null });
-    case 'UserPromptSubmit':
-      return status('working', at);
-    case 'PreToolUse':
-      if (tool && ASKING_TOOLS[tool]) return status('awaiting_input', at, { reason: ASKING_TOOLS[tool], tool });
-      return status('working', at, { tool });
-    case 'PermissionRequest':
-      return status('awaiting_permission', at, { reason: tool, tool });
-    case 'Notification':
-      if (event.notification_type === 'permission_prompt') {
-        return current.value === 'awaiting_permission' ? current : status('awaiting_permission', at, { reason: current.tool, tool: current.tool });
-      }
-      if (event.notification_type === 'elicitation_dialog') return status('awaiting_input', at, { reason: 'elicitation' });
-      if (event.notification_type === 'idle_prompt') return current.value === 'idle' ? current : status('idle', at);
-      return current;
-    case 'PostToolUse':
-    case 'PostToolUseFailure':
-    case 'PermissionDenied':
-      return status('working', at);
-    case 'Stop':
-      return status('idle', at);
-    case 'StopFailure':
-      return status('idle', at, { error: true, reason: text(event.error_type) ?? text(event.error) ?? 'error' });
-    default:
-      return current;
-  }
+  const name = event.hook_event_name;
+  const handler = typeof name === 'string' && Object.hasOwn(HANDLERS, name) ? HANDLERS[name as StatusEvent] : undefined;
+  return handler ? handler(current, event, at) : current;
 }
 
 /** Esc or Ctrl+C ended the turn. No hook reports this; the transcript does. */

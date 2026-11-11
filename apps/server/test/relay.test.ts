@@ -68,6 +68,21 @@ describe('hook relay', () => {
     assert.equal(posted.body, event);
   });
 
+  test('the same command line works when Claude runs hooks in PowerShell (Windows without Git Bash)', { skip: process.platform !== 'win32' }, async () => {
+    const configPath = path.join(dir, 'relay-powershell.json');
+    await writeFile(configPath, JSON.stringify({ port, token: 'ps-secret' }));
+    const command = `node "${relayPath().replace(/\\/g, '/')}" hook "${configPath.replace(/\\/g, '/')}"`;
+    const powershell = `${process.env.SystemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
+    const event = JSON.stringify({ hook_event_name: 'Stop', session_id: 'ps' });
+    const code = await new Promise<number | null>((resolve) => {
+      const child = spawn(powershell, ['-NoProfile', '-NonInteractive', '-Command', command], { stdio: ['pipe', 'ignore', 'ignore'] });
+      child.on('close', resolve);
+      child.stdin.end(event);
+    });
+    assert.equal(code, 0);
+    assert.ok(received.some((r) => r.auth === 'Bearer ps-secret' && r.body === event), 'the event reached the host');
+  });
+
   test('when the host is unreachable the relay still exits 0 at once', async () => {
     const closed = http.createServer();
     await new Promise<void>((resolve) => closed.listen(0, '127.0.0.1', resolve));

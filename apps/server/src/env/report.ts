@@ -1,7 +1,8 @@
 import os from 'node:os';
 import type { CliInstall, CliStatus, EnvMessage, EnvReport, Vendor } from '@agenthouse/protocol';
+import { claudeHookBlocker, gitBashPath } from '../cli/claude-settings';
 import { claudeLoggedIn, codexLoggedIn, detectVersion } from '../cli/probe';
-import { resolveCli } from '../cli/resolve';
+import { findOnPath, resolveCli } from '../cli/resolve';
 
 const CACHE_MS = 60_000;
 // Node lines whose security support has ended (as of 2026-11).
@@ -37,7 +38,14 @@ async function probeCli(vendor: Vendor): Promise<CliStatus> {
   return { vendor, installs, selected, loggedIn };
 }
 
-function messagesFor(report: Omit<EnvReport, 'messages'>): EnvMessage[] {
+/** What decides whether Claude's hooks (status, usage) can reach AgentHouse. */
+interface HookReach {
+  blocker: 'managed' | 'user' | null;
+  /** Windows without Git Bash runs hooks in PowerShell; the relay command then needs node on PATH. */
+  noShell: boolean;
+}
+
+function messagesFor(report: Omit<EnvReport, 'messages'>, hooks: HookReach): EnvMessage[] {
   const messages: EnvMessage[] = [];
   const { claude, codex } = report.clis;
 
@@ -62,6 +70,16 @@ function messagesFor(report: Omit<EnvReport, 'messages'>): EnvMessage[] {
     }
     if (status.loggedIn === false) {
       messages.push({ id: `ENV_${status.vendor.toUpperCase()}_NOT_LOGGED_IN`, level: 'warn', text: `${name}에 로그인되어 있지 않습니다.`, command: LOGIN_COMMAND[status.vendor] });
+    }
+  }
+  if (claude.installs.length) {
+    if (hooks.blocker === 'managed') {
+      messages.push({ id: 'ENV_CLAUDE_HOOKS_BLOCKED', level: 'warn', text: '관리 정책이 hook을 막고 있어 Claude 상태와 사용량을 볼 수 없습니다. 터미널은 그대로 쓸 수 있습니다.' });
+    } else if (hooks.blocker === 'user') {
+      messages.push({ id: 'ENV_CLAUDE_HOOKS_DISABLED', level: 'warn', text: 'Claude 설정의 disableAllHooks 때문에 상태와 사용량을 볼 수 없습니다. 터미널은 그대로 쓸 수 있습니다.' });
+    }
+    if (hooks.noShell) {
+      messages.push({ id: 'ENV_CLAUDE_NO_HOOK_SHELL', level: 'warn', text: 'Git Bash가 없고 PATH에서 node를 찾지 못해 Claude 상태를 받을 수 없습니다.' });
     }
   }
   if (report.node.eol) {
@@ -100,7 +118,11 @@ export class EnvService {
       defaultCwd: this.defaultCwd,
       clis: { claude, codex },
     };
-    const report: EnvReport = { ...base, messages: messagesFor(base) };
+    const hooks: HookReach = {
+      blocker: claudeHookBlocker(),
+      noShell: process.platform === 'win32' && !findOnPath('node').length && !gitBashPath(),
+    };
+    const report: EnvReport = { ...base, messages: messagesFor(base, hooks) };
     this.cached = { at: Date.now(), report };
     return report;
   }

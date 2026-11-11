@@ -10,7 +10,9 @@ import {
   type LaunchOptions,
 } from '@agenthouse/protocol';
 import { relayPath } from '../relay/path';
+import { STATUS_EVENTS } from '../sessions/status';
 import { userStatusLine } from './claude-settings';
+import { findOnPath } from './resolve';
 
 export class LaunchError extends Error {
   constructor(
@@ -53,25 +55,25 @@ export interface ObserveTarget {
   token: string;
 }
 
-// Every event the status reducer and the sub-agent tree use. All run async, so
-// Claude never waits for AgentHouse.
-export const HOOK_EVENTS = [
-  'SessionStart',
-  'SessionEnd',
-  'UserPromptSubmit',
-  'PreToolUse',
-  'PostToolUse',
-  'PermissionRequest',
-  'Notification',
-  'Stop',
-  'SubagentStart',
-  'SubagentStop',
-];
+// The events the status reads, plus the sub-agent events for the agent tree.
+// All run async, so Claude never waits for AgentHouse; each one starts the
+// relay once, so events nobody reads are left out.
+export const HOOK_EVENTS: readonly string[] = [...STATUS_EVENTS, 'SubagentStart', 'SubagentStop'];
 
-// Claude runs hook and status line commands with Git Bash on Windows and sh
-// elsewhere; single quotes keep every character of a path literal in both.
 function shellQuote(value: string): string {
   return `'${value.replace(/\\/g, '/').replace(/'/g, "'\\''")}'`;
+}
+
+/**
+ * The relay's command line. Claude runs hook and status line commands with
+ * Git Bash on Windows (PowerShell when Git Bash is missing) and sh elsewhere.
+ * A bare `node` with double-quoted paths reads the same in all of them. Only
+ * when node is not on PATH is its absolute path used, quoted for bash and sh.
+ */
+function relayCommand(mode: 'hook' | 'status', configPath: string): string {
+  const files = [relayPath(), configPath].map((p) => p.replace(/\\/g, '/'));
+  if (findOnPath('node').length && files.every((p) => !/["$`]/.test(p))) return `node "${files[0]}" ${mode} "${files[1]}"`;
+  return [process.execPath, relayPath(), mode, configPath].map(shellQuote).join(' ');
 }
 
 /**
@@ -83,10 +85,9 @@ async function observeSettings(dir: string, target: ObserveTarget, cwd: string):
   const configPath = path.join(dir, 'relay.json');
   const config = { port: target.port, token: target.token, ...(userLine ? { statusCommand: userLine.command } : {}) };
   await writeFile(configPath, JSON.stringify(config), { mode: 0o600 });
-  const relay = (mode: 'hook' | 'status') => [process.execPath, relayPath(), mode, configPath].map(shellQuote).join(' ');
-  const hook = [{ hooks: [{ type: 'command', command: relay('hook'), async: true, timeout: 3 }] }];
+  const hook = [{ hooks: [{ type: 'command', command: relayCommand('hook', configPath), async: true }] }];
   return {
-    statusLine: { type: 'command', command: relay('status'), ...(userLine?.padding !== undefined ? { padding: userLine.padding } : {}) },
+    statusLine: { type: 'command', command: relayCommand('status', configPath), ...(userLine?.padding !== undefined ? { padding: userLine.padding } : {}) },
     hooks: Object.fromEntries(HOOK_EVENTS.map((name) => [name, hook])),
   };
 }

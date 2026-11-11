@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { buildLaunch, HOOK_EVENTS, LaunchError, sessionTitle } from '../src/cli/launch';
+import { STATUS_EVENTS } from '../src/sessions/status';
 import { versionAtLeast } from '../src/sessions/manager';
 
 const install = { file: 'claude.exe', args: [] };
@@ -46,12 +47,22 @@ test('an observed claude session gets relay hooks and keeps the user status line
     const settingsPath = spec.args[spec.args.indexOf('--settings') + 1] ?? '';
     const settings = JSON.parse(readFileSync(settingsPath, 'utf8'));
     assert.deepEqual(Object.keys(settings.hooks).sort(), [...HOOK_EVENTS].sort());
+    assert.ok(
+      STATUS_EVENTS.every((name) => HOOK_EVENTS.includes(name)),
+      'every event the status reads is subscribed',
+    );
     const hook = settings.hooks.Stop[0].hooks[0];
     assert.equal(hook.async, true, 'Claude never waits for AgentHouse');
-    assert.match(hook.command, /relay\.cjs' 'hook' '/);
-    assert.match(settings.statusLine.command, /relay\.cjs' 'status' '/);
+    const relayConfigPath = path.join(path.dirname(settingsPath), 'relay.json').replace(/\\/g, '/');
+    for (const [command, mode] of [
+      [hook.command, 'hook'],
+      [settings.statusLine.command, 'status'],
+    ] as const) {
+      assert.ok(command.includes('relay.cjs') && command.includes(relayConfigPath), command);
+      assert.match(command, new RegExp(`["'] '?${mode}'? ["']`), 'mode between the two paths');
+    }
     assert.equal(settings.statusLine.padding, 1, "the user's padding is kept");
-    const relayConfig = JSON.parse(readFileSync(path.join(path.dirname(settingsPath), 'relay.json'), 'utf8'));
+    const relayConfig = JSON.parse(readFileSync(relayConfigPath, 'utf8'));
     assert.deepEqual(relayConfig, { port: 4321, token: 'secret', statusCommand: 'my-status --short' });
     await rm(spec.tempPaths[0] ?? '', { recursive: true, force: true });
   } finally {

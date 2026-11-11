@@ -58,6 +58,15 @@ describe('status from hook events', () => {
     assert.deepEqual([failed.value, failed.error, failed.reason], ['idle', true, 'rate_limit']);
   });
 
+  test('a failed or auto-denied tool resumes the turn; an MCP elicitation waits for input', () => {
+    const asking = run([{ hook_event_name: 'UserPromptSubmit' }, { hook_event_name: 'PermissionRequest', tool_name: 'Bash' }]);
+    assert.equal(applyHook(asking, { hook_event_name: 'PostToolUseFailure', tool_name: 'Bash' }).value, 'working');
+    assert.equal(applyHook(asking, { hook_event_name: 'PermissionDenied', tool_name: 'Bash' }).value, 'working');
+    const elicited = applyHook(run([{ hook_event_name: 'UserPromptSubmit' }]), { hook_event_name: 'Elicitation' });
+    assert.deepEqual([elicited.value, elicited.reason], ['awaiting_input', 'elicitation']);
+    assert.equal(applyHook(elicited, { hook_event_name: 'ElicitationResult' }).value, 'working');
+  });
+
   test('unknown events and events after exit change nothing', () => {
     const working = run([{ hook_event_name: 'UserPromptSubmit' }]);
     assert.equal(applyHook(working, { hook_event_name: 'SubagentStop' }), working);
