@@ -8,6 +8,7 @@
 // No dependencies: it starts on every event and must stay fast.
 const fs = require('fs');
 const http = require('http');
+const path = require('path');
 const { spawn } = require('child_process');
 
 const [mode, configPath] = process.argv.slice(2);
@@ -49,13 +50,25 @@ function post(path, body) {
   });
 }
 
-// The same shell Claude Code runs commands with: Git Bash on Windows, sh elsewhere.
+// The shell Claude Code runs commands with: Git Bash on Windows (PowerShell
+// when it is missing), sh elsewhere. Always by absolute path, never a bare name
+// that could run a same-named file from the current folder.
+function shellFor(command) {
+  if (process.env.SHELL && path.isAbsolute(process.env.SHELL)) return [process.env.SHELL, ['-c', command]];
+  if (process.platform !== 'win32') return ['/bin/sh', ['-c', command]];
+  const bases = [process.env.ProgramFiles, process.env['ProgramFiles(x86)'], process.env.LOCALAPPDATA && `${process.env.LOCALAPPDATA}\\Programs`];
+  const bash = bases.filter(Boolean).map((base) => `${base}\\Git\\bin\\bash.exe`).find((file) => fs.existsSync(file));
+  if (bash) return [bash, ['-c', command]];
+  const powershell = `${process.env.SystemRoot || 'C:\\Windows'}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
+  return [powershell, ['-NoProfile', '-NonInteractive', '-Command', command]];
+}
+
 function runStatusCommand(command, input) {
   return new Promise((resolve) => {
-    const shell = process.env.SHELL || (process.platform === 'win32' ? 'bash' : '/bin/sh');
+    const [shell, args] = shellFor(command);
     let child;
     try {
-      child = spawn(shell, ['-c', command], { stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true });
+      child = spawn(shell, args, { stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true });
     } catch {
       return resolve(Buffer.alloc(0));
     }

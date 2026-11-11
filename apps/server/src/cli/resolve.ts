@@ -1,8 +1,7 @@
 // Resolves the real executable behind an npm shim, so the PTY's child is the CLI
 // itself rather than cmd.exe. That keeps its pid comparable with the one
 // `claude agents --json` reports and avoids cmd.exe argument quoting.
-import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { accessSync, constants, existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 
 const isWindows = process.platform === 'win32';
@@ -13,21 +12,35 @@ export interface ResolvedCommand {
   args: string[];
 }
 
-/** Every location the shell would consider for `name`, in PATH order. */
-export function findOnPath(name: string): string[] {
+function isExecutableFile(file: string): boolean {
   try {
-    const out = execFileSync(isWindows ? 'where.exe' : 'which', isWindows ? [name] : ['-a', name], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-      windowsHide: true,
-    });
-    return out
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean);
+    if (!statSync(file).isFile()) return false;
+    if (!isWindows) accessSync(file, constants.X_OK);
+    return true;
   } catch {
-    return [];
+    return false;
   }
+}
+
+/**
+ * Every match for `name` in PATH order, like `where`/`which -a`, but never the
+ * current folder: cmd.exe, where.exe and Node's spawn all look there first on
+ * Windows, so a repository AgentHouse is started in could otherwise supply its
+ * own `claude.cmd`. Empty and relative PATH entries (the current folder in
+ * disguise) are skipped too.
+ */
+export function findOnPath(name: string, env: NodeJS.ProcessEnv = process.env): string[] {
+  const dirs = (env.PATH ?? '').split(path.delimiter).map((dir) => dir.trim().replace(/^"(.*)"$/, '$1'));
+  const extensions = isWindows ? (env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean) : [''];
+  const hits: string[] = [];
+  for (const dir of dirs) {
+    if (!dir || !path.isAbsolute(dir)) continue;
+    for (const ext of extensions) {
+      const candidate = path.join(dir, name + ext.toLowerCase());
+      if (!hits.includes(candidate) && isExecutableFile(candidate)) hits.push(candidate);
+    }
+  }
+  return hits;
 }
 
 /**

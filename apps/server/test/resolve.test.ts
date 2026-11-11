@@ -3,9 +3,30 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { resolveShim } from '../src/cli/resolve';
+import { findOnPath, resolveShim } from '../src/cli/resolve';
 
 const windowsOnly = { skip: process.platform !== 'win32' };
+
+test('PATH lookup never picks a program from the current folder', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'agenthouse-path-'));
+  const cwd = process.cwd();
+  try {
+    const name = 'agenthouse-probe-cli';
+    const file = process.platform === 'win32' ? `${name}.cmd` : name;
+    const bin = path.join(root, 'bin');
+    const repo = path.join(root, 'repo');
+    mkdirSync(bin);
+    mkdirSync(repo);
+    for (const dir of [bin, repo]) writeFileSync(path.join(dir, file), '', { mode: 0o755 });
+    process.chdir(repo);
+    // An empty and a relative entry both mean "the current folder".
+    const env = { PATH: ['', '.', bin].join(path.delimiter), PATHEXT: '.EXE;.CMD' };
+    assert.deepEqual(findOnPath(name, env), [path.join(bin, file)]);
+  } finally {
+    process.chdir(cwd);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test('an npm .cmd shim that wraps a native exe resolves to the exe', windowsOnly, () => {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'agenthouse-shim-'));

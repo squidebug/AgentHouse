@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { systemTool } from './system';
 
 export function isAlive(pid: number): boolean {
   try {
@@ -17,7 +18,7 @@ export function isAlive(pid: number): boolean {
 export function killTree(pid: number): Promise<void> {
   return new Promise((resolve) => {
     if (process.platform === 'win32') {
-      execFile('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true }, () => resolve());
+      execFile(systemTool('taskkill.exe'), ['/pid', String(pid), '/T', '/F'], { windowsHide: true }, () => resolve());
       return;
     }
     try {

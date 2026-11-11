@@ -2,9 +2,11 @@ import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { findOnPath } from './cli/resolve';
 import { HostClient } from './host/client';
 import { defaultStateDir } from './host/state';
 import { createAgentHouseServer, type AgentHouseServer } from './http/server';
+import { systemTool } from './util/system';
 
 const DEFAULT_PORT = 7357;
 
@@ -33,10 +35,11 @@ function parseArgs(argv: string[]): Args {
   return args;
 }
 
+// By absolute path: a bare name could run a same-named file from the current folder.
 function openBrowser(url: string): void {
-  const [cmd, cmdArgs] =
-    process.platform === 'win32' ? ['explorer.exe', [url]] : process.platform === 'darwin' ? ['open', [url]] : ['xdg-open', [url]];
-  execFile(cmd, cmdArgs, { windowsHide: true }, () => {});
+  const opener =
+    process.platform === 'win32' ? systemTool('explorer.exe') : process.platform === 'darwin' ? '/usr/bin/open' : findOnPath('xdg-open')[0];
+  if (opener) execFile(opener, [url], { windowsHide: true }, () => {});
 }
 
 async function listen(args: Args, options: Omit<Parameters<typeof createAgentHouseServer>[0], 'port'>): Promise<AgentHouseServer> {
