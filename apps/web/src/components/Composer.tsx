@@ -5,6 +5,7 @@ import { api } from '../api/client';
 import { t } from '../strings';
 import { v } from '../theme/tokens';
 import type { Dnd } from '../workspace/dnd';
+import { summarizeSend } from '../workspace/compose';
 import type { Action, WorkspaceState } from '../workspace/state';
 import { CloseIcon, SendIcon } from './icons';
 import { StatusIcon } from './StatusIcon';
@@ -34,17 +35,14 @@ export function Composer({ state, dispatch, dnd, sessionById, activeSession }: P
     if (!text || !recipients.length || sending) return;
     setSending(true);
     const results = await Promise.allSettled(recipients.map((s) => api.compose(s.id, { text: draft })));
-    let sent = 0;
-    let held = 0;
-    for (const result of results) {
-      if (result.status === 'fulfilled' && result.value.submitted) sent += 1;
-      // The session shows a permission or question dialog; the server sent nothing that could answer it.
-      else if (result.status === 'fulfilled' && (result.value.reason === 'awaiting_permission' || result.value.reason === 'awaiting_input')) held += 1;
-    }
-    const failed = results.length - sent - held;
+    const { sent, held, failed, delivered } = summarizeSend(
+      recipients.map((s) => s.id),
+      results,
+    );
     setNotice([sent ? t.sentTo(sent) : '', held ? t.heldFor(held) : '', failed ? t.failedFor(failed) : ''].filter(Boolean).join(' · '));
-    // Keep the text while any recipient still has to get it.
     if (sent && !held && !failed) setDraft('');
+    // The text stays for the rest; those who already got it leave the list so a resend skips them.
+    else for (const id of delivered) dispatch({ type: 'removeTarget', id });
     setSending(false);
   };
 
