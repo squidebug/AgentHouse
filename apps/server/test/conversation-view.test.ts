@@ -1,0 +1,97 @@
+import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { after, before, describe, test } from 'node:test';
+import type { ConversationEntry, ConversationServerMessage, ConversationTurn, EntryDetail, SessionInfo } from '@agenthouse/protocol';
+import { eventually, login, openSocket, request, startServer, waitFor, type TestServer } from './helpers';
+
+// The fake agent writes its transcript only under a CLAUDE_CONFIG_DIR, never into ~/.claude.
+const config = mkdtempSync(path.join(os.tmpdir(), 'agenthouse-claude-config-'));
+process.env.CLAUDE_CONFIG_DIR = config;
+
+let app: TestServer;
+let headers: Record<string, string>;
+
+before(async () => {
+  app = await startServer();
+  headers = { cookie: await login(app.port, app.token), origin: `http://127.0.0.1:${app.port}` };
+});
+
+after(async () => {
+  await app.close();
+  rmSync(config, { recursive: true, force: true });
+});
+
+/** The view a browser builds from the socket's reset and update messages. */
+function follow(messages: Array<{ type: string; [key: string]: unknown }>) {
+  const turns = new Map<number, ConversationTurn>();
+  const entries = new Map<string, ConversationEntry>();
+  for (const raw of messages) {
+    const message = raw as unknown as ConversationServerMessage;
+    if (message.type === 'reset') {
+      turns.clear();
+      entries.clear();
+    }
+    for (const turn of message.turns) turns.set(turn.index, turn);
+    for (const entry of message.entries) entries.set(entry.id, entry);
+  }
+  return { turns: [...turns.values()], entries: [...entries.values()] };
+}
+
+describe('conversation view', () => {
+  test('a session that reports like Claude Code: status, then its conversation as it happens', async () => {
+    const created = await request(app.port, 'POST', '/api/sessions', { headers, body: { vendor: 'fake', title: 'talk' } });
+    const session = created.json as SessionInfo;
+    const now = async () => ((await request(app.port, 'GET', '/api/sessions', { headers })).json as SessionInfo[]).find((s) => s.id === session.id);
+    const started = await eventually(now, (s) => s?.status.value === 'idle' && s.transcripts.length === 1, 8000);
+    assert.equal(started?.transcripts.length, 1, 'hooks reported in');
+
+    const socket = await openSocket(app.port, `/ws/conversation?id=${session.id}`, headers);
+    assert.equal(socket.status, 101);
+    assert.ok(await waitFor(() => socket.messages.some((m) => m.type === 'reset'), 3000), 'the view starts, empty');
+
+    const compose = (text: string) => request(app.port, 'POST', `/api/sessions/${session.id}/compose`, { headers, body: { text, enterDelayMs: 50, quietMs: 50 } });
+    await compose('run a tool please');
+    const answered = () => follow(socket.messages).entries.some((e) => e.kind === 'text' && e.text === 'fake answer: run a tool please');
+    assert.ok(await waitFor(answered, 8000), 'prompt, tool call and answer arrive');
+    const view = follow(socket.messages);
+    assert.deepEqual(
+      view.entries.map((e) => e.kind),
+      ['prompt', 'tool', 'text'],
+    );
+    const tool = view.entries.find((e) => e.kind === 'tool');
+    assert.equal(tool?.kind === 'tool' && tool.state, 'done');
+    assert.deepEqual(
+      view.turns.map((t) => [t.model, t.usage.calls, t.usage.output, t.durationMs]),
+      [['fake-model', 2, 50, 120]],
+    );
+
+    const detail = await request(app.port, 'GET', `/api/sessions/${session.id}/conversation/${encodeURIComponent(tool!.id)}`, { headers });
+    assert.equal(detail.status, 200);
+    assert.deepEqual([(detail.json as EntryDetail).text, ((detail.json as EntryDetail).input as { command?: string }).command], ['fake-tool-output', 'echo fake-tool-output']);
+    assert.equal((await request(app.port, 'GET', `/api/sessions/${session.id}/conversation/nothing`, { headers })).status, 404);
+
+    // /clear: a new transcript, shown after the old conversation.
+    await compose('/clear');
+    assert.equal((await eventually(now, (s) => s?.transcripts.length === 2, 8000))?.transcripts.length, 2, 'a second transcript');
+    await compose('and now?');
+    assert.ok(await waitFor(() => follow(socket.messages).entries.some((e) => e.kind === 'text' && e.text === 'fake answer: and now?'), 8000));
+    const after = follow(socket.messages);
+    assert.deepEqual(
+      after.entries.map((e) => (e.kind === 'notice' ? e.notice : e.kind)),
+      ['prompt', 'tool', 'text', 'cleared', 'command', 'prompt', 'text'],
+    );
+    assert.deepEqual(
+      after.turns.map((t) => t.segment),
+      [0, 1, 1],
+    );
+    socket.ws?.close();
+    await request(app.port, 'DELETE', `/api/sessions/${session.id}`, { headers });
+  });
+
+  test('sessions without a transcript have no conversation socket', async () => {
+    assert.equal((await openSocket(app.port, '/ws/conversation?id=missing', headers)).status, 404);
+    assert.equal((await openSocket(app.port, '/ws/conversation?id=x', { ...headers, origin: 'http://evil.example' })).status, 403);
+  });
+});

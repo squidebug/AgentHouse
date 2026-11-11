@@ -110,7 +110,8 @@ export async function buildLaunch(
   const title = sessionTitle(opts.title, cwd);
   const args = [...install.args];
 
-  if (opts.vendor === 'claude') {
+  // The test double takes the same flags and reports the way Claude Code does.
+  if (opts.vendor === 'claude' || opts.vendor === 'fake') {
     // A pre-chosen id makes the transcript path known before the CLI writes it.
     const vendorSessionId = randomUUID();
     args.push('--session-id', vendorSessionId);

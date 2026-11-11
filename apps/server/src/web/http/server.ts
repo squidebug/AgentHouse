@@ -6,6 +6,7 @@ import { LaunchError } from '../cli/launch';
 import { EnvService } from '../doctor';
 import { HostUnavailableError, type HostClient } from '../host-client';
 import { HostRequestError } from '../../shared/host-protocol';
+import { Conversations } from '../conversations';
 import { SessionManager } from '../manager';
 import { AccessControl } from './access';
 import { ComposeBody, LaunchBody, TerminalClient } from './schemas';
@@ -147,6 +148,8 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
   const manager = new SessionManager({ env, defaultCwd, host: options.host, ...(options.fakeAgentPath ? { fakeAgentPath: options.fakeAgentPath } : {}) });
   const eventClients = new Set<WebSocket>();
   const terminals = new Set<WebSocket>();
+  const conversations = new Conversations(manager);
+  const conversationSockets = new Set<WebSocket>();
 
   const broadcast = (message: EventServerMessage) => {
     const text = JSON.stringify(message);
@@ -179,6 +182,12 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
       if (!session) throw new HttpError(404, '세션을 찾을 수 없습니다.');
       if (parts.length === 3 && req.method === 'DELETE') {
         send(res, 200, await manager.remove(session.id));
+        return;
+      }
+      if (parts[3] === 'conversation' && parts[4] && parts.length === 5 && req.method === 'GET') {
+        const detail = await conversations.detail(session.id, parts[4]);
+        if (!detail) throw new HttpError(404, '찾을 수 없습니다.');
+        send(res, 200, detail);
         return;
       }
       if (parts[3] === 'compose' && req.method === 'POST') {
@@ -245,6 +254,22 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
     if (!access.hostAllowed(req) || !access.originAllowed(req)) return reject(403);
     if (!access.authenticated(req)) return reject(401);
     const url = new URL(req.url ?? '/', 'http://localhost');
+    if (url.pathname === '/ws/conversation') {
+      const id = url.searchParams.get('id') ?? '';
+      if (!manager.get(id)?.transcripts.length) return reject(404);
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        const unsubscribe = conversations.subscribe(id, (message) => {
+          if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(message));
+        });
+        if (!unsubscribe) return ws.close();
+        conversationSockets.add(ws);
+        ws.on('close', () => {
+          conversationSockets.delete(ws);
+          unsubscribe();
+        });
+      });
+      return;
+    }
     if (url.pathname === '/ws/events') {
       wss.handleUpgrade(req, socket, head, (ws) => {
         eventClients.add(ws);
@@ -286,6 +311,8 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
       manager.off('change', broadcastSessions);
       manager.off('limits', broadcastLimits);
       manager.close();
+      conversations.close();
+      for (const ws of conversationSockets) ws.terminate();
       for (const ws of eventClients) ws.close();
       for (const ws of terminals) ws.terminate();
       wss.close();

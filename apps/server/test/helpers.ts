@@ -132,6 +132,17 @@ export async function waitFor(predicate: () => boolean, timeoutMs: number): Prom
   return predicate();
 }
 
+/** Reads until the value is what the test waits for, or the time is up; returns the last value read. */
+export async function eventually<T>(read: () => Promise<T>, done: (value: T) => boolean, timeoutMs: number): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  let value = await read();
+  while (!done(value) && Date.now() < deadline) {
+    await sleep(100);
+    value = await read();
+  }
+  return value;
+}
+
 /** Terminal text without escape sequences (ConPTY re-renders the CLI's screen). */
 export function plain(text: string): string {
   return text

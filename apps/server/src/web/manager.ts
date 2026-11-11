@@ -106,9 +106,9 @@ export class SessionManager extends EventEmitter {
       install = selected;
     }
 
-    // Claude reports its status through hooks and its status line; the relay
-    // proves which session it speaks for with this token.
-    const hookToken = opts.vendor === 'claude' ? randomBytes(24).toString('base64url') : null;
+    // Claude (and the test double) report status through hooks and the status
+    // line; the relay proves which session it speaks for with this token.
+    const hookToken = opts.vendor === 'codex' ? null : randomBytes(24).toString('base64url');
     const spec = await buildLaunch(opts, install, cwd, {
       ...(hookToken ? { observe: { port: this.options.host.port, token: hookToken } } : {}),
       tempRoot: this.options.host.runDir,
