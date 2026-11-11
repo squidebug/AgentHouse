@@ -32,7 +32,7 @@ AgentHouse is three programs plus a browser app. Know which one a file runs in b
 - `pnpm dev` / `pnpm dev:stop`: dev servers with their own state folder and port (7358); never touch the user's real sessions.
 - `pnpm build`, `pnpm start` / `pnpm stop`.
 - `pnpm typecheck`, `pnpm test` (a fake agent stands in for the CLIs, no login; launched like Claude Code it sends hook events and, under a temporary `CLAUDE_CONFIG_DIR`, writes a transcript), `pnpm licenses:check`.
-- `pnpm canary:claude [-- --turn]`: the built app against the installed Claude Code; no prompt unless `--turn`.
+- `pnpm canary:claude [-- --turn | --scenario]`: the built app against the installed Claude Code; no prompt unless `--turn` (one) or `--scenario` (haiku, low effort: reply, approve, deny with Esc, interrupt, `/clear`, then the conversation view from the real transcript; runs in `%TEMP%/agenthouse-canary-work` and tells Claude to trust it the first time).
 - `pnpm ui:check [-- --out <folder>]`: the built app in the installed Chrome (playwright-core, nothing downloaded) with the fake agent and a made-up ended session (`scripts/ui-sample.mjs`); light and dark screenshots.
 - Tests that need a host use a temporary state folder (`tempStateDir()`, or `AGENTHOUSE_HOME` for a spawned server); never the real `~/.agenthouse`.
 

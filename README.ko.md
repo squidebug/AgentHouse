@@ -48,7 +48,7 @@ pnpm dev:stop     # 개발용 세션과 개발용 세션 호스트를 끝냅니�
 pnpm typecheck
 pnpm test             # 공통·웹·서버 테스트(가짜 에이전트 사용, 로그인 불필요)
 pnpm licenses:check   # 의존성 라이선스 허용 목록 검사
-pnpm canary:claude    # 빌드한 앱을 설치된 Claude Code로 확인. 프롬프트는 보내지 않음(-- --turn을 붙이면 haiku로 짧은 프롬프트 1회)
+pnpm canary:claude    # 빌드한 앱을 설치된 Claude Code로 확인. 프롬프트는 보내지 않음(-- --turn: haiku로 짧은 프롬프트 1회, -- --scenario: 승인·거부·중단·/clear)
 pnpm ui:check         # 빌드한 앱을 설치된 Chrome과 가짜 에이전트로 확인(헤드리스, -- --out <폴더>를 주면 스크린숏을 남김)
 ```
 
