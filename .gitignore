@@ -13,5 +13,6 @@ Thumbs.db
 # Raw transcripts copied for local debugging; only sanitized fixtures are committed
 fixtures/raw/
 
-# Local planning notes, kept out of the repo
+# Local planning notes and their change history, kept out of the repo
 docs/
+docs-backup/
