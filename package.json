@@ -17,8 +17,7 @@
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm -r --if-present test",
     "licenses:check": "node scripts/check-licenses.mjs",
-    "spike:terminal": "pnpm --filter @agenthouse/spike-terminal-bridge start",
-    "spike:terminal:smoke": "pnpm --filter @agenthouse/spike-terminal-bridge smoke"
+    "canary:claude": "node scripts/canary-claude.mjs"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
