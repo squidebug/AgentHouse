@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { test } from 'node:test';
 import { buildLaunch, LaunchError, sessionTitle } from '../src/cli/launch';
 
@@ -26,8 +27,10 @@ test('claude options map to its flags', async () => {
   assert.match(args, /--permission-mode plan/);
   const settingsPath = spec.args[spec.args.indexOf('--settings') + 1] ?? '';
   assert.deepEqual(JSON.parse(readFileSync(settingsPath, 'utf8')), { theme: 'light' });
-  await spec.cleanup();
-  assert.equal(existsSync(settingsPath), false, 'temporary settings removed');
+  assert.equal(spec.tempPaths.length, 1);
+  assert.ok(settingsPath.startsWith(spec.tempPaths[0] ?? '\0'), 'the settings file is listed for removal');
+  await rm(spec.tempPaths[0] ?? '', { recursive: true, force: true });
+  assert.equal(existsSync(settingsPath), false);
 });
 
 test('codex options map to its flags', async () => {

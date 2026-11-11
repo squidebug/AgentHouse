@@ -2,7 +2,7 @@
 
 A local web console for running and observing AI coding-agent CLIs — Claude Code and Codex — side by side in real browser terminals, with live status, token usage, effort level and sub-agent trees.
 
-> **Status: pre-alpha (M1).** Real CLI terminals in the browser, several sessions at once, drag-and-drop layout, a Korean-safe composer, light/dark themes and an environment check work today. Status, usage, sub-agents, the conversation view, grouping and delegation are next. The UI is in Korean for now; English is planned.
+> **Status: pre-alpha (M3).** Real CLI terminals in the browser, several sessions at once, drag-and-drop layout, a Korean-safe composer, light/dark themes and an environment check work today, and sessions keep running while the server restarts. Status, usage, sub-agents, the conversation view, grouping and delegation are next. The UI is in Korean for now; English is planned.
 
 - Runs only on your machine (`127.0.0.1`), with a per-launch token, a Host allowlist and an Origin check.
 - Drives the CLIs exactly as installed, signed in with your own account. No reinstall, no PATH changes: Node 18 or newer and whatever Claude Code / Codex you already use.
@@ -24,6 +24,8 @@ Development (server with reload on 7357, Vite on 5173):
 ```sh
 pnpm dev          # open the printed http://localhost:5173/auth?token=… address
 ```
+
+Sessions run in a separate session host, so they keep running when the server stops or restarts, and an open page reconnects by itself. `pnpm stop` ends every session and the host. The host keeps its address and a log in `~/.agenthouse`. After changing the host's code (`apps/server/src/host`, `apps/server/src/sessions/session.ts`), run `pnpm stop` so the next start uses it.
 
 ## Use
 

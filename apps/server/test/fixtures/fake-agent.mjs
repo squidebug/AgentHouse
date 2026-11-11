@@ -44,6 +44,18 @@ process.stdin.on('data', (chunk) => {
   });
   if (!rest) return;
   out(`IN ${JSON.stringify(rest)}\r\n`);
+  // Stands in for a turn in progress: output keeps coming for two seconds.
+  if (rest.includes('stream')) {
+    let tick = 0;
+    const timer = setInterval(() => {
+      tick += 1;
+      out(`tick ${tick}\r\n`);
+      if (tick === 40) {
+        clearInterval(timer);
+        out('stream done\r\n');
+      }
+    }, 50);
+  }
   if (rest.includes('exit')) {
     grandchild.kill();
     out('bye\r\n');

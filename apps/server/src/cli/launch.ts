@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {
@@ -26,12 +26,12 @@ export interface LaunchSpec {
   args: string[];
   title: string;
   vendorSessionId: string | null;
-  cleanup: () => Promise<void>;
+  /** Temporary files the CLI reads while it runs; whoever runs it removes them when it ends. */
+  tempPaths: string[];
 }
 
 // Aliases (opus), full ids (claude-opus-5-5, gpt-6.1-sol) and variants like [1m].
 const MODEL_NAME = /^[A-Za-z0-9][\w.:\-[\]]{0,79}$/;
-const noCleanup = async () => {};
 
 function pick<T extends string>(value: string | undefined, allowed: readonly T[], label: string): T | undefined {
   if (!value) return undefined;
@@ -74,7 +74,7 @@ export async function buildLaunch(
     const mode = pick(opts.permissionMode, CLAUDE_PERMISSION_MODES, '권한 모드');
     if (mode) args.push('--permission-mode', mode);
 
-    let cleanup = noCleanup;
+    const tempPaths: string[] = [];
     if (opts.theme) {
       // Windows' ConPTY never forwards background-color queries, so Claude's
       // theme detection cannot see the app theme; tell it directly instead.
@@ -82,9 +82,9 @@ export async function buildLaunch(
       const settingsPath = path.join(dir, 'settings.json');
       await writeFile(settingsPath, JSON.stringify({ theme: opts.theme }));
       args.push('--settings', settingsPath);
-      cleanup = () => rm(dir, { recursive: true, force: true });
+      tempPaths.push(dir);
     }
-    return { file: install.file, args, title, vendorSessionId, cleanup };
+    return { file: install.file, args, title, vendorSessionId, tempPaths };
   }
 
   if (opts.vendor === 'codex') {
@@ -92,8 +92,8 @@ export async function buildLaunch(
     if (chosenModel) args.push('-m', chosenModel);
     const effort = pick(opts.effort, CODEX_EFFORTS, 'effort');
     if (effort) args.push('-c', `model_reasoning_effort="${effort}"`);
-    return { file: install.file, args, title, vendorSessionId: null, cleanup: noCleanup };
+    return { file: install.file, args, title, vendorSessionId: null, tempPaths: [] };
   }
 
-  return { file: install.file, args, title, vendorSessionId: null, cleanup: noCleanup };
+  return { file: install.file, args, title, vendorSessionId: null, tempPaths: [] };
 }

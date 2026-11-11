@@ -1,15 +1,44 @@
+import { mkdtemp, rm } from 'node:fs/promises';
 import http from 'node:http';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import WebSocket from 'ws';
+import { HostClient } from '../src/host/client';
+import { createSessionHost, type SessionHost } from '../src/host/server';
 import { createAgentHouseServer, type AgentHouseServer } from '../src/http/server';
 
 export const fakeAgentPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'fake-agent.mjs');
 
 export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-export async function startServer(): Promise<AgentHouseServer> {
-  return createAgentHouseServer({ port: 0, fakeAgentPath });
+/** A state folder of the test's own, so tests never touch ~/.agenthouse or each other. */
+export function tempStateDir(): Promise<string> {
+  return mkdtemp(path.join(os.tmpdir(), 'agenthouse-test-'));
+}
+
+export interface TestServer extends AgentHouseServer {
+  stateDir: string;
+  host: SessionHost;
+}
+
+/** A web server and a session host of its own, both in this process. close() ends both. */
+export async function startServer(): Promise<TestServer> {
+  const stateDir = await tempStateDir();
+  const host = await createSessionHost({ stateDir, idleExitMs: null });
+  const client = await HostClient.connect({ stateDir, spawn: false });
+  const app = await createAgentHouseServer({ port: 0, fakeAgentPath, host: client });
+  return {
+    ...app,
+    stateDir,
+    host,
+    async close() {
+      await app.close();
+      client.close();
+      await host.close();
+      await rm(stateDir, { recursive: true, force: true });
+    },
+  };
 }
 
 export interface Reply {

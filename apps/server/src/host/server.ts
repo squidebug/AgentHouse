@@ -1,0 +1,236 @@
+import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { rm } from 'node:fs/promises';
+import http from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { WebSocketServer, type WebSocket } from 'ws';
+import type { SessionInfo, TerminalClientMessage } from '@agenthouse/protocol';
+import { THEME_COLORS } from '../sessions/colors';
+import { Session } from '../sessions/session';
+import { HOST_PROTOCOL, HostRequestError, type HostMessage, type HostRequest, type SpawnSpec } from './protocol';
+import { clearState, writeState } from './state';
+
+export interface HostOptions {
+  stateDir: string;
+  /** Leave after this long with no running session and no web server attached; null never leaves (tests). */
+  idleExitMs: number | null;
+  /** Browser login token kept for the host's lifetime, so a browser stays logged in across web server restarts. */
+  webToken?: string;
+  log?: (line: string) => void;
+}
+
+export interface SessionHost {
+  port: number;
+  /** Settles when the host should exit: idle for idleExitMs, or asked to shut down. */
+  done: Promise<'idle' | 'shutdown'>;
+  close(): Promise<void>;
+}
+
+function sameSecret(candidate: string, secret: string): boolean {
+  const a = Buffer.from(candidate);
+  const b = Buffer.from(secret);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+/**
+ * The long-lived half of AgentHouse. It owns every PTY and its screen mirror, so
+ * the web server can restart (or crash) without ending a running agent. Only web
+ * servers that can read the state file get in; browsers never talk to it.
+ */
+export async function createSessionHost(options: HostOptions): Promise<SessionHost> {
+  const log = options.log ?? (() => {});
+  const token = randomBytes(32).toString('base64url');
+  const webToken = options.webToken || randomBytes(24).toString('base64url');
+  const sessions = new Map<string, Session>();
+  const controls = new Set<WebSocket>();
+  let idleTimer: NodeJS.Timeout | undefined;
+  let settle: (reason: 'idle' | 'shutdown') => void = () => {};
+  const done = new Promise<'idle' | 'shutdown'>((resolve) => {
+    settle = resolve;
+  });
+
+  const list = (): SessionInfo[] => [...sessions.values()].map((s) => s.info());
+  const send = (ws: WebSocket, message: HostMessage) => {
+    if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(message));
+  };
+  const broadcast = () => {
+    const message: HostMessage = { type: 'sessions', sessions: list() };
+    for (const ws of controls) send(ws, message);
+  };
+
+  // Exited sessions do not keep the host alive; their list entries go with it.
+  const checkIdle = () => {
+    clearTimeout(idleTimer);
+    if (options.idleExitMs === null || controls.size > 0) return;
+    if ([...sessions.values()].some((s) => !s.exit)) return;
+    idleTimer = setTimeout(() => settle('idle'), options.idleExitMs);
+  };
+
+  const find = (id: string): Session => {
+    const session = sessions.get(id);
+    if (!session) throw new HostRequestError('세션을 찾을 수 없습니다.', 'NOT_FOUND');
+    return session;
+  };
+
+  const start = (spec: SpawnSpec): SessionInfo => {
+    const removeTemp = async () => {
+      await Promise.all(spec.tempPaths.map((p) => rm(p, { recursive: true, force: true })));
+    };
+    let session: Session;
+    try {
+      session = new Session({
+        vendor: spec.vendor,
+        title: spec.title,
+        file: spec.file,
+        args: spec.args,
+        cwd: spec.cwd,
+        env: spec.env,
+        cols: spec.cols,
+        rows: spec.rows,
+        colors: THEME_COLORS[spec.theme],
+        model: spec.model,
+        effort: spec.effort,
+        permissionMode: spec.permissionMode,
+        cliVersion: spec.cliVersion,
+        vendorSessionId: spec.vendorSessionId,
+        cleanup: removeTemp,
+      });
+    } catch (error) {
+      removeTemp().catch(() => {});
+      throw new HostRequestError(`실행하지 못했습니다: ${(error as Error).message}`, 'SPAWN_FAILED');
+    }
+    sessions.set(session.id, session);
+    log(`session ${session.id} started (${spec.vendor}, pid ${session.pid})`);
+    session.on('exit', () => {
+      log(`session ${session.id} exited (code ${session.exit?.code})`);
+      broadcast();
+      checkIdle();
+    });
+    broadcast();
+    checkIdle();
+    return session.info();
+  };
+
+  const closeAll = () => Promise.all([...sessions.values()].map((s) => s.close()));
+
+  async function handle(request: HostRequest): Promise<unknown> {
+    switch (request.op) {
+      case 'spawn':
+        return start(request.spec);
+      case 'close': {
+        const session = find(request.sessionId);
+        const result = await session.close();
+        sessions.delete(session.id);
+        broadcast();
+        checkIdle();
+        return result;
+      }
+      case 'compose':
+        return find(request.sessionId).compose(request.request);
+      case 'shutdown': {
+        const running = [...sessions.values()].filter((s) => !s.exit).length;
+        await closeAll();
+        setImmediate(() => settle('shutdown'));
+        return { closed: running };
+      }
+      default:
+        throw new HostRequestError('알 수 없는 요청입니다.', 'UNKNOWN_OP');
+    }
+  }
+
+  const attachControl = (ws: WebSocket) => {
+    controls.add(ws);
+    clearTimeout(idleTimer);
+    send(ws, { type: 'hello', protocol: HOST_PROTOCOL, pid: process.pid, webToken, sessions: list() });
+    ws.on('message', async (raw) => {
+      let request: HostRequest;
+      try {
+        request = JSON.parse(raw.toString()) as HostRequest;
+      } catch {
+        return;
+      }
+      if (typeof request?.id !== 'number') return;
+      try {
+        send(ws, { type: 'reply', id: request.id, ok: true, result: (await handle(request)) ?? null });
+      } catch (error) {
+        const code = error instanceof HostRequestError ? error.code : undefined;
+        send(ws, { type: 'reply', id: request.id, ok: false, error: (error as Error).message, ...(code ? { code } : {}) });
+      }
+    });
+    ws.on('close', () => {
+      controls.delete(ws);
+      checkIdle();
+    });
+  };
+
+  // The web server has validated the browser's messages; this only guards the types.
+  const attachTerminal = (session: Session, ws: WebSocket) => {
+    const viewer = session.attach(ws);
+    ws.on('message', (raw) => {
+      let message: TerminalClientMessage;
+      try {
+        message = JSON.parse(raw.toString()) as TerminalClientMessage;
+      } catch {
+        return;
+      }
+      if (message.type === 'input' && typeof message.data === 'string') session.input(message.data, message.binary === true);
+      else if (message.type === 'resize' && Number.isFinite(message.cols) && Number.isFinite(message.rows)) session.resize(viewer, message.cols, message.rows);
+      else if (message.type === 'claim') session.claim(viewer);
+      else if (message.type === 'theme' && (message.mode === 'light' || message.mode === 'dark')) session.setColors(THEME_COLORS[message.mode]);
+    });
+    ws.on('close', () => session.detach(viewer));
+  };
+
+  const server = http.createServer((_req, res) => {
+    res.writeHead(404);
+    res.end();
+  });
+  const wss = new WebSocketServer({ noServer: true, maxPayload: 8 * 1024 * 1024 });
+
+  server.on('upgrade', (req, socket, head) => {
+    const reject = (status: number) => {
+      socket.write(`HTTP/1.1 ${status} ${http.STATUS_CODES[status]}\r\nConnection: close\r\n\r\n`);
+      socket.destroy();
+    };
+    // A browser always sends Origin; a web server on this machine never does, and holds the token.
+    const bearer = req.headers.authorization?.match(/^Bearer (.+)$/)?.[1] ?? '';
+    if (req.headers.origin !== undefined || !sameSecret(bearer, token)) return reject(401);
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    if (url.pathname === '/control') {
+      wss.handleUpgrade(req, socket, head, attachControl);
+      return;
+    }
+    if (url.pathname === '/terminal') {
+      const session = sessions.get(url.searchParams.get('id') ?? '');
+      if (!session) return reject(404);
+      wss.handleUpgrade(req, socket, head, (ws) => attachTerminal(session, ws));
+      return;
+    }
+    reject(404);
+  });
+
+  const port = await new Promise<number>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      server.off('error', reject);
+      resolve((server.address() as AddressInfo).port);
+    });
+  });
+  writeState(options.stateDir, { protocol: HOST_PROTOCOL, pid: process.pid, port, token, startedAt: Date.now() });
+  checkIdle();
+
+  return {
+    port,
+    done,
+    async close() {
+      clearTimeout(idleTimer);
+      await closeAll();
+      sessions.clear();
+      for (const ws of wss.clients) ws.terminate();
+      wss.close();
+      clearState(options.stateDir, process.pid);
+      const closed = new Promise<void>((resolve) => server.close(() => resolve()));
+      server.closeAllConnections();
+      await closed;
+    },
+  };
+}

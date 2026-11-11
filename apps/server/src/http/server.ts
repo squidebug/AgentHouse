@@ -1,23 +1,27 @@
-import { randomBytes } from 'node:crypto';
 import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, type WebSocket } from 'ws';
 import type { ApiError, ComposeResult, EventServerMessage } from '@agenthouse/protocol';
 import { LaunchError } from '../cli/launch';
 import { EnvService } from '../env/report';
-import { SessionManager, THEME_COLORS } from '../sessions/manager';
+import { HostUnavailableError, type HostClient } from '../host/client';
+import { HostRequestError } from '../host/protocol';
+import { SessionManager } from '../sessions/manager';
 import { AccessControl } from './access';
 import { ComposeBody, LaunchBody, TerminalClient } from './schemas';
 import { serveStatic } from './static';
 
 export interface ServerOptions {
   port: number;
+  /** The session host that runs the CLIs; the web server only prepares and relays. */
+  host: HostClient;
   /** Extra origins allowed to call the API, e.g. the Vite dev server. */
   devOrigins?: string[];
   /** Built web app to serve; omitted in development, where Vite serves it. */
   webDist?: string;
   defaultCwd?: string;
   fakeAgentPath?: string;
+  /** Browser login token. Defaults to the host's, which outlives web server restarts. */
   token?: string;
 }
 
@@ -26,6 +30,7 @@ export interface AgentHouseServer {
   token: string;
   url: string;
   manager: SessionManager;
+  /** Stops serving. The sessions keep running in the host. */
   close(): Promise<void>;
 }
 
@@ -39,6 +44,11 @@ class HttpError extends Error {
     super(message);
   }
 }
+
+// A browser that falls behind stops being read for; the host's backlog for it
+// then grows and the host resyncs it from a snapshot. The PTY never waits.
+const RELAY_HIGH_WATER = 1024 * 1024;
+const RELAY_LOW_WATER = 256 * 1024;
 
 function send(res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}): void {
   const isText = typeof body === 'string';
@@ -73,13 +83,61 @@ function parse<T>(schema: { safeParse(v: unknown): { success: true; data: T } | 
   return result.data;
 }
 
+/** Relays one browser terminal socket to the session's terminal on the host. */
+function relayTerminal(browser: WebSocket, upstream: WebSocket): void {
+  const early: string[] = [];
+  let draining: NodeJS.Timeout | undefined;
+  const stopDraining = () => clearInterval(draining);
+
+  upstream.on('open', () => {
+    for (const text of early) upstream.send(text);
+    early.length = 0;
+  });
+  upstream.on('message', (data, isBinary) => {
+    if (browser.readyState !== browser.OPEN) return;
+    browser.send(data, { binary: isBinary });
+    if (browser.bufferedAmount > RELAY_HIGH_WATER && !upstream.isPaused) {
+      upstream.pause();
+      draining = setInterval(() => {
+        if (browser.readyState === browser.OPEN && browser.bufferedAmount > RELAY_LOW_WATER) return;
+        stopDraining();
+        upstream.resume();
+      }, 50);
+    }
+  });
+  // The session was removed or the host went away; the browser reconnects by itself.
+  const end = () => {
+    stopDraining();
+    browser.close();
+  };
+  upstream.on('close', end);
+  upstream.on('error', end);
+
+  browser.on('message', (raw) => {
+    let message;
+    try {
+      message = TerminalClient.parse(JSON.parse(raw.toString()));
+    } catch {
+      return;
+    }
+    const text = JSON.stringify(message);
+    if (upstream.readyState === upstream.OPEN) upstream.send(text);
+    else if (upstream.readyState === upstream.CONNECTING) early.push(text);
+  });
+  browser.on('close', () => {
+    stopDraining();
+    upstream.terminate();
+  });
+}
+
 export async function createAgentHouseServer(options: ServerOptions): Promise<AgentHouseServer> {
-  const token = options.token ?? randomBytes(24).toString('base64url');
+  const token = options.token ?? options.host.webToken;
   const access = new AccessControl(token, options.devOrigins ?? []);
   const defaultCwd = options.defaultCwd ?? process.cwd();
   const env = new EnvService(defaultCwd);
-  const manager = new SessionManager({ env, defaultCwd, ...(options.fakeAgentPath ? { fakeAgentPath: options.fakeAgentPath } : {}) });
+  const manager = new SessionManager({ env, defaultCwd, host: options.host, ...(options.fakeAgentPath ? { fakeAgentPath: options.fakeAgentPath } : {}) });
   const eventClients = new Set<WebSocket>();
+  const terminals = new Set<WebSocket>();
 
   const broadcastSessions = () => {
     const message: EventServerMessage = { type: 'sessions', sessions: manager.list() };
@@ -102,8 +160,7 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
     }
     if (url.pathname === '/api/sessions' && req.method === 'POST') {
       const body = parse(LaunchBody, await readJson(req));
-      const session = await manager.create(body);
-      send(res, 201, session.info());
+      send(res, 201, await manager.create(body));
       return;
     }
     if (parts[0] === 'api' && parts[1] === 'sessions' && parts[2]) {
@@ -115,7 +172,7 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
       }
       if (parts[3] === 'compose' && req.method === 'POST') {
         const body = parse(ComposeBody, await readJson(req));
-        const result: ComposeResult = { sessionId: session.id, ...(await session.compose(body)) };
+        const result: ComposeResult = { sessionId: session.id, ...(await manager.compose(session.id, body)) };
         send(res, 200, result);
         return;
       }
@@ -155,6 +212,14 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
         send(res, error.status, body);
         return;
       }
+      if (error instanceof HostUnavailableError) {
+        send(res, 503, { error: error.message, code: 'HOST_UNAVAILABLE' } satisfies ApiError);
+        return;
+      }
+      if (error instanceof HostRequestError) {
+        send(res, error.code === 'NOT_FOUND' ? 404 : 500, { error: error.message, ...(error.code ? { code: error.code } : {}) } satisfies ApiError);
+        return;
+      }
       send(res, 500, { error: (error as Error).message });
     }
   });
@@ -178,23 +243,12 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
       });
       return;
     }
-    const session = url.pathname === '/ws/session' ? manager.get(url.searchParams.get('id') ?? '') : undefined;
-    if (!session) return reject(404);
+    const sessionId = url.pathname === '/ws/session' ? (url.searchParams.get('id') ?? '') : '';
+    if (!sessionId || !manager.get(sessionId)) return reject(404);
     wss.handleUpgrade(req, socket, head, (ws) => {
-      const viewer = session.attach(ws);
-      ws.on('message', (raw) => {
-        let message;
-        try {
-          message = TerminalClient.parse(JSON.parse(raw.toString()));
-        } catch {
-          return;
-        }
-        if (message.type === 'input') session.input(message.data, message.binary === true);
-        else if (message.type === 'resize') session.resize(viewer, message.cols, message.rows);
-        else if (message.type === 'claim') session.claim(viewer);
-        else if (message.type === 'theme') session.setColors(THEME_COLORS[message.mode]);
-      });
-      ws.on('close', () => session.detach(viewer));
+      terminals.add(ws);
+      ws.on('close', () => terminals.delete(ws));
+      relayTerminal(ws, options.host.openTerminal(sessionId));
     });
   });
 
@@ -215,8 +269,9 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
     url: `http://127.0.0.1:${port}/auth?token=${token}`,
     manager,
     async close() {
+      manager.off('change', broadcastSessions);
       for (const ws of eventClients) ws.close();
-      await manager.closeAll();
+      for (const ws of terminals) ws.terminate();
       wss.close();
       const closed = new Promise<void>((resolve) => server.close(() => resolve()));
       // Keep-alive connections (the default since Node 19) would hold close() open.
