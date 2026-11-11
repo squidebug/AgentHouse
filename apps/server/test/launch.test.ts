@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
-import { rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { test } from 'node:test';
-import { buildLaunch, LaunchError, sessionTitle } from '../src/cli/launch';
+import { buildLaunch, HOOK_EVENTS, LaunchError, sessionTitle } from '../src/cli/launch';
+import { versionAtLeast } from '../src/sessions/manager';
 
 const install = { file: 'claude.exe', args: [] };
 const cwd = process.cwd();
@@ -33,6 +36,31 @@ test('claude options map to its flags', async () => {
   assert.equal(existsSync(settingsPath), false);
 });
 
+test('an observed claude session gets relay hooks and keeps the user status line', async () => {
+  const configDir = await mkdtemp(path.join(os.tmpdir(), 'agenthouse-claude-config-'));
+  await writeFile(path.join(configDir, 'settings.json'), JSON.stringify({ statusLine: { type: 'command', command: 'my-status --short', padding: 1 } }));
+  const previous = process.env.CLAUDE_CONFIG_DIR;
+  process.env.CLAUDE_CONFIG_DIR = configDir;
+  try {
+    const spec = await buildLaunch({ vendor: 'claude' }, install, cwd, { port: 4321, token: 'secret' });
+    const settingsPath = spec.args[spec.args.indexOf('--settings') + 1] ?? '';
+    const settings = JSON.parse(readFileSync(settingsPath, 'utf8'));
+    assert.deepEqual(Object.keys(settings.hooks).sort(), [...HOOK_EVENTS].sort());
+    const hook = settings.hooks.Stop[0].hooks[0];
+    assert.equal(hook.async, true, 'Claude never waits for AgentHouse');
+    assert.match(hook.command, /relay\.cjs' 'hook' '/);
+    assert.match(settings.statusLine.command, /relay\.cjs' 'status' '/);
+    assert.equal(settings.statusLine.padding, 1, "the user's padding is kept");
+    const relayConfig = JSON.parse(readFileSync(path.join(path.dirname(settingsPath), 'relay.json'), 'utf8'));
+    assert.deepEqual(relayConfig, { port: 4321, token: 'secret', statusCommand: 'my-status --short' });
+    await rm(spec.tempPaths[0] ?? '', { recursive: true, force: true });
+  } finally {
+    if (previous === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = previous;
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
 test('codex options map to its flags', async () => {
   const spec = await buildLaunch({ vendor: 'codex', model: 'gpt-6.1-sol', effort: 'high' }, { file: 'codex.exe', args: [] }, cwd);
   assert.deepEqual(spec.args, ['-m', 'gpt-6.1-sol', '-c', 'model_reasoning_effort="high"']);
@@ -43,6 +71,13 @@ test('invalid values are refused before anything runs', async () => {
   await assert.rejects(buildLaunch({ vendor: 'claude', effort: 'ultra-max' }, install, cwd), LaunchError);
   await assert.rejects(buildLaunch({ vendor: 'claude', model: 'opus --dangerously-skip-permissions' }, install, cwd), LaunchError);
   await assert.rejects(buildLaunch({ vendor: 'claude', permissionMode: 'bypassPermissions' }, install, cwd), LaunchError);
+});
+
+test('CLI features are gated by version; an unknown version counts as recent', () => {
+  assert.equal(versionAtLeast('2.1.322 (Claude Code)', [2, 1, 145]), true);
+  assert.equal(versionAtLeast('2.1.144', [2, 1, 145]), false);
+  assert.equal(versionAtLeast('1.0.126 (Claude Code)', [2, 1, 145]), false);
+  assert.equal(versionAtLeast(null, [2, 1, 145]), true);
 });
 
 test('titles default to the folder name and drop control characters', () => {

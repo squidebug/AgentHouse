@@ -1,7 +1,8 @@
+import { randomBytes } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { rm, stat } from 'node:fs/promises';
 import path from 'node:path';
-import type { ComposeRequest, LaunchOptions, SessionInfo, Vendor } from '@agenthouse/protocol';
+import type { AccountLimits, ComposeRequest, LaunchOptions, SessionInfo, Vendor } from '@agenthouse/protocol';
 import { buildLaunch, LaunchError } from '../cli/launch';
 import { EnvService, INSTALL_COMMAND } from '../env/report';
 import type { HostClient } from '../host/client';
@@ -19,6 +20,21 @@ export interface ManagerOptions {
   host: HostClient;
   /** Path of the test double; only set when the server runs with --allow-fake. */
   fakeAgentPath?: string;
+}
+
+// `claude agents --json` (lists sessions as idle, busy or waiting) arrived in 2.1.145.
+const AGENTS_JSON_SINCE = [2, 1, 145];
+
+/** Compares the first x.y.z in a CLI's version text; an unknown version counts as recent enough. */
+export function versionAtLeast(version: string | null, minimum: number[]): boolean {
+  const parts = version?.match(/(\d+)\.(\d+)\.(\d+)/)?.slice(1).map(Number);
+  if (!parts) return true;
+  for (let i = 0; i < minimum.length; i += 1) {
+    const a = parts[i] ?? 0;
+    const b = minimum[i] ?? 0;
+    if (a !== b) return a > b;
+  }
+  return true;
 }
 
 async function resolveCwd(requested: string | undefined, fallback: string): Promise<string> {
@@ -39,6 +55,12 @@ export class SessionManager extends EventEmitter {
   constructor(private readonly options: ManagerOptions) {
     super();
     options.host.on('change', () => this.emit('change'));
+    options.host.on('limits', () => this.emit('limits'));
+  }
+
+  /** Plan usage per vendor account, from the sessions' status lines. */
+  limits(): AccountLimits[] {
+    return this.options.host.limits();
   }
 
   async create(opts: LaunchOptions): Promise<SessionInfo> {
@@ -54,7 +76,10 @@ export class SessionManager extends EventEmitter {
       install = selected;
     }
 
-    const spec = await buildLaunch(opts, install, cwd);
+    // Claude reports its status through hooks and its status line; the relay
+    // proves which session it speaks for with this token.
+    const hookToken = opts.vendor === 'claude' ? randomBytes(24).toString('base64url') : null;
+    const spec = await buildLaunch(opts, install, cwd, hookToken ? { port: this.options.host.port, token: hookToken } : undefined);
     try {
       return await this.options.host.spawn({
         vendor: opts.vendor,
@@ -72,6 +97,8 @@ export class SessionManager extends EventEmitter {
         cliVersion: install.version,
         vendorSessionId: spec.vendorSessionId,
         tempPaths: spec.tempPaths,
+        hookToken,
+        agentsCommand: opts.vendor === 'claude' && versionAtLeast(install.version, AGENTS_JSON_SINCE) ? { file: install.file, args: [...install.args, 'agents', '--json'] } : null,
       });
     } catch (error) {
       // The host refused it, so nothing reads the temporary files. After a

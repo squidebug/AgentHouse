@@ -6,6 +6,7 @@ import { api } from './api/client';
 import { useEnv, useSessions } from './api/hooks';
 import { Composer } from './components/Composer';
 import { CopyCommand } from './components/CopyCommand';
+import { statusText } from './components/Details';
 import { LaunchDialog } from './components/LaunchDialog';
 import { PaneGrid } from './components/PaneGrid';
 import { SessionTree } from './components/SessionTree';
@@ -19,7 +20,7 @@ export function App() {
   const { mode, systemMode, setMode } = useColorScheme();
   const resolved: ThemeMode = (mode === 'system' ? systemMode : mode) === 'dark' ? 'dark' : 'light';
   const { env, loading: envLoading, refresh: refreshEnv } = useEnv();
-  const { sessions, connected, loaded } = useSessions();
+  const { sessions, limits, connected, loaded } = useSessions();
 
   // Sessions launched from this tab, until the live list includes them.
   const [launched, setLaunched] = useState<Record<string, SessionInfo>>({});
@@ -55,6 +56,27 @@ export function App() {
     dispatch({ type: 'sync', sessionIds: [...byId.keys()], runningIds: [...byId.values()].filter((s) => s.state === 'running').map((s) => s.id) });
   }, [byId, loaded]);
 
+  // Sessions waiting for an approval or an answer: counted in the tab title, and
+  // announced by a notification while the tab is in the background.
+  const asking = useMemo(() => sessions.filter((s) => s.status.value === 'awaiting_permission' || s.status.value === 'awaiting_input'), [sessions]);
+  useEffect(() => {
+    document.title = asking.length ? `(${asking.length}) ${t.appName}` : t.appName;
+  }, [asking.length]);
+  const announced = useRef(new Map<string, number>());
+  useEffect(() => {
+    for (const session of asking) {
+      if (announced.current.get(session.id) === session.status.at) continue;
+      announced.current.set(session.id, session.status.at);
+      if (document.visibilityState === 'visible' || typeof Notification === 'undefined' || Notification.permission !== 'granted') continue;
+      const note = new Notification(session.title, { body: statusText(session.status), tag: session.id });
+      note.onclick = () => {
+        window.focus();
+        dispatch({ type: 'open', sessionId: session.id });
+        note.close();
+      };
+    }
+  }, [asking]);
+
   const dnd = makeDnd(state, dispatch, ctxRef.current);
   const activePane = state.panes.find((p) => p.id === state.active);
   const activeSession = activePane ? byId.get(activePane.sessionId) : undefined;
@@ -71,7 +93,7 @@ export function App() {
       onDragEnd={() => dispatch({ type: 'dragEnd' })}
       sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', bgcolor: v.bg, color: v.on }}
     >
-      <TopBar env={env} envLoading={envLoading} refreshEnv={() => refreshEnv().catch(() => {})} mode={resolved} onToggleMode={() => setMode(resolved === 'dark' ? 'light' : 'dark')} />
+      <TopBar limits={limits} env={env} envLoading={envLoading} refreshEnv={() => refreshEnv().catch(() => {})} mode={resolved} onToggleMode={() => setMode(resolved === 'dark' ? 'light' : 'dark')} />
 
       {(!connected || noCli) && (
         <Box role="status" sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1.5, m: '12px 16px 0', p: '10px 14px', borderRadius: '12px', bgcolor: v.warnContainer, color: v.onWarnContainer }}>
@@ -112,6 +134,8 @@ export function App() {
         onLaunched={(session) => {
           setLaunched((current) => ({ ...current, [session.id]: session }));
           dispatch({ type: 'openNew', sessionId: session.id });
+          // Asked once, right after the user starts a session: approval requests notify from then on.
+          if (typeof Notification !== 'undefined' && Notification.permission === 'default') Notification.requestPermission().catch(() => {});
         }}
       />
 

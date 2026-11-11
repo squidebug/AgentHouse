@@ -9,6 +9,8 @@ import {
   type CliInstall,
   type LaunchOptions,
 } from '@agenthouse/protocol';
+import { relayPath } from '../relay/path';
+import { userStatusLine } from './claude-settings';
 
 export class LaunchError extends Error {
   constructor(
@@ -45,6 +47,50 @@ function model(value: string | undefined): string | undefined {
   return value;
 }
 
+/** Where the relay delivers a session's hook events and status line: the session host. */
+export interface ObserveTarget {
+  port: number;
+  token: string;
+}
+
+// Every event the status reducer and the sub-agent tree use. All run async, so
+// Claude never waits for AgentHouse.
+export const HOOK_EVENTS = [
+  'SessionStart',
+  'SessionEnd',
+  'UserPromptSubmit',
+  'PreToolUse',
+  'PostToolUse',
+  'PermissionRequest',
+  'Notification',
+  'Stop',
+  'SubagentStart',
+  'SubagentStop',
+];
+
+// Claude runs hook and status line commands with Git Bash on Windows and sh
+// elsewhere; single quotes keep every character of a path literal in both.
+function shellQuote(value: string): string {
+  return `'${value.replace(/\\/g, '/').replace(/'/g, "'\\''")}'`;
+}
+
+/**
+ * Hooks and a status line that pass everything to the session host through the
+ * relay. The user's own status line keeps showing: the relay runs it.
+ */
+async function observeSettings(dir: string, target: ObserveTarget, cwd: string): Promise<Record<string, unknown>> {
+  const userLine = userStatusLine(cwd);
+  const configPath = path.join(dir, 'relay.json');
+  const config = { port: target.port, token: target.token, ...(userLine ? { statusCommand: userLine.command } : {}) };
+  await writeFile(configPath, JSON.stringify(config), { mode: 0o600 });
+  const relay = (mode: 'hook' | 'status') => [process.execPath, relayPath(), mode, configPath].map(shellQuote).join(' ');
+  const hook = [{ hooks: [{ type: 'command', command: relay('hook'), async: true, timeout: 3 }] }];
+  return {
+    statusLine: { type: 'command', command: relay('status'), ...(userLine?.padding !== undefined ? { padding: userLine.padding } : {}) },
+    hooks: Object.fromEntries(HOOK_EVENTS.map((name) => [name, hook])),
+  };
+}
+
 export function sessionTitle(title: string | undefined, cwd: string): string {
   const clean = (title ?? '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 80);
   return clean || path.basename(cwd) || cwd;
@@ -58,6 +104,7 @@ export async function buildLaunch(
   opts: LaunchOptions,
   install: Pick<CliInstall, 'file' | 'args'>,
   cwd: string,
+  observe?: ObserveTarget,
 ): Promise<LaunchSpec> {
   const title = sessionTitle(opts.title, cwd);
   const args = [...install.args];
@@ -75,14 +122,17 @@ export async function buildLaunch(
     if (mode) args.push('--permission-mode', mode);
 
     const tempPaths: string[] = [];
-    if (opts.theme) {
+    if (opts.theme || observe) {
+      const dir = await mkdtemp(path.join(os.tmpdir(), 'agenthouse-'));
+      tempPaths.push(dir);
+      const settings: Record<string, unknown> = {};
       // Windows' ConPTY never forwards background-color queries, so Claude's
       // theme detection cannot see the app theme; tell it directly instead.
-      const dir = await mkdtemp(path.join(os.tmpdir(), 'agenthouse-'));
+      if (opts.theme) settings.theme = opts.theme;
+      if (observe) Object.assign(settings, await observeSettings(dir, observe, cwd));
       const settingsPath = path.join(dir, 'settings.json');
-      await writeFile(settingsPath, JSON.stringify({ theme: opts.theme }));
+      await writeFile(settingsPath, JSON.stringify(settings));
       args.push('--settings', settingsPath);
-      tempPaths.push(dir);
     }
     return { file: install.file, args, title, vendorSessionId, tempPaths };
   }

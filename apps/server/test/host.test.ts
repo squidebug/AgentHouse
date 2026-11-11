@@ -46,6 +46,8 @@ function fakeSpec(tempPaths: string[] = []): SpawnSpec {
     cliVersion: null,
     vendorSessionId: null,
     tempPaths,
+    hookToken: null,
+    agentsCommand: null,
   };
 }
 
@@ -105,6 +107,62 @@ describe('session host', () => {
       assert.equal(allowed.status, 101);
       allowed.ws?.close();
     } finally {
+      await host.close();
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  test('hook events set the status; the composer leaves a session waiting for approval alone', async () => {
+    const stateDir = await tempStateDir();
+    const host = await createSessionHost({ stateDir, idleExitMs: null });
+    const client = await HostClient.connect({ stateDir, spawn: false });
+    try {
+      const info = await client.spawn({ ...fakeSpec(), vendor: 'claude', hookToken: 'hook-secret' });
+      const post = (route: string, body: object, headers: Record<string, string> = {}) =>
+        request(client.port, 'POST', route, { headers: { authorization: 'Bearer hook-secret', ...headers }, body });
+      const statusOf = () => client.get(info.id)?.status;
+
+      assert.equal((await post('/hook', {}, { authorization: 'Bearer wrong' })).status, 401, 'wrong token');
+      assert.equal((await post('/hook', {}, { origin: 'http://127.0.0.1:7357' })).status, 401, 'never a browser');
+
+      await post('/hook', { hook_event_name: 'SessionStart', source: 'startup', session_id: 'cli-session-1' });
+      assert.ok(await waitFor(() => statusOf()?.value === 'idle', 2000), 'started');
+      assert.equal(client.get(info.id)?.telemetry.level, 'full');
+      assert.equal(client.get(info.id)?.vendorSessionId, 'cli-session-1');
+
+      const terminal = client.openTerminal(info.id);
+      const messages: Socket['messages'] = [];
+      terminal.on('message', (raw) => messages.push(JSON.parse(raw.toString())));
+      await waitFor(() => plain(screenText(messages)).includes('fake-agent ready'), 5000);
+
+      await post('/hook', { hook_event_name: 'UserPromptSubmit' });
+      await post('/hook', { hook_event_name: 'PreToolUse', tool_name: 'Write' });
+      await post('/hook', { hook_event_name: 'PermissionRequest', tool_name: 'Write' });
+      assert.ok(await waitFor(() => statusOf()?.value === 'awaiting_permission', 2000), 'waiting for approval');
+      assert.equal(statusOf()?.reason, 'Write');
+      const refused = await client.compose(info.id, { text: 'must not answer the dialog', enterDelayMs: 50, quietMs: 50 });
+      assert.deepEqual(refused, { sent: false, submitted: false, reason: 'awaiting_permission' });
+
+      await post('/hook', { hook_event_name: 'PostToolUse', tool_name: 'Write' });
+      await post('/hook', { hook_event_name: 'Stop' });
+      assert.ok(await waitFor(() => statusOf()?.value === 'idle', 2000), 'turn over');
+      const sent = await client.compose(info.id, { text: 'now it can go', enterDelayMs: 50, quietMs: 50 });
+      assert.deepEqual(sent, { sent: true, submitted: true });
+      assert.ok(await waitFor(() => screenText(messages).includes('now it can go'), 3000));
+      assert.ok(!screenText(messages).includes('must not answer'), 'the refused text never reached the CLI');
+      terminal.close();
+
+      await post('/status', {
+        model: { display_name: 'Haiku 5.5' },
+        effort: { level: 'low' },
+        context_window: { used_percentage: 4, context_window_size: 200000 },
+        rate_limits: { five_hour: { used_percentage: 13, resets_at: 1794388800 } },
+      });
+      assert.ok(await waitFor(() => client.limits().length === 1, 2000), 'plan limits reported');
+      assert.deepEqual(client.limits()[0]?.fiveHour, { usedPct: 13, resetsAt: 1794388800000 });
+      assert.ok(await waitFor(() => client.get(info.id)?.telemetry.contextPct === 4, 2000), 'context use reported');
+    } finally {
+      client.close();
       await host.close();
       await rm(stateDir, { recursive: true, force: true });
     }

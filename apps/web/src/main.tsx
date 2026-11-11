@@ -20,6 +20,9 @@ const globalStyles = {
   '.ah-grip': { opacity: 0, transition: 'opacity .12s', color: 'var(--ah-on-2)' },
   '.ah-row:hover .ah-grip, .ah-phead:hover .ah-grip': { opacity: 0.7 },
   '.xterm .xterm-viewport': { backgroundColor: 'transparent !important' },
+  '@keyframes ah-pulse': { '0%, 100%': { opacity: 1 }, '50%': { opacity: 0.35 } },
+  '.ah-working': { animation: 'ah-pulse 1.6s ease-in-out infinite' },
+  '@media (prefers-reduced-motion: reduce)': { '.ah-working': { animation: 'none' } },
 } as const;
 
 const root = document.getElementById('root');

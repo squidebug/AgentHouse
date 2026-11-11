@@ -56,7 +56,7 @@ process.stdin.on('data', (chunk) => {
       }
     }, 50);
   }
-  if (rest.includes('exit')) {
+  if (rest.includes('exit') || rest.includes('\x03')) {
     grandchild.kill();
     out('bye\r\n');
     process.exit(0);

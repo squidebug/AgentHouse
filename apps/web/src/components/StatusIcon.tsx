@@ -1,19 +1,23 @@
-import type { SessionInfo } from '@agenthouse/protocol';
-import { t } from '../strings';
+import type { SessionStatus } from '@agenthouse/protocol';
 import { v } from '../theme/tokens';
+import { statusText } from './Details';
 
 /**
- * M1 knows only whether the CLI process runs. Working / waiting-for-approval /
- * idle arrive with hook telemetry (M4) and replace the neutral dot.
+ * Color is kept for what needs attention: working is primary (pulsing),
+ * waiting for approval or input is amber with a halo, an error is red; idle is
+ * a quiet dot and an ended session a ring. The label carries the same meaning.
  */
-export function StatusIcon({ state, size = 14 }: { state: SessionInfo['state']; size?: number }) {
-  const label = state === 'running' ? t.running : t.exited;
+export function StatusIcon({ status, size = 14 }: { status: SessionStatus; size?: number }) {
+  const value = status.value;
+  const asking = value === 'awaiting_permission' || value === 'awaiting_input';
+  const color = status.error ? v.error : asking ? v.warn : value === 'working' ? v.primary : v.on2;
   return (
-    <svg role="img" aria-label={label} width={size} height={size} viewBox="0 0 16 16" style={{ flex: 'none' }}>
-      {state === 'running' ? (
-        <circle cx="8" cy="8" r="4.5" style={{ fill: v.on2 }} />
+    <svg role="img" aria-label={statusText(status)} width={size} height={size} viewBox="0 0 16 16" style={{ flex: 'none' }}>
+      {asking && <circle cx="8" cy="8" r="7" style={{ fill: v.warnContainer }} />}
+      {value === 'exited' || value === 'starting' ? (
+        <circle cx="8" cy="8" r="4.5" style={{ fill: 'none', stroke: color, strokeWidth: 1.8, opacity: value === 'starting' ? 0.6 : 1 }} />
       ) : (
-        <circle cx="8" cy="8" r="4.5" style={{ fill: 'none', stroke: v.on2, strokeWidth: 1.8 }} />
+        <circle className={value === 'working' ? 'ah-working' : undefined} cx="8" cy="8" r="4.5" style={{ fill: color }} />
       )}
     </svg>
   );

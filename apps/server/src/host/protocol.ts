@@ -1,10 +1,10 @@
-import type { ComposeRequest, SessionInfo, SessionVendor, ThemeMode } from '@agenthouse/protocol';
+import type { AccountLimits, ComposeRequest, SessionInfo, SessionVendor, ThemeMode } from '@agenthouse/protocol';
 
 /**
  * Web server ↔ session host. Bump when either side could misread the other:
  * a web server only talks to a host of its own protocol version.
  */
-export const HOST_PROTOCOL = 1;
+export const HOST_PROTOCOL = 2;
 
 /** Written by the host once it listens: how web servers find it and prove they may use it. */
 export interface HostState {
@@ -33,6 +33,10 @@ export interface SpawnSpec {
   vendorSessionId: string | null;
   /** Temporary files the CLI reads while it runs (e.g. a settings file); removed when it ends. */
   tempPaths: string[];
+  /** Secret the CLI's hook relay presents on /hook and /status; null when it has none. */
+  hookToken: string | null;
+  /** How to run `claude agents --json` for this CLI install; null when it has no such command. */
+  agentsCommand: { file: string; args: string[] } | null;
 }
 
 export interface CloseResult {
@@ -53,10 +57,15 @@ export type HostRequest =
   | { id: number; op: 'compose'; sessionId: string; request: ComposeRequest }
   | { id: number; op: 'shutdown' };
 
-/** Host → web server on /control. */
+/**
+ * Host → web server on /control. Besides /control and /terminal (web server,
+ * host token), the host takes POST /hook and /status from the CLIs' relays
+ * (per-session hook token).
+ */
 export type HostMessage =
-  | { type: 'hello'; protocol: number; pid: number; webToken: string; sessions: SessionInfo[] }
+  | { type: 'hello'; protocol: number; pid: number; webToken: string; sessions: SessionInfo[]; limits: AccountLimits[] }
   | { type: 'sessions'; sessions: SessionInfo[] }
+  | { type: 'limits'; limits: AccountLimits[] }
   | { type: 'reply'; id: number; ok: true; result: unknown }
   | { type: 'reply'; id: number; ok: false; error: string; code?: string };
 

@@ -28,6 +28,48 @@ export interface SessionExit {
   at: number;
 }
 
+/** `running`: the process runs but reports no turns (no hooks: Codex until M8, hooks blocked by policy). */
+export type StatusValue = 'starting' | 'running' | 'idle' | 'working' | 'awaiting_permission' | 'awaiting_input' | 'exited';
+
+/** What the agent is doing, from confirmed signals only (hooks, the process exiting). */
+export interface SessionStatus {
+  value: StatusValue;
+  /** Short reason: the tool waiting for approval, `interrupted`, `cleared`, an error kind. */
+  reason: string | null;
+  /** The tool running right now, when known. */
+  tool: string | null;
+  /** The last turn ended with an error (e.g. a rate limit). */
+  error: boolean;
+  at: number;
+}
+
+/** Live numbers from the CLI's status line. */
+export interface SessionTelemetry {
+  /** `full` once the CLI's hooks report in; `minimal` before that or for CLIs without them. */
+  level: 'full' | 'minimal';
+  model: string | null;
+  /** The effort the CLI actually applies. */
+  effort: string | null;
+  contextPct: number | null;
+  contextWindow: number | null;
+  /** API-priced cost of the session so far; secondary for subscription users. */
+  costUsd: number | null;
+}
+
+export interface RateWindow {
+  usedPct: number;
+  /** Epoch milliseconds. */
+  resetsAt: number | null;
+}
+
+/** Plan usage of one vendor account: the latest any of its sessions reported. */
+export interface AccountLimits {
+  vendor: Vendor;
+  fiveHour: RateWindow | null;
+  sevenDay: RateWindow | null;
+  at: number;
+}
+
 export interface SessionInfo {
   id: string;
   vendor: SessionVendor;
@@ -45,6 +87,8 @@ export interface SessionInfo {
   startedAt: number;
   state: 'running' | 'exited';
   exit: SessionExit | null;
+  status: SessionStatus;
+  telemetry: SessionTelemetry;
 }
 
 export interface CliInstall {

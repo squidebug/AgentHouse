@@ -4,7 +4,7 @@ import { t } from '../strings';
 import { v } from '../theme/tokens';
 import type { Dnd } from '../workspace/dnd';
 import { MAX_PANES, type Action, type Pane, type WorkspaceState } from '../workspace/state';
-import { Details, modelLabel, sessionDetails } from './Details';
+import { Details, SessionSubtitle, sessionDetails } from './Details';
 import { ChevronIcon, CloseIcon, Grip, PlusIcon } from './icons';
 import { StatusIcon } from './StatusIcon';
 import { TerminalView } from './TerminalView';
@@ -134,7 +134,7 @@ function PaneView({ pane, session, state, dispatch, dnd, mode, windowsBuild }: P
         sx={{ display: 'flex', alignItems: 'center', gap: '10px', p: '10px 8px 8px 10px', cursor: 'grab' }}
       >
         <Grip className="ah-grip" />
-        <StatusIcon state={session.state} />
+        <StatusIcon status={session.status} />
         <ButtonBase
           onClick={() => dispatch({ type: 'focus', paneId: pane.id })}
           sx={{ flex: 1, minWidth: 0, flexDirection: 'column', alignItems: 'flex-start', textAlign: 'left', borderRadius: '6px' }}
@@ -142,9 +142,7 @@ function PaneView({ pane, session, state, dispatch, dnd, mode, windowsBuild }: P
           <Typography noWrap sx={{ maxWidth: '100%', fontSize: 14, lineHeight: '20px', fontWeight: 600 }}>
             {session.title}
           </Typography>
-          <Typography noWrap sx={{ maxWidth: '100%', fontSize: 12, lineHeight: '16px', color: v.on2 }}>
-            {modelLabel(session)}
-          </Typography>
+          <SessionSubtitle session={session} />
         </ButtonBase>
         {session.state === 'exited' && (
           <Box component="span" sx={{ flex: 'none', height: 26, px: 1.25, display: 'inline-flex', alignItems: 'center', borderRadius: '8px', bgcolor: v.surface2, fontSize: 12 }}>

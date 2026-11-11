@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import WebSocket from 'ws';
-import type { ComposeRequest, SessionInfo } from '@agenthouse/protocol';
+import type { AccountLimits, ComposeRequest, SessionInfo } from '@agenthouse/protocol';
 import { childEnv } from '../sessions/env';
 import { isAlive } from '../util/kill-tree';
 import {
@@ -138,6 +138,7 @@ export class HostClient extends EventEmitter {
   readonly webToken: string;
   private link: Link;
   private list: SessionInfo[];
+  private limitList: AccountLimits[];
   private up = true;
   private closed = false;
   private nextId = 1;
@@ -150,6 +151,7 @@ export class HostClient extends EventEmitter {
     super();
     this.link = link;
     this.list = link.hello.sessions;
+    this.limitList = link.hello.limits;
     this.webToken = options.webToken ?? link.hello.webToken;
     this.bind(link.ws);
   }
@@ -160,6 +162,15 @@ export class HostClient extends EventEmitter {
 
   get pid(): number {
     return this.link.state.pid;
+  }
+
+  /** Where the CLIs' hook relays reach the host. */
+  get port(): number {
+    return this.link.state.port;
+  }
+
+  limits(): AccountLimits[] {
+    return this.limitList;
   }
 
   get connected(): boolean {
@@ -227,6 +238,9 @@ export class HostClient extends EventEmitter {
       if (message.type === 'sessions') {
         this.list = message.sessions;
         this.emit('change');
+      } else if (message.type === 'limits') {
+        this.limitList = message.limits;
+        this.emit('limits');
       } else if (message.type === 'reply') {
         const waiting = this.pending.get(message.id);
         if (!waiting) return;
@@ -266,9 +280,11 @@ export class HostClient extends EventEmitter {
       }
       this.link = link;
       this.list = link.hello.sessions;
+      this.limitList = link.hello.limits;
       this.up = true;
       this.bind(link.ws);
       this.emit('change');
+      this.emit('limits');
       return;
     }
   }

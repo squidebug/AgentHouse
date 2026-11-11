@@ -7,6 +7,7 @@ import { v } from '../theme/tokens';
 import type { Dnd } from '../workspace/dnd';
 import type { Action, WorkspaceState } from '../workspace/state';
 import { CloseIcon, SendIcon } from './icons';
+import { StatusIcon } from './StatusIcon';
 
 interface Props {
   state: WorkspaceState;
@@ -33,10 +34,17 @@ export function Composer({ state, dispatch, dnd, sessionById, activeSession }: P
     if (!text || !recipients.length || sending) return;
     setSending(true);
     const results = await Promise.allSettled(recipients.map((s) => api.compose(s.id, { text: draft })));
-    const ok = results.filter((r) => r.status === 'fulfilled' && r.value.sent).length;
-    const failed = results.length - ok;
-    setNotice([ok ? t.sentTo(ok) : '', failed ? t.failedFor(failed) : ''].filter(Boolean).join(' · '));
-    if (ok) setDraft('');
+    let sent = 0;
+    let held = 0;
+    for (const result of results) {
+      if (result.status === 'fulfilled' && result.value.submitted) sent += 1;
+      // The session shows a permission or question dialog; the server sent nothing that could answer it.
+      else if (result.status === 'fulfilled' && (result.value.reason === 'awaiting_permission' || result.value.reason === 'awaiting_input')) held += 1;
+    }
+    const failed = results.length - sent - held;
+    setNotice([sent ? t.sentTo(sent) : '', held ? t.heldFor(held) : '', failed ? t.failedFor(failed) : ''].filter(Boolean).join(' · '));
+    // Keep the text while any recipient still has to get it.
+    if (sent && !held && !failed) setDraft('');
     setSending(false);
   };
 
@@ -76,6 +84,7 @@ export function Composer({ state, dispatch, dnd, sessionById, activeSession }: P
               fontWeight: 500,
             }}
           >
+            <StatusIcon status={session.status} size={12} />
             {session.title}
             {!implicit && (
               <IconButton

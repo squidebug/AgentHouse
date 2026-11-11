@@ -3,9 +3,10 @@ import { rm } from 'node:fs/promises';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { WebSocketServer, type WebSocket } from 'ws';
-import type { SessionInfo, TerminalClientMessage } from '@agenthouse/protocol';
+import type { AccountLimits, SessionInfo, TerminalClientMessage, Vendor } from '@agenthouse/protocol';
 import { THEME_COLORS } from '../sessions/colors';
 import { Session } from '../sessions/session';
+import { limitsFrom, type HookEvent, type StatusLineInput } from '../sessions/status';
 import { HOST_PROTOCOL, HostRequestError, type HostMessage, type HostRequest, type SpawnSpec } from './protocol';
 import { clearState, writeState } from './state';
 
@@ -25,11 +26,16 @@ export interface SessionHost {
   close(): Promise<void>;
 }
 
+// Hook events carry tool input and output; a huge one is dropped, not buffered.
+const MAX_EVENT_BYTES = 8 * 1024 * 1024;
+
 function sameSecret(candidate: string, secret: string): boolean {
   const a = Buffer.from(candidate);
   const b = Buffer.from(secret);
   return a.length === b.length && timingSafeEqual(a, b);
 }
+
+const sameWindow = (a: AccountLimits['fiveHour'], b: AccountLimits['fiveHour']) => a?.usedPct === b?.usedPct && a?.resetsAt === b?.resetsAt;
 
 /**
  * The long-lived half of AgentHouse. It owns every PTY and its screen mirror, so
@@ -48,12 +54,28 @@ export async function createSessionHost(options: HostOptions): Promise<SessionHo
     settle = resolve;
   });
 
+  const limits = new Map<Vendor, AccountLimits>();
+  let broadcastTimer: NodeJS.Timeout | undefined;
+
   const list = (): SessionInfo[] => [...sessions.values()].map((s) => s.info());
   const send = (ws: WebSocket, message: HostMessage) => {
     if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(message));
   };
   const broadcast = () => {
+    clearTimeout(broadcastTimer);
+    broadcastTimer = undefined;
     const message: HostMessage = { type: 'sessions', sessions: list() };
+    for (const ws of controls) send(ws, message);
+  };
+  // Status lines and hook events arrive in bursts; one update per burst is enough.
+  const broadcastSoon = () => {
+    broadcastTimer ??= setTimeout(broadcast, 150);
+  };
+  const updateLimits = (vendor: Vendor, update: Omit<AccountLimits, 'vendor'>) => {
+    const previous = limits.get(vendor);
+    limits.set(vendor, { vendor, ...update });
+    if (previous && sameWindow(previous.fiveHour, update.fiveHour) && sameWindow(previous.sevenDay, update.sevenDay)) return;
+    const message: HostMessage = { type: 'limits', limits: [...limits.values()] };
     for (const ws of controls) send(ws, message);
   };
 
@@ -92,6 +114,8 @@ export async function createSessionHost(options: HostOptions): Promise<SessionHo
         permissionMode: spec.permissionMode,
         cliVersion: spec.cliVersion,
         vendorSessionId: spec.vendorSessionId,
+        hookToken: spec.hookToken,
+        agentsCommand: spec.agentsCommand,
         cleanup: removeTemp,
       });
     } catch (error) {
@@ -105,6 +129,7 @@ export async function createSessionHost(options: HostOptions): Promise<SessionHo
       broadcast();
       checkIdle();
     });
+    session.on('status', broadcastSoon);
     broadcast();
     checkIdle();
     return session.info();
@@ -140,7 +165,7 @@ export async function createSessionHost(options: HostOptions): Promise<SessionHo
   const attachControl = (ws: WebSocket) => {
     controls.add(ws);
     clearTimeout(idleTimer);
-    send(ws, { type: 'hello', protocol: HOST_PROTOCOL, pid: process.pid, webToken, sessions: list() });
+    send(ws, { type: 'hello', protocol: HOST_PROTOCOL, pid: process.pid, webToken, sessions: list(), limits: [...limits.values()] });
     ws.on('message', async (raw) => {
       let request: HostRequest;
       try {
@@ -180,9 +205,46 @@ export async function createSessionHost(options: HostOptions): Promise<SessionHo
     ws.on('close', () => session.detach(viewer));
   };
 
-  const server = http.createServer((_req, res) => {
-    res.writeHead(404);
-    res.end();
+  // POST /hook and /status from a session's relay. The hook token picks the
+  // session; browsers (which always send Origin) are refused like on /control.
+  const server = http.createServer((req, res) => {
+    const route = req.method === 'POST' ? req.url : undefined;
+    const bearer = req.headers.authorization?.match(/^Bearer (.+)$/)?.[1];
+    const session =
+      (route === '/hook' || route === '/status') && req.headers.origin === undefined && bearer
+        ? [...sessions.values()].find((s) => s.ownsHookToken(bearer))
+        : undefined;
+    if (!session) {
+      res.writeHead(route === '/hook' || route === '/status' ? 401 : 404);
+      res.end();
+      req.resume();
+      return;
+    }
+    const chunks: Buffer[] = [];
+    let size = 0;
+    req.on('data', (chunk: Buffer) => {
+      size += chunk.length;
+      if (size <= MAX_EVENT_BYTES) chunks.push(chunk);
+    });
+    req.on('end', () => {
+      res.writeHead(size > MAX_EVENT_BYTES ? 413 : 204);
+      res.end();
+      if (size > MAX_EVENT_BYTES) return;
+      let payload: unknown;
+      try {
+        payload = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      } catch {
+        return;
+      }
+      if (!payload || typeof payload !== 'object') return;
+      if (route === '/hook') {
+        session.onHook(payload as HookEvent);
+        return;
+      }
+      session.onStatusLine(payload as StatusLineInput);
+      const update = session.vendor === 'claude' ? limitsFrom(payload as StatusLineInput) : null;
+      if (update) updateLimits('claude', update);
+    });
   });
   const wss = new WebSocketServer({ noServer: true, maxPayload: 8 * 1024 * 1024 });
 
@@ -223,6 +285,7 @@ export async function createSessionHost(options: HostOptions): Promise<SessionHo
     done,
     async close() {
       clearTimeout(idleTimer);
+      clearTimeout(broadcastTimer);
       await closeAll();
       sessions.clear();
       for (const ws of wss.clients) ws.terminate();

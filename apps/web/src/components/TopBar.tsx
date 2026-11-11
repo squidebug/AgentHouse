@@ -1,12 +1,14 @@
 import { Badge, Box, Button, IconButton, Popover, Tooltip, Typography } from '@mui/material';
 import { useState } from 'react';
-import type { EnvReport, ThemeMode } from '@agenthouse/protocol';
+import type { AccountLimits, EnvReport, ThemeMode } from '@agenthouse/protocol';
 import { t } from '../strings';
 import { v } from '../theme/tokens';
 import { CopyCommand } from './CopyCommand';
 import { MoonIcon, PulseIcon, SunIcon } from './icons';
+import { LimitsChip } from './LimitsChip';
 
 interface Props {
+  limits: AccountLimits[];
   env: EnvReport | null;
   envLoading: boolean;
   refreshEnv: () => void;
@@ -16,7 +18,7 @@ interface Props {
 
 const LEVEL_COLOR = { error: v.error, warn: v.warn, info: v.on2 } as const;
 
-export function TopBar({ env, envLoading, refreshEnv, mode, onToggleMode }: Props) {
+export function TopBar({ limits, env, envLoading, refreshEnv, mode, onToggleMode }: Props) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const messages = env?.messages ?? [];
   const attention = messages.some((m) => m.level !== 'info');
@@ -27,6 +29,7 @@ export function TopBar({ env, envLoading, refreshEnv, mode, onToggleMode }: Prop
         {t.appName}
       </Typography>
       <Box sx={{ flex: 1 }} />
+      <LimitsChip limits={limits} />
       <Tooltip title={t.environment}>
         <IconButton aria-label={t.environment} onClick={(event) => setAnchor(event.currentTarget)} sx={{ width: 40, height: 40 }}>
           <Badge variant="dot" color="warning" invisible={!attention}>

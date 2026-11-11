@@ -1,4 +1,4 @@
-import type { SessionInfo, ThemeMode } from './session';
+import type { AccountLimits, SessionInfo, ThemeMode } from './session';
 
 /** Browser → server on /ws/session */
 export type TerminalClientMessage =
@@ -16,7 +16,7 @@ export type TerminalServerMessage =
   | { type: 'exit'; code: number; signal: number | null };
 
 /** Server → browser on /ws/events */
-export type EventServerMessage = { type: 'sessions'; sessions: SessionInfo[] };
+export type EventServerMessage = { type: 'sessions'; sessions: SessionInfo[] } | { type: 'limits'; limits: AccountLimits[] };
 
 export interface ComposeRequest {
   text: string;
@@ -30,6 +30,7 @@ export interface ComposeResult {
   sessionId: string;
   sent: boolean;
   submitted: boolean;
+  /** Why nothing (or no Enter) was sent, e.g. `awaiting_permission`, `exited`. */
   reason?: string;
 }
 

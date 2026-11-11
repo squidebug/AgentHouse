@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { EnvReport, EventServerMessage, SessionInfo } from '@agenthouse/protocol';
+import type { AccountLimits, EnvReport, EventServerMessage, SessionInfo } from '@agenthouse/protocol';
 import { api, socketUrl } from './client';
 
-/** Live session list from /ws/events, reconnecting with backoff while the server restarts. */
-export function useSessions(): { sessions: SessionInfo[]; connected: boolean; loaded: boolean } {
+/** Live sessions and plan usage from /ws/events, reconnecting with backoff while the server restarts. */
+export function useSessions(): { sessions: SessionInfo[]; limits: AccountLimits[]; connected: boolean; loaded: boolean } {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const [limits, setLimits] = useState<AccountLimits[]>([]);
   const [connected, setConnected] = useState(true);
   const [loaded, setLoaded] = useState(false);
 
@@ -25,6 +26,8 @@ export function useSessions(): { sessions: SessionInfo[]; connected: boolean; lo
         if (message.type === 'sessions') {
           setSessions(message.sessions);
           setLoaded(true);
+        } else if (message.type === 'limits') {
+          setLimits(message.limits);
         }
       };
       ws.onclose = () => {
@@ -42,7 +45,7 @@ export function useSessions(): { sessions: SessionInfo[]; connected: boolean; lo
     };
   }, []);
 
-  return { sessions, connected, loaded };
+  return { sessions, limits, connected, loaded };
 }
 
 export function useEnv(): { env: EnvReport | null; refresh: () => Promise<void>; loading: boolean } {

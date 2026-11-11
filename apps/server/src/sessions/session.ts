@@ -1,5 +1,7 @@
-import { randomUUID } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { EventEmitter } from 'node:events';
+import { open } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import pty, { type IPty } from 'node-pty';
 import type { WebSocket } from 'ws';
@@ -9,11 +11,27 @@ import {
   type ComposeRequest,
   type SessionExit,
   type SessionInfo,
+  type SessionStatus,
+  type SessionTelemetry,
   type SessionVendor,
   type TerminalColors,
   type TerminalServerMessage,
 } from '@agenthouse/protocol';
 import { isAlive, killTree } from '../util/kill-tree';
+import {
+  applyAgents,
+  applyHook,
+  applyStatusLine,
+  endsWithInterrupt,
+  exitedStatus,
+  initialStatus,
+  initialTelemetry,
+  interruptedStatus,
+  runningStatus,
+  type AgentsEntry,
+  type HookEvent,
+  type StatusLineInput,
+} from './status';
 
 const require = createRequire(import.meta.url);
 const { Terminal: HeadlessTerminal } = require('@xterm/headless') as typeof import('@xterm/headless');
@@ -25,8 +43,43 @@ const MAX_BUFFERED = 4 * 1024 * 1024;
 const RESYNC_BELOW = 256 * 1024;
 // node-pty flushes the last output for up to 1 s after the process exits.
 const RELEASE_AFTER_EXIT_MS = 1500;
+// Claude's first hook (SessionStart) comes within a few seconds; none by then
+// means hooks are blocked (e.g. by managed policy) and only the terminal is left.
+const FIRST_HOOK_WAIT_MS = 30_000;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// States in which Enter would answer a dialog instead of sending a prompt.
+const ASKING = new Set<SessionStatus['value']>(['awaiting_permission', 'awaiting_input']);
+const BUSY = new Set<SessionStatus['value']>(['working', 'awaiting_permission', 'awaiting_input']);
+
+/** `claude agents --json`; null if it fails (older CLI, timeout). Each call starts the CLI once. */
+function listAgents(command: { file: string; args: string[] }, env: NodeJS.ProcessEnv): Promise<AgentsEntry[] | null> {
+  return new Promise((resolve) => {
+    execFile(command.file, command.args, { env, timeout: 8000, windowsHide: true, maxBuffer: 1024 * 1024 }, (error, stdout) => {
+      if (error) return resolve(null);
+      try {
+        const parsed: unknown = JSON.parse(stdout);
+        resolve(Array.isArray(parsed) ? (parsed as AgentsEntry[]) : null);
+      } catch {
+        resolve(null);
+      }
+    });
+  });
+}
+
+async function readTail(file: string, bytes: number): Promise<string> {
+  const handle = await open(file, 'r');
+  try {
+    const { size } = await handle.stat();
+    const start = Math.max(0, size - bytes);
+    const buffer = Buffer.alloc(size - start);
+    await handle.read(buffer, 0, buffer.length, start);
+    return buffer.toString('utf8');
+  } finally {
+    await handle.close();
+  }
+}
 
 export class Viewer {
   live = false;
@@ -68,6 +121,10 @@ export interface SessionOptions {
   permissionMode: string | null;
   cliVersion: string | null;
   vendorSessionId: string | null;
+  /** Secret the CLI's hook relay presents; null when the CLI reports nothing. */
+  hookToken: string | null;
+  /** How to run `claude agents --json`, which lists its sessions as idle, busy or waiting. */
+  agentsCommand: { file: string; args: string[] } | null;
   cleanup: () => Promise<void>;
 }
 
@@ -84,6 +141,13 @@ export class Session extends EventEmitter {
   rows: number;
   exit: SessionExit | null = null;
   lastOutputAt = 0;
+  status: SessionStatus = initialStatus();
+  telemetry: SessionTelemetry = initialTelemetry();
+  /** Changes on /clear, when the CLI starts a new conversation. */
+  vendorSessionId: string | null;
+  private transcriptPath: string | null = null;
+  private recheckPending = false;
+  private hookWait: NodeJS.Timeout | undefined;
 
   private readonly viewers = new Set<Viewer>();
   private owner: Viewer | null = null;
@@ -95,6 +159,15 @@ export class Session extends EventEmitter {
 
   constructor(private readonly options: SessionOptions) {
     super();
+    this.vendorSessionId = options.vendorSessionId;
+    if (options.hookToken) {
+      this.hookWait = setTimeout(() => {
+        if (this.status.value === 'starting') this.setStatus(runningStatus());
+      }, FIRST_HOOK_WAIT_MS);
+      this.hookWait.unref();
+    } else {
+      this.status = runningStatus();
+    }
     this.cols = options.cols;
     this.rows = options.rows;
     this.colors = new ColorQueryResponder(options.colors);
@@ -134,6 +207,8 @@ export class Session extends EventEmitter {
 
   private handleExit(code: number, signal: number | null): void {
     this.exit = { code, signal, at: Date.now() };
+    this.status = exitedStatus(code, this.exit.at);
+    clearTimeout(this.hookWait);
     clearInterval(this.resyncTimer);
     this.broadcast({ type: 'exit', code, signal });
     this.options.cleanup().catch(() => {});
@@ -231,7 +306,92 @@ export class Session extends EventEmitter {
     // xterm.js in the browser answers terminal queries too; the mirror already did.
     if (isAutoResponse(data)) return false;
     this.pty.write(binary ? Buffer.from(data, 'latin1') : data);
+    // Esc or Ctrl+C during a turn, or any key on an open dialog, can end or
+    // resume the turn without a hook saying so.
+    const cut = data === '\x1b' || data.includes('\x03');
+    if ((cut && BUSY.has(this.status.value)) || ASKING.has(this.status.value)) this.recheckSoon();
     return true;
+  }
+
+  get vendor(): SessionVendor {
+    return this.options.vendor;
+  }
+
+  /** True when a hook relay presents this session's token. */
+  ownsHookToken(candidate: string): boolean {
+    const token = this.options.hookToken;
+    if (!token) return false;
+    const a = Buffer.from(candidate);
+    const b = Buffer.from(token);
+    return a.length === b.length && timingSafeEqual(a, b);
+  }
+
+  private setStatus(next: SessionStatus): void {
+    if (next === this.status) return;
+    this.status = next;
+    this.emit('status', this);
+  }
+
+  /** One hook event from the CLI's relay. */
+  onHook(event: HookEvent): void {
+    if (this.exit) return;
+    clearTimeout(this.hookWait);
+    if (typeof event.transcript_path === 'string') this.transcriptPath = event.transcript_path;
+    let changed = false;
+    if (event.hook_event_name === 'SessionStart' && typeof event.session_id === 'string' && event.session_id !== this.vendorSessionId) {
+      this.vendorSessionId = event.session_id;
+      changed = true;
+    }
+    if (this.telemetry.level !== 'full') {
+      this.telemetry = { ...this.telemetry, level: 'full' };
+      changed = true;
+    }
+    const next = applyHook(this.status, event);
+    if (next !== this.status) this.status = next;
+    else if (!changed) return;
+    this.emit('status', this);
+  }
+
+  /** The CLI's status line input: model, effort, context use, cost. */
+  onStatusLine(line: StatusLineInput): void {
+    if (this.exit) return;
+    const next = applyStatusLine(this.telemetry, line);
+    if (JSON.stringify(next) === JSON.stringify(this.telemetry)) return;
+    this.telemetry = next;
+    this.emit('status', this);
+  }
+
+  /**
+   * No hook fires when a turn is interrupted (Esc, Ctrl+C) or a permission is
+   * denied with Esc. Claude then writes an interrupt marker to the transcript,
+   * and `claude agents --json` shows the session idle. Esc may also just close a
+   * menu, so these decide, not the key. A newer hook event wins over a recheck.
+   */
+  private recheckSoon(): void {
+    if (this.recheckPending) return;
+    this.recheckPending = true;
+    const since = this.status.at;
+    setTimeout(() => {
+      this.recheck(since)
+        .catch(() => {})
+        .finally(() => {
+          this.recheckPending = false;
+        });
+    }, 1000).unref();
+  }
+
+  private async recheck(since: number): Promise<void> {
+    const stale = () => this.exit || this.status.at !== since || !BUSY.has(this.status.value);
+    if (stale()) return;
+    if (this.transcriptPath && endsWithInterrupt(await readTail(this.transcriptPath, 64 * 1024))) {
+      if (!stale()) this.setStatus(interruptedStatus());
+      return;
+    }
+    const command = this.options.agentsCommand;
+    if (!command) return;
+    const entries = await listAgents(command, this.options.env);
+    const mine = entries?.find((e) => e.pid === this.pid || (this.vendorSessionId !== null && e.sessionId === this.vendorSessionId));
+    if (mine && !stale()) this.setStatus(applyAgents(this.status, mine));
   }
 
   setColors(colors: TerminalColors): void {
@@ -250,14 +410,16 @@ export class Session extends EventEmitter {
    */
   async compose({ text, bracketed = true, enterDelayMs = 150, quietMs = 120, submit = true }: ComposeRequest) {
     if (this.exit) return { sent: false, submitted: false, reason: 'exited' };
+    // A permission or question dialog is open: typed text and Enter would answer it.
+    if (ASKING.has(this.status.value)) return { sent: false, submitted: false, reason: this.status.value };
     const payload = text.replace(/\r\n?|\n/g, '\r');
     this.pty.write(bracketed ? `\x1b[200~${payload}\x1b[201~` : payload);
     if (!submit) return { sent: true, submitted: false };
     await sleep(enterDelayMs);
     await this.waitForQuiet(quietMs, 2000);
     if (this.exit) return { sent: true, submitted: false, reason: 'exited' };
-    // M4/M9: refuse to press Enter while the CLI shows a permission or selection
-    // dialog (Enter could pick "Yes"). Status tracking does not exist yet.
+    // Checked again right before Enter: a dialog may have opened meanwhile.
+    if (ASKING.has(this.status.value)) return { sent: true, submitted: false, reason: this.status.value };
     this.pty.write('\r');
     return { sent: true, submitted: true };
   }
@@ -306,13 +468,15 @@ export class Session extends EventEmitter {
       effort: o.effort,
       permissionMode: o.permissionMode,
       cli: { file: o.file, version: o.cliVersion },
-      vendorSessionId: o.vendorSessionId,
+      vendorSessionId: this.vendorSessionId,
       pid: this.pid,
       cols: this.cols,
       rows: this.rows,
       startedAt: this.startedAt,
       state: this.exit ? 'exited' : 'running',
       exit: this.exit,
+      status: this.status,
+      telemetry: this.telemetry,
     };
   }
 }

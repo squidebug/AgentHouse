@@ -4,7 +4,7 @@ import { t } from '../strings';
 import { v } from '../theme/tokens';
 import type { Dnd } from '../workspace/dnd';
 import type { Action, WorkspaceState } from '../workspace/state';
-import { Details, modelLabel, sessionDetails } from './Details';
+import { Details, SessionSubtitle, sessionDetails } from './Details';
 import { ChevronIcon, Grip, PlusIcon } from './icons';
 import { StatusIcon } from './StatusIcon';
 
@@ -74,7 +74,7 @@ export function SessionTree({ sessions, state, dispatch, dnd, onNew, onEnd, onRe
                   }}
                 >
                   <Grip className="ah-grip" />
-                  <StatusIcon state={session.state} />
+                  <StatusIcon status={session.status} />
                   <ButtonBase
                     onClick={() => dispatch({ type: 'open', sessionId: session.id })}
                     aria-label={`${session.title} 열기`}
@@ -83,9 +83,7 @@ export function SessionTree({ sessions, state, dispatch, dnd, onNew, onEnd, onRe
                     <Typography noWrap sx={{ maxWidth: '100%', fontWeight: 500, color: session.state === 'exited' ? v.on2 : v.on }}>
                       {session.title}
                     </Typography>
-                    <Typography noWrap sx={{ maxWidth: '100%', fontSize: 12, lineHeight: '16px', color: v.on2 }}>
-                      {modelLabel(session)}
-                    </Typography>
+                    <SessionSubtitle session={session} />
                   </ButtonBase>
                   <IconButton
                     aria-label={`${session.title} ${t.details}`}

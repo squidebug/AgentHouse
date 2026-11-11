@@ -139,12 +139,14 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
   const eventClients = new Set<WebSocket>();
   const terminals = new Set<WebSocket>();
 
-  const broadcastSessions = () => {
-    const message: EventServerMessage = { type: 'sessions', sessions: manager.list() };
+  const broadcast = (message: EventServerMessage) => {
     const text = JSON.stringify(message);
     for (const ws of eventClients) if (ws.readyState === ws.OPEN) ws.send(text);
   };
+  const broadcastSessions = () => broadcast({ type: 'sessions', sessions: manager.list() });
+  const broadcastLimits = () => broadcast({ type: 'limits', limits: manager.limits() });
   manager.on('change', broadcastSessions);
+  manager.on('limits', broadcastLimits);
 
   async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
     if (req.method !== 'GET' && !access.originAllowed(req)) throw new HttpError(403, '허용되지 않은 출처입니다.');
@@ -238,8 +240,10 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
       wss.handleUpgrade(req, socket, head, (ws) => {
         eventClients.add(ws);
         ws.on('close', () => eventClients.delete(ws));
-        const message: EventServerMessage = { type: 'sessions', sessions: manager.list() };
-        ws.send(JSON.stringify(message));
+        const sessions: EventServerMessage = { type: 'sessions', sessions: manager.list() };
+        const limits: EventServerMessage = { type: 'limits', limits: manager.limits() };
+        ws.send(JSON.stringify(sessions));
+        ws.send(JSON.stringify(limits));
       });
       return;
     }
@@ -270,6 +274,7 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
     manager,
     async close() {
       manager.off('change', broadcastSessions);
+      manager.off('limits', broadcastLimits);
       for (const ws of eventClients) ws.close();
       for (const ws of terminals) ws.terminate();
       wss.close();
