@@ -168,6 +168,69 @@ describe('session host', () => {
     }
   });
 
+  test('the composer: nothing before the CLI started or into a dialog another call hides; control characters dropped; one text at a time', async () => {
+    const stateDir = await tempStateDir();
+    const host = await createSessionHost({ stateDir, idleExitMs: null });
+    const client = await HostClient.connect({ stateDir, spawn: false });
+    try {
+      const info = await client.spawn({ ...fakeSpec(), vendor: 'claude', hookToken: 'hook-secret' });
+      const hook = (body: object) => request(client.port, 'POST', '/hook', { headers: { authorization: 'Bearer hook-secret' }, body });
+      const statusOf = () => client.get(info.id)?.status;
+      const terminal = client.openTerminal(info.id);
+      const messages: Socket['messages'] = [];
+      terminal.on('message', (raw) => messages.push(JSON.parse(raw.toString())));
+      await waitFor(() => plain(screenText(messages)).includes('fake-agent ready'), 5000);
+      const compose = (text: string, extra: object = {}) => client.compose(info.id, { text, enterDelayMs: 50, quietMs: 50, ...extra });
+
+      // Claude asks whether to trust a new folder before any hook: Enter would pick its default, "No, exit".
+      assert.deepEqual(await compose('too early'), { sent: false, submitted: false, reason: 'starting' });
+      await hook({ hook_event_name: 'SessionStart', source: 'startup', session_id: 'cli-session-2' });
+      assert.ok(await waitFor(() => statusOf()?.value === 'idle', 2000));
+
+      // Two calls in parallel: the one that needs approval asks, the other ends first.
+      const rm_ = { tool_name: 'Bash', tool_input: { command: 'rm -rf build' } };
+      await hook({ hook_event_name: 'UserPromptSubmit' });
+      await hook({ hook_event_name: 'PreToolUse', tool_use_id: 'read-1', tool_name: 'Read', tool_input: { file_path: 'a.txt' } });
+      await hook({ hook_event_name: 'PreToolUse', tool_use_id: 'bash-1', ...rm_ });
+      await hook({ hook_event_name: 'PermissionRequest', ...rm_ });
+      await hook({ hook_event_name: 'PostToolUse', tool_use_id: 'read-1', tool_name: 'Read', tool_input: { file_path: 'a.txt' } });
+      assert.ok(await waitFor(() => statusOf()?.value === 'awaiting_permission', 2000), 'the dialog still shows');
+      assert.deepEqual(await compose('must not answer'), { sent: false, submitted: false, reason: 'awaiting_permission' });
+      await hook({ hook_event_name: 'PostToolUse', tool_use_id: 'bash-1', ...rm_ });
+      await hook({ hook_event_name: 'Stop' });
+      assert.ok(await waitFor(() => statusOf()?.value === 'idle', 2000));
+
+      // Sent at once, they go one after the other; an ESC or Ctrl+C inside never reaches the CLI as a key.
+      const [first, second] = await Promise.all([compose('alpha'), compose('beta\x1b[201~!rm\x03\x15 end')]);
+      assert.deepEqual([first, second], [
+        { sent: true, submitted: true },
+        { sent: true, submitted: true },
+      ]);
+      // The fake agent echoes what it reads as JSON; a paste and its Enter may arrive in one read.
+      const afterBeta = () => {
+        const screen = screenText(messages);
+        return screen.slice(screen.indexOf('beta[201~!rm end'));
+      };
+      assert.ok(await waitFor(() => screenText(messages).includes('beta[201~!rm end') && afterBeta().includes('\\r'), 3000), 'the text without its control characters, then Enter');
+      const screen = screenText(messages);
+      const alpha = screen.indexOf('alpha');
+      assert.ok(alpha !== -1 && screen.slice(alpha, screen.indexOf('beta')).includes('\\r'), "alpha's Enter before beta");
+      assert.ok(!screen.includes('must not answer') && !screen.includes('too early') && !screen.includes('\\u0003'));
+
+      // Enter alone, for text that went in before.
+      const count = (needle: string) => screenText(messages).split(needle).length - 1;
+      const [enters, pastes] = [count('IN "\\r"'), count('[200~')];
+      assert.deepEqual(await compose('', { enterOnly: true }), { sent: true, submitted: true });
+      assert.ok(await waitFor(() => count('IN "\\r"') === enters + 1, 2000), 'one Enter');
+      assert.equal(count('[200~'), pastes, 'nothing pasted');
+      terminal.close();
+    } finally {
+      client.close();
+      await host.close();
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
+
   test('a host started on demand runs sessions on its own and leaves when idle', async () => {
     const stateDir = await tempStateDir();
     const tempDir = await mkdtemp(path.join(os.tmpdir(), 'agenthouse-temp-'));

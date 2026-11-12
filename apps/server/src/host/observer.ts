@@ -8,6 +8,7 @@ import {
   applyAgents,
   applyHook,
   applyStatusLine,
+  Dialogs,
   endsWithInterrupt,
   exitedStatus,
   initialStatus,
@@ -82,6 +83,19 @@ export class Observer extends EventEmitter {
   /** Something the user sent to the CLI from a terminal. */
   typed(_data: string): void {}
 
+  /**
+   * Whether text and Enter may go to the CLI now. Without hooks nothing tells
+   * of a dialog, so only an exited CLI or a known dialog refuses.
+   */
+  acceptsInput(): boolean {
+    return this.status.value !== 'exited' && !isAsking(this.status.value);
+  }
+
+  /** Asks the CLI itself whether it waits for the user, when it can tell: the status it waits in, else null. */
+  async waiting(): Promise<StatusValue | null> {
+    return null;
+  }
+
   /** The process ended; nothing changes the status after this. */
   exited(code: number, at: number): void {
     this.status = exitedStatus(code, at);
@@ -116,6 +130,8 @@ export class ClaudeObserver extends Observer {
    * one of them opens in the terminal shows in the session's status.
    */
   private main: SessionStatus;
+  /** Dialogs of the main conversation, apart from `main`: a call ending next to one that asks must not hide it. */
+  private readonly dialogs = new Dialogs();
   private readonly tracker: AgentTracker;
   private askShown: { ask: AgentAsk; status: SessionStatus } | null = null;
 
@@ -158,11 +174,41 @@ export class ClaudeObserver extends Observer {
     }
     if (this.tracker.onHook(event, at)) changed = true;
     const fromAgent = typeof event.agent_id === 'string' && event.agent_id !== '';
-    if (!fromAgent) this.main = applyHook(this.main, event, at);
+    if (!fromAgent) {
+      this.main = applyHook(this.main, event, at);
+      this.dialogs.onHook(event, at);
+    }
     const shown = this.shown();
     if (shown !== this.status) this.status = shown;
     else if (!changed) return;
     this.emit('change');
+  }
+
+  /**
+   * Text and Enter go only to a session that has started (its first hook;
+   * the folder trust question comes before any) and shows no dialog: they
+   * would answer it.
+   */
+  acceptsInput(): boolean {
+    return this.status.value === 'idle' || this.status.value === 'working';
+  }
+
+  /** `claude agents --json` on whether this session waits for the user; null when it does not or cannot tell. */
+  async waiting(): Promise<StatusValue | null> {
+    const command = this.options.agentsCommand;
+    if (!command || this.done) return null;
+    const mine = this.mine(await listAgents(command, this.options.env));
+    if (mine?.status !== 'waiting') return null;
+    return applyAgents(this.main, mine).value;
+  }
+
+  private mine(entries: AgentsEntry[] | null): AgentsEntry | undefined {
+    return entries?.find((e) => e.pid === this.options.pid || (this.vendorSessionId !== null && e.sessionId === this.vendorSessionId));
+  }
+
+  /** The main conversation as it stands: a dialog it has open comes first. */
+  private mainNow(): SessionStatus {
+    return this.main.value === 'exited' ? this.main : (this.dialogs.current() ?? this.main);
   }
 
   /** The sub-agent status line's input: its tasks, with model and tokens. */
@@ -173,10 +219,11 @@ export class ClaudeObserver extends Observer {
 
   /** The main conversation's status, unless a sub-agent's dialog waits for the user. */
   private shown(): SessionStatus {
+    const main = this.mainNow();
     const ask = this.tracker.asking();
-    if (!ask || isAsking(this.main.value) || this.main.value === 'exited') {
+    if (!ask || isAsking(main.value) || main.value === 'exited') {
       this.askShown = null;
-      return this.main;
+      return main;
     }
     if (this.askShown?.ask !== ask) {
       const value: StatusValue = ask.kind === 'permission' ? 'awaiting_permission' : 'awaiting_input';
@@ -252,23 +299,28 @@ export class ClaudeObserver extends Observer {
     const stale = () => this.done || this.status.at !== since || !BUSY.has(this.status.value);
     if (stale()) return;
     // A sub-agent's dialog is answered in that agent's transcript; the main one only tells about the main turn.
-    const agentAsks = () => this.tracker.asking() !== null && !isAsking(this.main.value);
+    const agentAsks = () => this.tracker.asking() !== null && !isAsking(this.mainNow().value);
     const transcript = this.transcripts.at(-1)?.path;
     if (!agentAsks() && transcript && endsWithInterrupt(await readTail(transcript, 64 * 1024))) {
-      if (!stale()) this.setMain(interruptedStatus());
+      if (stale()) return;
+      this.dialogs.clear();
+      this.setMain(interruptedStatus());
       return;
     }
     const command = this.options.agentsCommand;
     if (!command) return;
-    const entries = await listAgents(command, this.options.env);
-    const mine = entries?.find((e) => e.pid === this.options.pid || (this.vendorSessionId !== null && e.sessionId === this.vendorSessionId));
+    const mine = this.mine(await listAgents(command, this.options.env));
     if (!mine || stale()) return;
-    if (mine.status !== 'waiting' && agentAsks()) {
-      // The sub-agent's dialog is gone; the main conversation is as it was.
-      this.tracker.clearAsks();
-      this.setStatus(this.shown());
+    if (agentAsks()) {
+      // Waiting means the sub-agent's dialog, never the main conversation's: that is as it was.
+      if (mine.status !== 'waiting') {
+        this.tracker.clearAsks();
+        this.setStatus(this.shown());
+      }
       return;
     }
+    // The CLI no longer waits: whatever dialog was open got its answer in the terminal.
+    if (mine.status !== 'waiting') this.dialogs.clear();
     this.setMain(applyAgents(this.main, mine));
   }
 }

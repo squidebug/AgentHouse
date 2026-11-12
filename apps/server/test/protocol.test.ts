@@ -33,7 +33,7 @@ async function olderHost(stateDir: string, protocol: number, sessions: number) {
   return { received, close: () => new Promise<void>((resolve) => server.close(() => resolve())) };
 }
 
-describe('host protocol 4', () => {
+describe('host protocol', () => {
   test('a session has the id the web server chose, and only once', async () => {
     const stateDir = await tempStateDir();
     const host = await createSessionHost({ stateDir, idleExitMs: null });

@@ -41,7 +41,8 @@ export const t = {
   noIssues: '문제 없음',
   sentTo: (n: number) => `${n}개 세션에 보냄`,
   failedFor: (n: number) => `${n}개 실패`,
-  heldFor: (n: number) => `${n}개는 승인·입력 대기라 보내지 않음`,
+  heldFor: (n: number) => `${n}개 보류`,
+  pastedFor: (n: number) => `${n}개 입력란에 남음`,
   status: {
     starting: '시작 중',
     unobserved: '실행 중',

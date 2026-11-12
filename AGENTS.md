@@ -44,7 +44,7 @@ AgentHouse is three programs plus a browser app. Know which one a file runs in b
 - Never read credential files (`~/.claude/.credentials.json`, `~/.codex/auth.json`); never proxy model traffic.
 - Change a CLI's behaviour only per session (Claude: `--settings`); never edit the user's settings files.
 - The relay prints nothing as a hook, always exits 0, stays fast and has no dependencies.
-- Never type into a dialog: the composer refuses sessions waiting for an approval or an answer.
+- Never type into a dialog: the host takes text only from a CLI that has started (Claude's folder trust question comes before any hook) and shows no dialog; dialogs are tracked apart from the status (`Dialogs` in `claude/status.ts`), and automatic sends (delegation) ask `claude agents --json` first. Text is pasted without control characters, one at a time per session; a held-back Enter is sent again alone, never with the text.
 - node-pty only on the host's main thread.
 - Start programs by absolute path, or after a PATH search that skips empty and relative entries: Windows runs a same-named program from the current folder first.
 - Security problems that plain CLI use also has are environment facts, not AgentHouse bugs; AgentHouse must just not make them worse.

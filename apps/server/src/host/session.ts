@@ -4,7 +4,6 @@ import pty, { type IPty } from 'node-pty';
 import type { WebSocket } from 'ws';
 import {
   ColorQueryResponder,
-  isAsking,
   isAutoResponse,
   type ComposeRequest,
   type SessionExit,
@@ -14,6 +13,7 @@ import {
   type TerminalColors,
   type TerminalServerMessage,
 } from '@agenthouse/protocol';
+import type { ComposeOutcome } from '../shared/host-protocol';
 import { isAlive, killTree } from '../shared/kill-tree';
 import type { Observer } from './observer';
 
@@ -33,6 +33,19 @@ export const DEFAULT_BACKLOG: ViewerBacklog = { max: 4 * 1024 * 1024, resyncBelo
 const RELEASE_AFTER_EXIT_MS = 1500;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// C0 and C1 control characters but tab and line breaks, and DEL.
+const CONTROL = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/g;
+
+/**
+ * Text as it goes into a bracketed paste. Control characters are dropped: an
+ * ESC could end the paste early (the rest would arrive as keys: Enter, Shift+Tab,
+ * `!`), and others act as keys on their own (Ctrl+U, Ctrl+C). The text may be
+ * another agent's answer. Line breaks become the Enter a terminal would send.
+ */
+export function pasteText(text: string): string {
+  return text.replace(CONTROL, '').replace(/\r\n?|\n/g, '\r');
+}
 
 export class Viewer {
   live = false;
@@ -109,6 +122,7 @@ export class Session extends EventEmitter {
   private readonly pty: IPty;
   private readonly resyncTimer: NodeJS.Timeout;
   private readonly backlog: ViewerBacklog;
+  private composing: Promise<unknown> = Promise.resolve();
 
   constructor(private readonly options: SessionOptions) {
     super();
@@ -273,20 +287,36 @@ export class Session extends EventEmitter {
   /**
    * Composer input: paste the whole text, wait until the CLI has settled, then
    * press Enter. Some TUIs treat an Enter that follows a paste too closely as
-   * part of the paste (a newline) instead of "submit".
+   * part of the paste (a newline) instead of "submit". One text at a time per
+   * session, so two never interleave and each sees the status the last one left.
    */
-  async compose({ text, bracketed = true, enterDelayMs = 150, quietMs = 120, submit = true }: ComposeRequest) {
-    if (this.exit) return { sent: false, submitted: false, reason: 'exited' };
-    // A permission or question dialog is open: typed text and Enter would answer it.
-    if (isAsking(this.status.value)) return { sent: false, submitted: false, reason: this.status.value };
-    const payload = text.replace(/\r\n?|\n/g, '\r');
-    this.pty.write(bracketed ? `\x1b[200~${payload}\x1b[201~` : payload);
-    if (!submit) return { sent: true, submitted: false };
-    await sleep(enterDelayMs);
-    await this.waitForQuiet(quietMs, 2000);
-    if (this.exit) return { sent: true, submitted: false, reason: 'exited' };
-    // Checked again right before Enter: a dialog may have opened meanwhile.
-    if (isAsking(this.status.value)) return { sent: true, submitted: false, reason: this.status.value };
+  compose(request: ComposeRequest): Promise<ComposeOutcome> {
+    const outcome = this.composing.then(() => this.composeNow(request));
+    this.composing = outcome.catch(() => undefined);
+    return outcome;
+  }
+
+  private async composeNow({ text, enterDelayMs = 150, quietMs = 120, enterOnly = false, verify = false }: ComposeRequest): Promise<ComposeOutcome> {
+    // `sent`: the text is in the CLI's input. With enterOnly it went in before.
+    const held = (reason: string): ComposeOutcome => ({ sent: enterOnly, submitted: false, reason });
+    if (this.exit) return held('exited');
+    // A dialog is open, or the CLI has not started (Claude's folder trust question): text and Enter would answer it.
+    if (!this.observer.acceptsInput()) return held(this.status.value);
+    if (verify) {
+      // Nobody may be watching: the CLI itself is asked as well, in case a dialog opened unreported.
+      const waiting = await this.observer.waiting();
+      if (waiting) return held(waiting);
+      if (this.exit) return held('exited');
+      if (!this.observer.acceptsInput()) return held(this.status.value);
+    }
+    if (!enterOnly) {
+      this.pty.write(`\x1b[200~${pasteText(text)}\x1b[201~`);
+      await sleep(enterDelayMs);
+      await this.waitForQuiet(quietMs, 2000);
+      // Checked again right before Enter: a dialog may have opened meanwhile.
+      if (this.exit) return { sent: true, submitted: false, reason: 'exited' };
+      if (!this.observer.acceptsInput()) return { sent: true, submitted: false, reason: this.status.value };
+    }
     this.pty.write('\r');
     return { sent: true, submitted: true };
   }
@@ -296,8 +326,8 @@ export class Session extends EventEmitter {
    * running turn, the next ones quit), so the CLI can save its state; only if it
    * is still running after that is its process tree killed.
    */
-  async close({ graceful = true } = {}): Promise<{ exited: boolean; stillAlive: boolean }> {
-    if (!this.exit && graceful && this.options.vendor !== 'fake') {
+  async close(): Promise<{ exited: boolean; stillAlive: boolean }> {
+    if (!this.exit && this.options.vendor !== 'fake') {
       for (let i = 0; i < 3 && !this.exit; i += 1) {
         this.pty.write('\x03');
         const deadline = Date.now() + 700;

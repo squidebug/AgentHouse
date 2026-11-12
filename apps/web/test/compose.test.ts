@@ -20,14 +20,15 @@ const held = (sessionId: string): PromiseSettledResult<ComposeResult> => ({
 });
 
 test('a partial send names who got it, so a resend can leave them out', () => {
-  const outcome = summarizeSend(['a', 'b', 'c'], [ok('a'), held('b'), { status: 'rejected', reason: new Error('down') }]);
-  assert.deepEqual(outcome, { sent: 1, held: 1, failed: 1, delivered: ['a'] });
+  const starting: PromiseSettledResult<ComposeResult> = { status: 'fulfilled', value: { sessionId: 'd', sent: false, submitted: false, reason: 'starting' } };
+  const outcome = summarizeSend(['a', 'b', 'c', 'd'], [ok('a'), held('b'), { status: 'rejected', reason: new Error('down') }, starting]);
+  assert.deepEqual(outcome, { sent: 1, pasted: 0, held: 2, failed: 1, delivered: ['a'] }, 'a session still starting is held, like one with a dialog');
 });
 
-test('text pasted but not submitted because a dialog opened counts as held, not sent', () => {
+test('text pasted but not submitted (a dialog opened) is in that session already: never sent again', () => {
   const late: PromiseSettledResult<ComposeResult> = {
     status: 'fulfilled',
     value: { sessionId: 'a', sent: true, submitted: false, reason: 'awaiting_input' },
   };
-  assert.deepEqual(summarizeSend(['a'], [late]), { sent: 0, held: 1, failed: 0, delivered: [] });
+  assert.deepEqual(summarizeSend(['a'], [late]), { sent: 0, pasted: 1, held: 0, failed: 0, delivered: ['a'] });
 });

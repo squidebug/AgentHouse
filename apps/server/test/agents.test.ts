@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, test } from 'node:test';
@@ -177,5 +178,51 @@ describe('the session status with background sub-agents', () => {
     hook(start('a2', 'Explore'));
     observer.exited(0, 1000);
     assert.deepEqual([observer.status.value, observer.agents[1]?.state], ['exited', 'stopped']);
+  });
+
+  test("`agents --json` waiting while a sub-agent asks is that agent's dialog: the main conversation stays as it was", async () => {
+    // Stands in for `claude agents --json`: this session waits for a permission prompt.
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'agenthouse-agents-cmd-'));
+    const script = path.join(dir, 'agents.mjs');
+    writeFileSync(script, `console.log(JSON.stringify([{ pid: 1, sessionId: 'cli-session', status: 'waiting', waitingFor: 'permission prompt' }]));\n`);
+    const observer = new ClaudeObserver({
+      token: 't',
+      vendorSessionId: 'cli-session',
+      agentsCommand: { file: process.execPath, args: [script] },
+      env: { ...process.env, CLAUDE_CONFIG_DIR: config },
+      pid: 1,
+    });
+    try {
+      const hook = (event: HookEvent) => observer.onHook({ session_id: 'cli-session', transcript_path: session, ...event });
+      hook({ hook_event_name: 'SessionStart', source: 'startup' });
+      hook(callAgent('t1', 'Explore', 'Look around'));
+      hook(start('a1', 'Explore'));
+      hook(launched('t1', 'a1', 'Look around'));
+      hook({ hook_event_name: 'Stop' });
+      hook(byAgent('PreToolUse', 'a1', { tool_name: 'Write' }));
+      hook(byAgent('PermissionRequest', 'a1', { tool_name: 'Write' }));
+      assert.equal(observer.status.value, 'awaiting_permission');
+      assert.equal(observer.acceptsInput(), false, 'nothing goes in while the agent asks');
+      assert.equal(await observer.waiting(), 'awaiting_permission', 'the CLI itself says it waits');
+
+      observer.typed('\x1b[B'); // an arrow key on the dialog: a recheck follows
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      hook(byAgent('PostToolUse', 'a1', { tool_name: 'Write' }));
+      assert.equal(observer.status.value, 'idle', 'answered: the main conversation was idle all along');
+      assert.equal(observer.acceptsInput(), true);
+    } finally {
+      observer.exited(0, Date.now());
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('before its first hook a Claude session takes no text: its folder trust question may be up', () => {
+    const observer = new ClaudeObserver({ token: 't', vendorSessionId: null, agentsCommand: null, env: { CLAUDE_CONFIG_DIR: config }, pid: 1 });
+    assert.deepEqual([observer.status.value, observer.acceptsInput()], ['starting', false]);
+    observer.onHook({ hook_event_name: 'SessionStart', source: 'startup', session_id: 'cli-session' });
+    assert.deepEqual([observer.status.value, observer.acceptsInput()], ['idle', true]);
+    observer.onHook({ hook_event_name: 'UserPromptSubmit' });
+    assert.equal(observer.acceptsInput(), true, 'a working session takes text: Claude queues it');
+    observer.exited(0, Date.now());
   });
 });

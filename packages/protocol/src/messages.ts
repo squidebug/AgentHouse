@@ -24,10 +24,12 @@ export type EventServerMessage =
 
 export interface ComposeRequest {
   text: string;
-  bracketed?: boolean;
   enterDelayMs?: number;
   quietMs?: number;
-  submit?: boolean;
+  /** Only Enter: the text went in before and its Enter was held back (a dialog opened meanwhile). Web server only. */
+  enterOnly?: boolean;
+  /** Sent while nobody may be watching (a queued answer): the CLI itself is asked first whether it waits for the user. Web server only. */
+  verify?: boolean;
 }
 
 export interface ComposeResult {

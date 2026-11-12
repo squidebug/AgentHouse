@@ -12,12 +12,11 @@ export const LaunchBody = z.object({
   theme: z.enum(['light', 'dark']).optional(),
 });
 
+// What a browser may ask for; enterOnly and verify are the web server's own (unknown keys are dropped).
 export const ComposeBody = z.object({
   text: z.string().min(1).max(200_000),
-  bracketed: z.boolean().optional(),
   enterDelayMs: z.number().int().min(0).max(5000).optional(),
   quietMs: z.number().int().min(0).max(5000).optional(),
-  submit: z.boolean().optional(),
 });
 
 export const LinkBody = z.object({

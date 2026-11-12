@@ -1,11 +1,13 @@
-import { isAsking, type ComposeResult } from '@agenthouse/protocol';
+import { isHeld, type ComposeResult } from '@agenthouse/protocol';
 
 export interface SendOutcome {
   sent: number;
-  /** Not sent because the session shows a permission or question dialog. */
+  /** In the session's input, but Enter was held back: a dialog opened meanwhile. */
+  pasted: number;
+  /** Not sent: a dialog is open, or the session has not started. */
   held: number;
   failed: number;
-  /** Sessions that got the message; a resend must leave them out. */
+  /** Sessions that have the text now (sent or in their input); a resend must leave them out. */
   delivered: string[];
 }
 
@@ -35,13 +37,16 @@ export function composerOpen(s: ComposerSituation): boolean {
 
 /** Tallies one composer send, recipient by recipient (results in the same order as ids). */
 export function summarizeSend(ids: string[], results: PromiseSettledResult<ComposeResult>[]): SendOutcome {
-  const outcome: SendOutcome = { sent: 0, held: 0, failed: 0, delivered: [] };
+  const outcome: SendOutcome = { sent: 0, pasted: 0, held: 0, failed: 0, delivered: [] };
   results.forEach((result, i) => {
     const id = ids[i];
-    if (result.status === 'fulfilled' && result.value.submitted) {
-      outcome.sent += 1;
+    const value = result.status === 'fulfilled' ? result.value : null;
+    if (value?.sent) {
+      // Submitted, or waiting in its input for Enter: either way it has the text, and sending again would double it.
+      if (value.submitted) outcome.sent += 1;
+      else outcome.pasted += 1;
       if (id) outcome.delivered.push(id);
-    } else if (result.status === 'fulfilled' && isAsking(result.value.reason)) {
+    } else if (value && isHeld(value.reason)) {
       outcome.held += 1;
     } else {
       outcome.failed += 1;

@@ -41,12 +41,14 @@ interface Props {
 
 export function Composer({ state, dispatch, dnd, sessionById, activeSession }: Props) {
   const [draft, setDraft] = useState('');
+  // Sessions that have this text already (sent, or left in their input): a resend skips them, the active one too.
+  const [got, setGot] = useState<string[]>([]);
   const [notice, setNotice] = useState('');
   const [sending, setSending] = useState(false);
   const [focused, setFocused] = useState(false);
 
-  const explicit = state.targets.map(sessionById).filter((s): s is SessionInfo => Boolean(s));
-  const implicit = !explicit.length && activeSession?.state === 'running' ? activeSession : undefined;
+  const explicit = state.targets.map(sessionById).filter((s): s is SessionInfo => Boolean(s) && !got.includes(s!.id));
+  const implicit = !state.targets.length && activeSession?.state === 'running' && !got.includes(activeSession.id) ? activeSession : undefined;
   const recipients = implicit ? [implicit] : explicit;
   const target = { type: 'composer' as const };
   const acceptsDrop = dnd.dragging?.kind === 'session' && dnd.canDrop(target);
@@ -59,14 +61,19 @@ export function Composer({ state, dispatch, dnd, sessionById, activeSession }: P
     if (!text || !recipients.length || sending) return;
     setSending(true);
     const results = await Promise.allSettled(recipients.map((s) => api.compose(s.id, { text: draft })));
-    const { sent, held, failed, delivered } = summarizeSend(
+    const { sent, pasted, held, failed, delivered } = summarizeSend(
       recipients.map((s) => s.id),
       results,
     );
-    setNotice([sent ? t.sentTo(sent) : '', held ? t.heldFor(held) : '', failed ? t.failedFor(failed) : ''].filter(Boolean).join(' · '));
-    if (sent && !held && !failed) setDraft('');
-    // The text stays for the rest; those who already got it leave the list so a resend skips them.
-    else for (const id of delivered) dispatch({ type: 'removeTarget', id });
+    setNotice([sent ? t.sentTo(sent) : '', pasted ? t.pastedFor(pasted) : '', held ? t.heldFor(held) : '', failed ? t.failedFor(failed) : ''].filter(Boolean).join(' · '));
+    if (!held && !failed) {
+      setDraft('');
+      setGot([]);
+    } else {
+      // The text stays for the rest; those that have it leave the list, so a resend skips them.
+      setGot((current) => [...current, ...delivered]);
+      for (const id of delivered) dispatch({ type: 'removeTarget', id });
+    }
     setSending(false);
   };
 
@@ -143,7 +150,11 @@ export function Composer({ state, dispatch, dnd, sessionById, activeSession }: P
           multiline
           maxRows={8}
           value={draft}
-          onChange={(event) => setDraft(event.target.value)}
+          onChange={(event) => {
+            setDraft(event.target.value);
+            // Edited, it is a new message: everyone gets it again.
+            if (got.length) setGot([]);
+          }}
           onKeyDown={(event) => {
             // Enter while an IME (Korean, Japanese, …) is composing belongs to the IME.
             if (event.nativeEvent.isComposing) return;

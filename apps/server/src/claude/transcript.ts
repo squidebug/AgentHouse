@@ -1,4 +1,5 @@
 import type { ConversationEntry, ConversationTurn, EntryDetail, ToolState } from '@agenthouse/protocol';
+import { isInterruptText } from './status';
 
 // Claude Code's transcript (<config>/projects/<cwd>/<session>.jsonl), as of
 // 2.1.3xx: one JSON record per line. What the conversation view reads:
@@ -58,8 +59,6 @@ function tag(text: string, name: string): string | null {
   const match = text.match(new RegExp(`<${name}>([\\s\\S]*?)</${name}>`));
   return match ? (match[1] ?? '') : null;
 }
-
-const INTERRUPT = /^\[Request interrupted by user/;
 
 /** What a background agent's report says (a `<task-notification>` block in a user record). */
 interface TaskReport {
@@ -306,7 +305,7 @@ export class ConversationBuilder {
       return;
     }
     if (typeof content === 'string') {
-      if (INTERRUPT.test(content)) return this.interrupted(at);
+      if (isInterruptText(content)) return this.interrupted(at);
       if (content.startsWith('<local-command-caveat>') || this.command(content, at, line)) return;
       this.prompt(r, content, 0, at, line);
       return;
@@ -321,7 +320,7 @@ export class ConversationBuilder {
         results = true;
         this.toolResult(r, block, line);
       } else if (block?.type === 'text' && typeof block.text === 'string') {
-        if (INTERRUPT.test(block.text)) this.interrupted(at);
+        if (isInterruptText(block.text)) this.interrupted(at);
         else texts.push(block.text);
       } else if (block?.type === 'image') images += 1;
     }

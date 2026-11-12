@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import type { AccountLimits, RateWindow, SessionStatus, SessionTelemetry, StatusValue } from '@agenthouse/protocol';
 
@@ -38,6 +39,8 @@ export const initialTelemetry = (): SessionTelemetry => ({ level: 'minimal', mod
 
 // Tools that wait for the user instead of running.
 export const ASKING_TOOLS: Record<string, string> = { AskUserQuestion: 'question', ExitPlanMode: 'plan' };
+/** What an asking tool waits for; null for every other name (`__proto__` included). */
+export const askingTool = (tool: string | null): string | null => (tool !== null && Object.hasOwn(ASKING_TOOLS, tool) ? ASKING_TOOLS[tool]! : null);
 
 /**
  * Hook events the status reads. The launch settings subscribe to exactly
@@ -70,7 +73,8 @@ const HANDLERS: Record<StatusEvent, Handler> = {
   UserPromptSubmit: (_current, _event, at) => status('working', at),
   PreToolUse: (_current, event, at) => {
     const tool = text(event.tool_name);
-    if (tool && ASKING_TOOLS[tool]) return status('awaiting_input', at, { reason: ASKING_TOOLS[tool], tool });
+    const asks = askingTool(tool);
+    if (asks) return status('awaiting_input', at, { reason: asks, tool });
     return status('working', at, { tool });
   },
   // The immediate signal for a permission dialog; Notification(permission_prompt) only follows after ~6 s.
@@ -93,6 +97,94 @@ const HANDLERS: Record<StatusEvent, Handler> = {
   // An API error (e.g. a rate limit) ends the turn instead of Stop.
   StopFailure: (_current, event, at) => status('idle', at, { error: true, reason: text(event.error_type) ?? text(event.error) ?? 'error' }),
 };
+
+/** The same JSON for the same value, whatever order its keys came in. */
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const entries = Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableJson((value as Record<string, unknown>)[key])}`);
+    return `{${entries.join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'null';
+}
+
+// Tool calls whose dialog may still be matched; older ones are long settled.
+const MAX_CALLS = 200;
+
+/**
+ * The dialogs the main conversation has open, kept apart from its status: a
+ * call that runs next to the one that asks (calls run in parallel) and ends
+ * first must not hide a dialog that still waits. PermissionRequest names no
+ * tool_use_id, so a dialog is known by its tool and input, which PreToolUse
+ * ties to the call that PostToolUse and the like later settle.
+ */
+export class Dialogs {
+  private readonly open = new Map<string, SessionStatus>();
+  private readonly calls = new Map<string, string>();
+
+  /** One event of the main conversation; true when a dialog opened or closed. */
+  onHook(event: HookEvent, at = Date.now()): boolean {
+    const tool = text(event.tool_name);
+    const id = text(event.tool_use_id);
+    const key = tool ? `${tool}:${createHash('sha1').update(stableJson(event.tool_input ?? null)).digest('base64url')}` : null;
+    switch (event.hook_event_name) {
+      case 'SessionStart':
+      case 'UserPromptSubmit':
+      case 'Stop':
+      case 'StopFailure':
+        // A turn begins or ends: nothing of the one before still waits.
+        return this.clear();
+      case 'PreToolUse': {
+        if (id && key) this.remember(id, key);
+        const asks = askingTool(tool);
+        if (!asks || !key) return false;
+        this.open.set(key, status('awaiting_input', at, { reason: asks, tool }));
+        return true;
+      }
+      case 'PermissionRequest':
+        if (!key) return false;
+        this.open.set(key, status('awaiting_permission', at, { reason: tool, tool }));
+        return true;
+      case 'Elicitation':
+        this.open.set('elicitation', status('awaiting_input', at, { reason: 'elicitation' }));
+        return true;
+      case 'ElicitationResult':
+        return this.open.delete('elicitation');
+      case 'PostToolUse':
+      case 'PostToolUseFailure':
+      case 'PermissionDenied': {
+        const call = id ? this.calls.get(id) : undefined;
+        if (id) this.calls.delete(id);
+        const closed = call !== undefined && this.open.delete(call);
+        return (key !== null && key !== call && this.open.delete(key)) || closed;
+      }
+      default:
+        return false;
+    }
+  }
+
+  /** The newest dialog still open, as the session's status; null when none is. */
+  current(): SessionStatus | null {
+    let newest: SessionStatus | null = null;
+    for (const dialog of this.open.values()) if (!newest || dialog.at >= newest.at) newest = dialog;
+    return newest;
+  }
+
+  /** Closed by what no hook reports: an interrupt, or the CLI saying it no longer waits. */
+  clear(): boolean {
+    const had = this.open.size > 0;
+    this.open.clear();
+    this.calls.clear();
+    return had;
+  }
+
+  private remember(id: string, key: string): void {
+    this.calls.set(id, key);
+    if (this.calls.size > MAX_CALLS) this.calls.delete(this.calls.keys().next().value!);
+  }
+}
 
 /** Status after one hook event. Only confirmed signals move it; other events leave it unchanged. */
 export function applyHook(current: SessionStatus, event: HookEvent, at = Date.now()): SessionStatus {
@@ -190,6 +282,22 @@ export function isClaudeTranscript(file: string, configDir: string): boolean {
   return process.platform === 'win32' ? resolved.toLowerCase().startsWith(projects.toLowerCase()) : resolved.startsWith(projects);
 }
 
+/** Claude's interrupt marker: a user text of its own that starts with these words (facts §2.5). */
+export const isInterruptText = (text: string) => text.startsWith('[Request interrupted by user');
+
+/**
+ * Whether a user entry's content is Claude's interrupt marker. The same words
+ * inside a tool result (a file Claude read, a command's output) are not it.
+ */
+export function isInterrupt(content: unknown): boolean {
+  if (typeof content === 'string') return isInterruptText(content);
+  if (!Array.isArray(content)) return false;
+  return content.some((block) => {
+    const b = block as { type?: unknown; text?: unknown } | null;
+    return b?.type === 'text' && typeof b.text === 'string' && isInterruptText(b.text);
+  });
+}
+
 /**
  * True when the newest user entry in this transcript tail is Claude's interrupt
  * marker, i.e. the running turn was just cut short. Older markers are followed
@@ -206,7 +314,7 @@ export function endsWithInterrupt(tail: string): boolean {
       continue;
     }
     if (entry.type !== 'user' && entry.message?.role !== 'user') continue;
-    return JSON.stringify(entry.message?.content ?? '').includes('[Request interrupted by user');
+    return isInterrupt(entry.message?.content);
   }
   return false;
 }

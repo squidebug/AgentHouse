@@ -43,6 +43,15 @@ export function isAsking(value: string | null | undefined): boolean {
   return value === 'awaiting_permission' || value === 'awaiting_input';
 }
 
+/**
+ * A compose result's reason when the session could not take the text yet: a
+ * dialog is open, or a Claude session has not started (its folder trust
+ * question may be up). The text can go again later.
+ */
+export function isHeld(reason: string | null | undefined): boolean {
+  return isAsking(reason) || reason === 'starting' || reason === 'unobserved';
+}
+
 /** What the agent is doing, from confirmed signals only (hooks, the process exiting). */
 export interface SessionStatus {
   value: StatusValue;

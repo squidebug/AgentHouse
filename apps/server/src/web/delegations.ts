@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { open, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { isAsking, type DelegationInfo, type SessionInfo } from '@agenthouse/protocol';
+import { isAsking, isHeld, type DelegationInfo, type SessionInfo } from '@agenthouse/protocol';
 import { claudeConfigDir } from '../claude/settings';
 import { isClaudeTranscript } from '../claude/status';
 import type { SessionManager } from './manager';
@@ -53,6 +53,10 @@ interface Task {
   deliveredAt: number | null;
   /** The browser's words in front of the answer when it is handed over. */
   header: string | null;
+  /** The work went into the delegate's input but its Enter was held back (a dialog opened): only Enter is left. */
+  enterPending?: boolean;
+  /** The same for the answer in the parent's input. */
+  pasted?: boolean;
 }
 
 type Json = Record<string, unknown>;
@@ -131,8 +135,16 @@ function isTask(value: unknown): value is Task {
   return typeof t?.id === 'string' && typeof t.parentId === 'string' && typeof t.childId === 'string' && typeof t.sentAt === 'number' && typeof t.status === 'string';
 }
 
-/** A session ready for a message: idle, or one that reports no turns (nothing tells it is busy). */
-const ready = (session: SessionInfo) => session.state === 'running' && (session.status.value === 'idle' || session.status.value === 'unobserved');
+/**
+ * A session ready for a message: idle, or a CLI that reports no turns (nothing
+ * tells it is busy). Never a Claude session that has not started: its folder
+ * trust question may be up, and the host refuses it anyway.
+ */
+const ready = (session: SessionInfo) =>
+  session.state === 'running' && (session.status.value === 'idle' || (session.status.value === 'unobserved' && session.vendor !== 'claude'));
+
+const refusal = (reason: string | undefined) =>
+  reason === 'exited' ? '끝난 세션입니다.' : isAsking(reason) ? '승인이나 답을 기다리는 세션입니다.' : isHeld(reason) ? '아직 시작 중인 세션입니다.' : '보내지 못했습니다.';
 
 /**
  * Work handed from a session to the session delegated under it, followed
@@ -192,13 +204,28 @@ export class Delegations extends EventEmitter {
       throw new DelegationError('위임으로 연결된 세션이 아닙니다.', 'INVALID_REQUEST');
     }
     if (child.state !== 'running') throw new DelegationError('끝난 세션입니다.', 'INVALID_REQUEST');
-    if (isAsking(child.status.value)) throw new DelegationError('승인이나 답을 기다리는 세션입니다.', 'BUSY');
+    if (isAsking(child.status.value)) throw new DelegationError(refusal(child.status.value), 'BUSY');
     const transcript = [...child.transcripts].reverse().find((t) => isClaudeTranscript(t.path, claudeConfigDir()))?.path ?? null;
     const from = transcript ? await stat(transcript).then((s) => s.size).catch(() => 0) : 0;
     const sentAt = Date.now();
     const result = await this.manager.compose(childId, { text });
-    if (!result.submitted) throw new DelegationError('보내지 못했습니다.', 'BUSY');
-    const task: Task = { id: randomUUID(), parentId, childId, sentAt, status: 'running', endedAt: null, transcript, from, answer: null, delivery: 'none', deliveredAt: null, header: null };
+    if (!result.sent) throw new DelegationError(refusal(result.reason), 'BUSY');
+    // In its input but not submitted (a dialog opened): the work is there, and only Enter is left to press.
+    const task: Task = {
+      id: randomUUID(),
+      parentId,
+      childId,
+      sentAt,
+      status: 'running',
+      endedAt: null,
+      transcript,
+      from,
+      answer: null,
+      delivery: 'none',
+      deliveredAt: null,
+      header: null,
+      ...(result.submitted ? {} : { enterPending: true }),
+    };
     this.tasks.set(task.id, task);
     for (const old of [...this.tasks.values()].sort((a, b) => b.sentAt - a.sentAt).slice(MAX_KEPT)) this.tasks.delete(old.id);
     this.changed();
@@ -269,6 +296,11 @@ export class Delegations extends EventEmitter {
         changed = true;
         continue;
       }
+      if (task.status === 'running' && task.enterPending) {
+        if (child.state !== 'running') changed = (await this.settle(task, child)) || changed;
+        else if (ready(child)) changed = (await this.submit(task)) || changed;
+        continue;
+      }
       if (task.status === 'running') changed = (await this.settle(task, child)) || changed;
       if (task.delivery === 'queued' && !this.sending.has(task.id)) {
         if (parent.state !== 'running') {
@@ -307,6 +339,25 @@ export class Delegations extends EventEmitter {
     return true;
   }
 
+  /** Presses the Enter that was held back on the delegate: the work already in its input goes out. */
+  private async submit(task: Task): Promise<boolean> {
+    if (this.sending.has(task.id)) return false;
+    this.sending.add(task.id);
+    try {
+      // Nobody may be watching the delegate: the CLI is asked too before Enter is pressed.
+      const result = await this.manager.compose(task.childId, { text: '', enterOnly: true, verify: true });
+      if (!result.submitted) return false;
+      delete task.enterPending;
+      task.sentAt = Date.now();
+      return true;
+    } catch {
+      // the host is away: tried again on the next change
+      return false;
+    } finally {
+      this.sending.delete(task.id);
+    }
+  }
+
   private async send(task: Task): Promise<void> {
     if (this.sending.has(task.id) || !task.answer) return;
     this.sending.add(task.id);
@@ -316,12 +367,17 @@ export class Delegations extends EventEmitter {
         task.delivery = 'failed';
       } else {
         const body = text.length > DELIVER_CHARS ? text.slice(0, DELIVER_CHARS) : text;
-        const result = await this.manager.compose(task.parentId, { text: `${task.header ?? ''}\n${body}`.trim() });
+        // Nobody may be watching the parent: the CLI is asked too. An answer already in its input only needs its Enter.
+        const request = task.pasted ? { text: '', enterOnly: true, verify: true } : { text: `${task.header ?? ''}\n${body}`.trim(), verify: true };
+        const result = await this.manager.compose(task.parentId, request);
         if (result.submitted) {
           task.delivery = 'sent';
           task.deliveredAt = Date.now();
+          delete task.pasted;
         } else if (result.reason === 'exited') {
           task.delivery = 'failed';
+        } else if (result.sent) {
+          task.pasted = true;
         }
         // Otherwise a dialog opened or it got busy: still queued, tried again when it is idle.
       }

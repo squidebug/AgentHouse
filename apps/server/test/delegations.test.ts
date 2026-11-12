@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { EventEmitter } from 'node:events';
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
-import type { ConversationEntry, DelegationInfo, SessionInfo } from '@agenthouse/protocol';
-import { delegationsFile } from '../src/web/delegations';
+import type { ComposeRequest, ConversationEntry, DelegationInfo, SessionInfo, StatusValue } from '@agenthouse/protocol';
+import type { ComposeOutcome } from '../src/shared/host-protocol';
+import { Delegations, delegationsFile } from '../src/web/delegations';
+import type { SessionManager } from '../src/web/manager';
 import { eventually, login, openSocket, request, startServer, waitFor, type Socket, type TestServer } from './helpers';
 
 // The fake agent writes its transcript only under a CLAUDE_CONFIG_DIR, never into ~/.claude.
@@ -97,5 +100,72 @@ describe('delegation', () => {
     assert.ok(await waitFor(() => !listed().some((d) => d.id === task.id), 5000));
     events.ws?.close();
     await request(app.port, 'DELETE', `/api/sessions/${parent}`, { headers });
+  });
+});
+
+describe('delegation, with the host stood in for', () => {
+  test('text that went in but whose Enter was held back gets only its Enter later, never a second paste', async () => {
+    const dir = path.join(config, 'projects', 'C--stub');
+    mkdirSync(dir, { recursive: true });
+    const transcript = path.join(dir, 'child.jsonl');
+    writeFileSync(transcript, '');
+    const at = (value: StatusValue, when = Date.now()) => ({ value, reason: null, tool: null, error: false, at: when });
+    const sessions = new Map<string, SessionInfo>();
+    const put = (id: string, value: StatusValue, when?: number) =>
+      sessions.set(id, {
+        id,
+        vendor: 'claude',
+        state: 'running',
+        status: at(value, when),
+        agents: [],
+        transcripts: id === 'child' ? [{ vendorSessionId: 'c', path: transcript, since: 0 }] : [],
+        exit: null,
+      } as unknown as SessionInfo);
+    put('parent', 'idle');
+    put('child', 'idle');
+    const calls: Array<{ id: string } & ComposeRequest> = [];
+    const replies: ComposeOutcome[] = [];
+    const manager = Object.assign(new EventEmitter(), {
+      get: (id: string) => sessions.get(id),
+      links: () => [{ childId: 'child', parentId: 'parent', kind: 'delegate' }],
+      compose: async (id: string, request: ComposeRequest): Promise<ComposeOutcome> => {
+        calls.push({ id, ...request });
+        return replies.shift() ?? { sent: true, submitted: true };
+      },
+    });
+    const state = mkdtempSync(path.join(os.tmpdir(), 'agenthouse-delegations-'));
+    const delegations = new Delegations(manager as unknown as SessionManager, delegationsFile(state));
+    const changed = () => manager.emit('change');
+    try {
+      replies.push({ sent: false, submitted: false, reason: 'starting' });
+      await assert.rejects(delegations.delegate('parent', 'child', 'too early'), /시작 중/);
+
+      // In the delegate's input, but a dialog opened before Enter: the work is there, Enter is left.
+      replies.push({ sent: true, submitted: false, reason: 'awaiting_permission' });
+      const task = await delegations.delegate('parent', 'child', 'check the build');
+      assert.equal(task.status, 'running');
+      put('child', 'idle', Date.now() + 1);
+      changed();
+      assert.ok(await waitFor(() => calls.length === 3, 3000), 'Enter, once the delegate is free again');
+      assert.deepEqual(calls[2], { id: 'child', text: '', enterOnly: true, verify: true });
+
+      appendFileSync(transcript, `${JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'build is green' }] } })}\n`);
+      put('child', 'idle', Date.now() + 1000);
+      changed();
+      assert.ok(await waitFor(() => delegations.list()[0]?.status === 'done', 3000));
+
+      // The answer goes into the parent's input, then a dialog opens: only Enter follows.
+      replies.push({ sent: true, submitted: false, reason: 'awaiting_input' });
+      const queued = await delegations.deliver(task.id, '[위임 결과 · child]');
+      assert.equal(queued.delivery, 'queued');
+      assert.deepEqual(calls[3], { id: 'parent', text: '[위임 결과 · child]\nbuild is green', verify: true }, 'nobody may be watching: the CLI is asked too');
+      changed();
+      assert.ok(await waitFor(() => delegations.list()[0]?.delivery === 'sent', 3000));
+      assert.deepEqual(calls[4], { id: 'parent', text: '', enterOnly: true, verify: true });
+      assert.equal(calls.length, 5, 'the answer went in once');
+    } finally {
+      delegations.close();
+      rmSync(state, { recursive: true, force: true });
+    }
   });
 });

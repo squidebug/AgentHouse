@@ -1,6 +1,6 @@
 import path from 'node:path';
 import type { AgentInfo } from '@agenthouse/protocol';
-import { ASKING_TOOLS, isClaudeTranscript, type HookEvent } from './status';
+import { askingTool, isClaudeTranscript, type HookEvent } from './status';
 
 // Claude Code's sub-agents as its hooks and sub-agent status line report them
 // (2.1.322). The Agent tool starts one in the background: PreToolUse(Agent),
@@ -107,7 +107,7 @@ export class AgentTracker {
     if (name === 'Elicitation') return ask('input', 'elicitation') || changed;
     if (name === 'Notification' && event.notification_type === 'permission_prompt' && !this.asks.has(caller)) return ask('permission', agent?.tool ?? null) || changed;
     if (name === 'PreToolUse') {
-      if (tool && ASKING_TOOLS[tool]) return ask('input', tool) || changed;
+      if (askingTool(tool)) return ask('input', tool) || changed;
       return this.update(caller, { tool, state: 'running' }) || changed;
     }
     if (typeof name === 'string' && RESUMES.has(name)) {

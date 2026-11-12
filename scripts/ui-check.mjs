@@ -65,7 +65,15 @@ try {
   await terminalShown();
   check(true, 'the pane shows its terminal');
 
+  // A Claude session takes text only once it has started (its first hook): the folder trust question may be up before.
+  const ready = (title) =>
+    page
+      .getByRole('complementary', { name: '세션' })
+      .locator('.ah-row', { has: page.getByRole('button', { name: `${title} 열기`, exact: true }) })
+      .getByRole('img', { name: /^대기/ })
+      .waitFor({ timeout: 10_000 });
   const box = page.getByRole('textbox', { name: '메시지' });
+  await ready('ui-check');
   await box.fill('show me a tool call');
   await box.press('Control+Enter');
   await page.getByText('1개 세션에 보냄').waitFor({ timeout: 10_000 });
@@ -168,6 +176,7 @@ try {
   const tree = page.getByRole('complementary', { name: '세션' });
   await tree.getByRole('button', { name: 'ui-agents 열기' }).click();
   await terminalShown();
+  await ready('ui-agents');
   await box.fill('start agents please');
   await box.press('Control+Enter');
   const nestedRow = tree.getByRole('button', { name: 'Check the tests 열기' });
@@ -247,6 +256,7 @@ try {
   await page.getByRole('button', { name: 'ui-lead 열기', exact: true }).click();
   const lead = page.getByRole('region', { name: 'ui-lead' });
   await lead.locator('.xterm-screen').waitFor({ timeout: 10_000 });
+  await ready('ui-lead');
   await box.fill('please outline the plan');
   await box.press('Control+Enter');
   await lead.getByRole('button', { name: '대화', exact: true }).click();

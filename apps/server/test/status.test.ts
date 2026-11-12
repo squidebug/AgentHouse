@@ -7,6 +7,7 @@ import {
   applyAgents,
   applyHook,
   applyStatusLine,
+  Dialogs,
   endsWithInterrupt,
   exitedStatus,
   initialStatus,
@@ -143,5 +144,45 @@ describe('interrupt marker', () => {
     assert.equal(endsWithInterrupt([user('count to 1500'), assistant, user([{ type: 'text', text: '[Request interrupted by user]' }])].join('\n')), true);
     assert.equal(endsWithInterrupt([user([{ type: 'text', text: '[Request interrupted by user]' }]), user('next question'), assistant].join('\n')), false);
     assert.equal(endsWithInterrupt('{"type":"user","message":{"rol'), false, 'a cut-off line is skipped');
+  });
+
+  test('the same words inside a tool result (a file Claude just read) are not the marker', () => {
+    const read = user([{ type: 'tool_result', tool_use_id: 't1', content: "const marker = '[Request interrupted by user]';" }]);
+    assert.equal(endsWithInterrupt([user('read status.ts'), assistant, read].join('\n')), false);
+    assert.equal(endsWithInterrupt(user('[Request interrupted by user for tool use]')), true, 'a plain-text marker');
+  });
+});
+
+describe('dialogs of the main conversation', () => {
+  const bash = (command: string) => ({ tool_name: 'Bash', tool_input: { command, description: command } });
+
+  test('a call that ends next to one that asks does not hide its dialog', () => {
+    const dialogs = new Dialogs();
+    dialogs.onHook({ hook_event_name: 'PreToolUse', tool_use_id: 'r1', tool_name: 'Read', tool_input: { file_path: '/a' } }, 1);
+    dialogs.onHook({ hook_event_name: 'PreToolUse', tool_use_id: 'b1', ...bash('rm -rf build') }, 2);
+    dialogs.onHook({ hook_event_name: 'PreToolUse', tool_use_id: 'b2', ...bash('ls') }, 3);
+    dialogs.onHook({ hook_event_name: 'PermissionRequest', ...bash('rm -rf build') }, 4);
+    assert.equal(dialogs.current()?.value, 'awaiting_permission');
+    dialogs.onHook({ hook_event_name: 'PostToolUse', tool_use_id: 'r1', tool_name: 'Read', tool_input: { file_path: '/a' } }, 5);
+    dialogs.onHook({ hook_event_name: 'PostToolUse', tool_use_id: 'b2', ...bash('ls') }, 6);
+    assert.deepEqual([dialogs.current()?.value, dialogs.current()?.tool], ['awaiting_permission', 'Bash'], 'another Bash call ended; this one still asks');
+    dialogs.onHook({ hook_event_name: 'PostToolUse', tool_use_id: 'b1', ...bash('rm -rf build') }, 7);
+    assert.equal(dialogs.current(), null, 'answered');
+  });
+
+  test('a permission asked before its PreToolUse arrived (async hooks) still closes; a new turn clears what is left', () => {
+    const dialogs = new Dialogs();
+    dialogs.onHook({ hook_event_name: 'PermissionRequest', tool_name: 'Write', tool_input: { file_path: '/x', content: 'a' } }, 1);
+    dialogs.onHook({ hook_event_name: 'PreToolUse', tool_use_id: 'w1', tool_name: 'Write', tool_input: { content: 'a', file_path: '/x' } }, 2);
+    assert.equal(dialogs.current()?.value, 'awaiting_permission');
+    dialogs.onHook({ hook_event_name: 'PostToolUseFailure', tool_use_id: 'w1', tool_name: 'Write', tool_input: { file_path: '/x', content: 'a' } }, 3);
+    assert.equal(dialogs.current(), null, 'the same input in another key order is the same call');
+
+    dialogs.onHook({ hook_event_name: 'PreToolUse', tool_use_id: 'q1', tool_name: 'AskUserQuestion', tool_input: { questions: [] } }, 4);
+    assert.deepEqual([dialogs.current()?.value, dialogs.current()?.reason], ['awaiting_input', 'question']);
+    dialogs.onHook({ hook_event_name: 'Stop' }, 5);
+    assert.equal(dialogs.current(), null);
+    dialogs.onHook({ hook_event_name: 'PreToolUse', tool_use_id: 'p1', tool_name: '__proto__' }, 6);
+    assert.equal(dialogs.current(), null, 'only the asking tools ask');
   });
 });
