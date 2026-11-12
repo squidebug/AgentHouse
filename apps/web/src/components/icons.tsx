@@ -128,3 +128,16 @@ export const ReturnIcon = (p: IconProps) => (
     <path d="M18 20 V13 A4 4 0 0 0 14 9 H6 M10 5 L6 9 L10 13" />
   </Svg>
 );
+
+/** A session's flow: who worked when. */
+export const FlowIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M5 4 V18 M5 6 H12 M9 12 H17 M9 18 H20" />
+  </Svg>
+);
+
+export const BackIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M15 5 L8 12 L15 19" />
+  </Svg>
+);

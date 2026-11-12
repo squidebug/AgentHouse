@@ -13,7 +13,7 @@ export interface Conversation {
 const EMPTY: Conversation = { turns: [], entries: [], ready: false };
 
 /** A session's conversation (or a sub-agent's) from /ws/conversation: a full copy first, then changes; reconnects with backoff. */
-export function useConversation(sessionId: string, agentId: string | null = null): Conversation {
+export function useConversation(sessionId: string | null, agentId: string | null = null, turnsOnly = false): Conversation {
   const [conversation, setConversation] = useState<Conversation>(EMPTY);
 
   useEffect(() => {
@@ -25,9 +25,11 @@ export function useConversation(sessionId: string, agentId: string | null = null
     let order: string[] = [];
     let byId = new Map<string, ConversationEntry>();
     setConversation(EMPTY);
+    // Nothing to read (no transcript): no socket at all.
+    if (!sessionId) return;
 
     const connect = () => {
-      ws = new WebSocket(socketUrl(`/ws/conversation?id=${encodeURIComponent(sessionId)}${agentId ? `&agent=${encodeURIComponent(agentId)}` : ''}`));
+      ws = new WebSocket(socketUrl(`/ws/conversation?id=${encodeURIComponent(sessionId)}${agentId ? `&agent=${encodeURIComponent(agentId)}` : ''}${turnsOnly ? '&turns=only' : ''}`));
       ws.onopen = () => {
         delay = 500;
       };
@@ -57,7 +59,7 @@ export function useConversation(sessionId: string, agentId: string | null = null
       clearTimeout(retry);
       ws?.close();
     };
-  }, [sessionId, agentId]);
+  }, [sessionId, agentId, turnsOnly]);
 
   return conversation;
 }

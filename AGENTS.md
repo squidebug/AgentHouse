@@ -14,7 +14,7 @@ AgentHouse is three programs plus a browser app. Know which one a file runs in b
 | Relay | `apps/server/src/relay/relay.cjs`, run by Claude Code for each hook and as its status line and sub-agent status line | per event |
 
 - `src/claude/` is what AgentHouse knows about Claude Code (hook events, status line, settings files, sub-agents in `agents.ts`, the transcript format in `transcript.ts`); `src/shared/` is used by both servers.
-- The conversation view is read in the web server (`web/conversations.ts`): only the transcripts the host reported (a sub-agent's next to its session's), only under Claude's projects folder, in small pieces so the event loop stays free.
+- The conversation view is read in the web server (`web/conversations.ts`): only the transcripts the host reported (a sub-agent's next to its session's), only under Claude's projects folder, in small pieces so the event loop stays free. The flow view (`workspace/flow.ts`) asks for the turns only (`turns=only`).
 - The session host owns the PTYs, so sessions survive web server restarts. The web server prepares launches, checks the environment, serves the UI and relays terminals to the host.
 - Browser ↔ web server types: `packages/protocol`. Web server ↔ host messages: `apps/server/src/shared/host-protocol.ts`; bump `HOST_PROTOCOL` whenever they change, and keep the hello's proof and the `shutdown` request as they are, so `--stop` still reaches older hosts.
 - Until the host restarts after its code changed, the environment check warns (`shared/build.ts` hashes the files listed above).

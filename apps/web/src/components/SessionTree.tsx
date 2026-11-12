@@ -37,7 +37,7 @@ interface AgentRowProps {
   dnd: Dnd;
 }
 
-/** A sub-agent under its session (or under the agent that started it): opens its own conversation. */
+/** A sub-agent under its session (or under the agent that started it): opens its session's flow, with it pointed out. */
 function AgentRow({ session, agent, depth, shown, state, dispatch, dnd }: AgentRowProps) {
   const key = `${session.id}/${agent.id}`;
   const open = Boolean(state.rowOpen[key]);
@@ -65,7 +65,7 @@ function AgentRow({ session, agent, depth, shown, state, dispatch, dnd }: AgentR
         <Connector />
         <AgentStatusIcon agent={agent} />
         <ButtonBase
-          onClick={() => dispatch({ type: 'open', sessionId: session.id, agentId: agent.id })}
+          onClick={() => dispatch({ type: 'open', sessionId: session.id, mode: 'flow', focusAgent: agent.id })}
           aria-label={`${title} 열기`}
           sx={{ flex: 1, minWidth: 0, flexDirection: 'column', alignItems: 'flex-start', textAlign: 'left', py: '2px', borderRadius: '6px' }}
         >

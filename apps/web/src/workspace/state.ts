@@ -8,7 +8,19 @@ export interface Pane {
   sessionId: string;
   /** One of the session's sub-agents: the pane shows that agent's conversation. */
   agentId?: string;
+  /** What the pane showed before, newest last, for its back button. Not kept across reloads. */
+  history?: PaneEntry[];
 }
+
+/** What a pane shows: a session in some mode, or one of its sub-agents. */
+export interface PaneEntry {
+  sessionId: string;
+  agentId?: string;
+  mode: PaneMode | null;
+}
+
+// Back goes this many steps at most.
+const HISTORY = 10;
 
 /** What a pane shows: a session, or one of its sub-agents. */
 export interface Target {
@@ -19,8 +31,8 @@ export interface Target {
 const shows = (pane: Pane, target: Target) => pane.sessionId === target.sessionId && (pane.agentId ?? null) === (target.agentId ?? null);
 const paneOf = (id: string, target: Target): Pane => ({ id, sessionId: target.sessionId, ...(target.agentId ? { agentId: target.agentId } : {}) });
 
-/** What a pane shows of its session: the live terminal, or the conversation read from the transcript. */
-export type PaneMode = 'terminal' | 'conversation';
+/** What a pane shows of its session: the live terminal, the conversation, or the flow (who works, since when, under whom). */
+export type PaneMode = 'terminal' | 'conversation' | 'flow';
 
 export type Drag =
   | { kind: 'session'; id: string }
@@ -68,6 +80,8 @@ export interface WorkspaceState {
   /** Per pane; a pane not listed shows the terminal. */
   paneMode: Record<string, PaneMode>;
   pending: PendingLink | null;
+  /** A sub-agent to point out in its session's flow: picked in the tree, or the one a pane came back from. */
+  flowFocus: { paneId: string; agentId: string } | null;
 }
 
 export const initialWorkspace: WorkspaceState = {
@@ -81,6 +95,7 @@ export const initialWorkspace: WorkspaceState = {
   paneOpen: {},
   paneMode: {},
   pending: null,
+  flowFocus: null,
 };
 
 const LAYOUT_KEY = 'ah-layout';
@@ -96,7 +111,10 @@ export function loadWorkspace(storage: Pick<Storage, 'getItem'> | undefined = gl
       .slice(0, MAX_PANES);
     const active = panes.some((p) => p.id === saved.active) ? (saved.active as string) : (panes[0]?.id ?? null);
     const nextPane = Math.max(Number(saved.nextPane) || 1, ...panes.map((p) => Number(p.id.slice(1)) + 1 || 1));
-    const paneMode = Object.fromEntries(panes.filter((p) => saved.paneMode?.[p.id] === 'conversation').map((p) => [p.id, 'conversation' as const]));
+    const modes = (saved.paneMode ?? {}) as Record<string, unknown>;
+    const paneMode = Object.fromEntries(
+      panes.filter((p) => modes[p.id] === 'conversation' || modes[p.id] === 'flow').map((p) => [p.id, modes[p.id] as PaneMode]),
+    );
     return { ...initialWorkspace, panes, active, nextPane, paneMode };
   } catch {
     return initialWorkspace;
@@ -106,14 +124,19 @@ export function loadWorkspace(storage: Pick<Storage, 'getItem'> | undefined = gl
 export function saveWorkspace(state: WorkspaceState, storage: Pick<Storage, 'setItem'> | undefined = globalThis.localStorage): void {
   try {
     const paneMode = Object.fromEntries(state.panes.filter((p) => state.paneMode[p.id]).map((p) => [p.id, state.paneMode[p.id]]));
-    storage?.setItem(LAYOUT_KEY, JSON.stringify({ panes: state.panes, active: state.active, nextPane: state.nextPane, paneMode }));
+    const panes = state.panes.map(({ history: _history, ...pane }) => pane);
+    storage?.setItem(LAYOUT_KEY, JSON.stringify({ panes, active: state.active, nextPane: state.nextPane, paneMode }));
   } catch {
     // private windows and blocked storage: the layout just isn't remembered
   }
 }
 
 export type Action =
-  | { type: 'open'; sessionId: string; agentId?: string }
+  /** `mode`: show the session that way; `focusAgent`: point out this sub-agent in its flow. */
+  | { type: 'open'; sessionId: string; agentId?: string; mode?: PaneMode; focusAgent?: string }
+  /** Within a pane: show something else, with the way back. */
+  | { type: 'drill'; paneId: string; sessionId: string; agentId?: string; mode?: PaneMode }
+  | { type: 'back'; paneId: string }
   | { type: 'openNew'; sessionId: string; agentId?: string }
   | { type: 'focus'; paneId: string }
   | { type: 'closePane'; paneId: string }
@@ -174,13 +197,42 @@ function addPane(state: WorkspaceState, target: Target): WorkspaceState {
   return { ...state, panes: [...state.panes, paneOf(id, target)], nextPane: state.nextPane + 1, active: id };
 }
 
+/** What a pane shows now, as a history entry. */
+const entryOf = (state: WorkspaceState, pane: Pane): PaneEntry => ({
+  sessionId: pane.sessionId,
+  ...(pane.agentId ? { agentId: pane.agentId } : {}),
+  mode: state.paneMode[pane.id] ?? null,
+});
+
+/**
+ * The pane now shows the target, in its default view (the terminal for a
+ * session); what it showed before, mode included, goes on its history.
+ */
+function replace(state: WorkspaceState, paneId: string, target: Target): WorkspaceState {
+  const paneMode = { ...state.paneMode };
+  delete paneMode[paneId];
+  return {
+    ...state,
+    paneMode,
+    panes: state.panes.map((p) => (p.id === paneId ? { ...paneOf(p.id, target), history: [...(p.history ?? []), entryOf(state, p)].slice(-HISTORY) } : p)),
+  };
+}
+
+function withMode(state: WorkspaceState, paneId: string | null, mode: PaneMode | null | undefined): WorkspaceState {
+  if (!paneId || mode === undefined) return state;
+  const paneMode = { ...state.paneMode };
+  if (mode === null) delete paneMode[paneId];
+  else paneMode[paneId] = mode;
+  return { ...state, paneMode };
+}
+
 /** Shows a session or sub-agent: focuses the pane already showing it, else replaces the active pane, else adds one. */
 function open(state: WorkspaceState, target: Target): WorkspaceState {
   const shown = state.panes.find((p) => shows(p, target));
   if (shown) return { ...state, active: shown.id };
   const active = state.panes.find((p) => p.id === state.active);
   if (!active) return addPane(state, target);
-  return { ...state, panes: state.panes.map((p) => (p.id === active.id ? paneOf(p.id, target) : p)) };
+  return replace(state, active.id, target);
 }
 
 /** Shows a session or sub-agent in a new pane when there is room, else like `open`. */
@@ -209,10 +261,13 @@ function drop(state: WorkspaceState, target: DropTarget): WorkspaceState {
   if (target.type === 'nest') return { ...state, pending: { childId: drag.id, parentId: target.id } };
   if (target.type === 'root') return state;
   const shown = dragTarget(drag)!;
-  if (target.type === 'pane') return { ...state, panes: state.panes.map((p) => (p.id === target.id ? paneOf(p.id, shown) : p)), active: target.id };
+  if (target.type === 'pane') return { ...replace(state, target.id, shown), active: target.id };
   if (target.type === 'slot') return addPane(state, shown);
   return { ...state, targets: [...state.targets, drag.id] };
 }
+
+/** The agent pointed out in a flow, no longer for this pane. */
+const unfocus = (state: WorkspaceState, paneId: string) => (state.flowFocus?.paneId === paneId ? null : state.flowFocus);
 
 function toggle(map: Record<string, boolean>, id: string): Record<string, boolean> {
   return { ...map, [id]: !map[id] };
@@ -220,8 +275,31 @@ function toggle(map: Record<string, boolean>, id: string): Record<string, boolea
 
 export function reducer(state: WorkspaceState, action: Action, ctx: DropContext = { runningIds: [] }): WorkspaceState {
   switch (action.type) {
-    case 'open':
-      return open(state, action);
+    case 'open': {
+      let next = open(state, action);
+      // A pane already showing the session, switched to another mode: the old one is a step back.
+      const shown = state.panes.find((p) => shows(p, action));
+      if (shown && action.mode && (state.paneMode[shown.id] ?? null) !== action.mode) {
+        next = { ...next, panes: next.panes.map((p) => (p.id === shown.id ? { ...p, history: [...(p.history ?? []), entryOf(state, p)].slice(-HISTORY) } : p)) };
+      }
+      const focus = action.focusAgent && next.active ? { paneId: next.active, agentId: action.focusAgent } : null;
+      return { ...withMode(next, next.active, action.mode), flowFocus: focus ?? (action.mode && next.active ? unfocus(next, next.active) : next.flowFocus) };
+    }
+    case 'drill': {
+      const pane = state.panes.find((p) => p.id === action.paneId);
+      if (!pane) return state;
+      const next = replace(state, pane.id, action);
+      return { ...withMode(next, pane.id, action.mode ?? null), active: pane.id, flowFocus: unfocus(state, pane.id) };
+    }
+    case 'back': {
+      const pane = state.panes.find((p) => p.id === action.paneId);
+      const previous = pane?.history?.at(-1);
+      if (!pane || !previous) return state;
+      const panes = state.panes.map((p) => (p.id === pane.id ? { ...paneOf(p.id, previous), history: p.history!.slice(0, -1) } : p));
+      // Back from a sub-agent to its session: the agent it came from is pointed out.
+      const from = pane.agentId && !previous.agentId && previous.sessionId === pane.sessionId ? { paneId: pane.id, agentId: pane.agentId } : null;
+      return { ...withMode({ ...state, panes }, pane.id, previous.mode), active: pane.id, flowFocus: from ?? unfocus(state, pane.id) };
+    }
     case 'openNew':
       return openNew(state, action);
     case 'focus':
@@ -256,11 +334,14 @@ export function reducer(state: WorkspaceState, action: Action, ctx: DropContext 
     case 'sync': {
       // Sessions removed elsewhere drop out of panes; ended ones stop receiving input.
       const known = new Set(action.sessionIds);
-      const panes = state.panes.filter((p) => known.has(p.sessionId));
+      const stale = (p: Pane) => p.history?.some((e) => !known.has(e.sessionId));
+      // A step back to a removed session is dropped from the history too.
+      const panes = state.panes.filter((p) => known.has(p.sessionId)).map((p) => (stale(p) ? { ...p, history: p.history!.filter((e) => known.has(e.sessionId)) } : p));
       const targets = state.targets.filter((t) => action.runningIds.includes(t));
       const active = panes.some((p) => p.id === state.active) ? state.active : (panes[0]?.id ?? null);
       const pending = state.pending && known.has(state.pending.childId) && known.has(state.pending.parentId) ? state.pending : null;
-      if (panes.length === state.panes.length && targets.length === state.targets.length && active === state.active && pending === state.pending) return state;
+      const same = panes.length === state.panes.length && panes.every((p, i) => p === state.panes[i]);
+      if (same && targets.length === state.targets.length && active === state.active && pending === state.pending) return state;
       return { ...state, panes, targets, active, pending };
     }
     default:

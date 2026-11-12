@@ -64,7 +64,11 @@ test('a sub-agent opens in a pane of its own, apart from its session; dropped on
   s = run(s, { type: 'dragStart', drag: { kind: 'agent', id: 'a2', sessionId: 's1' } }, { type: 'drop', target: { type: 'slot' } });
   assert.deepEqual(s.panes.at(-1), { id: 'p3', sessionId: 's1', agentId: 'a2' });
   s = run(s, { type: 'dragStart', drag: { kind: 'session', id: 's2' } }, { type: 'drop', target: { type: 'pane', id: 'p3' } });
-  assert.deepEqual(s.panes.at(-1), { id: 'p3', sessionId: 's2' }, 'a session dropped on an agent pane replaces it');
+  assert.deepEqual(
+    s.panes.at(-1),
+    { id: 'p3', sessionId: 's2', history: [{ sessionId: 's1', agentId: 'a2', mode: null }] },
+    'a session dropped on an agent pane replaces it, and the agent is a step back',
+  );
 });
 
 test('agent panes survive a reload', () => {

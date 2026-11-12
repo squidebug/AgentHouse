@@ -5,10 +5,12 @@ import { t } from '../strings';
 import { v } from '../theme/tokens';
 import { childAgents } from '../workspace/agents';
 import type { Dnd } from '../workspace/dnd';
+import type { FlowRow } from '../workspace/flow';
 import { MAX_PANES, type Action, type Pane, type PaneMode, type WorkspaceState } from '../workspace/state';
 import { ConversationView, type DelegationView } from './ConversationView';
 import { AgentSubtitle, agentDetails, agentTitle, Details, SessionSubtitle, sessionDetails } from './Details';
-import { ChatIcon, ChevronIcon, CloseIcon, DelegateIcon, Grip, PlusIcon, TerminalIcon } from './icons';
+import { FlowView } from './FlowView';
+import { BackIcon, ChatIcon, ChevronIcon, CloseIcon, DelegateIcon, FlowIcon, Grip, PlusIcon, TerminalIcon } from './icons';
 import { AgentStatusIcon, StatusIcon } from './StatusIcon';
 import { TerminalView } from './TerminalView';
 
@@ -121,13 +123,14 @@ export function PaneGrid({ state, dispatch, dnd, sessionById, mode, windowsBuild
 const MODES = [
   { mode: 'terminal', label: t.terminal, Icon: TerminalIcon },
   { mode: 'conversation', label: t.conversation, Icon: ChatIcon },
+  { mode: 'flow', label: t.flow, Icon: FlowIcon },
 ] as const;
 
-/** Terminal or conversation, as a two-part switch in the pane header. */
-function ModeSwitch({ mode, onChange }: { mode: PaneMode; onChange: (mode: PaneMode) => void }) {
+/** Terminal, conversation or flow, as a switch in the pane header; only the modes the session has. */
+function ModeSwitch({ mode, modes, onChange }: { mode: PaneMode; modes: PaneMode[]; onChange: (mode: PaneMode) => void }) {
   return (
     <Box role="group" sx={{ flex: 'none', display: 'inline-flex', p: '2px', borderRadius: '10px', bgcolor: v.surface2 }}>
-      {MODES.map(({ mode: value, label, Icon }) => (
+      {MODES.filter((m) => modes.includes(m.mode)).map(({ mode: value, label, Icon }) => (
         <Tooltip key={value} title={label}>
           <IconButton
             aria-label={label}
@@ -228,9 +231,29 @@ function PaneView({ pane, session, state, dispatch, dnd, theme, windowsBuild, se
   const agent = agentId ? session.agents.find((a) => a.id === agentId) : undefined;
   const hasConversation = agentId ? Boolean(agent?.transcriptPath) : session.transcripts.length > 0;
   // An ended session from an earlier host has only its conversation left.
-  const mode: PaneMode = agentId || !session.screen ? 'conversation' : hasConversation ? (state.paneMode[pane.id] ?? 'terminal') : 'terminal';
+  // A session's pane can show its terminal (while the host has it), its conversation, or its flow.
+  const modes: PaneMode[] = agentId ? ['conversation'] : [...(session.screen ? ['terminal' as const] : []), ...(hasConversation ? ['conversation' as const] : []), 'flow'];
+  const chosen = state.paneMode[pane.id];
+  const mode: PaneMode = chosen && modes.includes(chosen) ? chosen : (modes[0] ?? 'flow');
   const focus = () => dispatch({ type: 'focus', paneId: pane.id });
-  const openAgent = useCallback((id: string) => dispatch({ type: 'openNew', sessionId: session.id, agentId: id }), [dispatch, session.id]);
+  // An agent opened from a conversation takes this pane, with the way back.
+  const openAgent = useCallback((id: string) => dispatch({ type: 'drill', paneId: pane.id, sessionId: session.id, agentId: id }), [dispatch, pane.id, session.id]);
+  const placed = useMemo(
+    () =>
+      links
+        .filter((l) => l.parentId === session.id)
+        .map((l) => sessionById(l.childId))
+        .filter((s): s is SessionInfo => Boolean(s)),
+    [links, session.id, sessionById],
+  );
+  const openRow = useCallback(
+    (row: FlowRow) => {
+      if (row.kind === 'agent') dispatch({ type: 'drill', paneId: pane.id, sessionId: row.session.id, agentId: row.agent.id });
+      else dispatch({ type: 'drill', paneId: pane.id, sessionId: row.session.id, mode: row.session.screen ? 'terminal' : 'conversation' });
+    },
+    [dispatch, pane.id],
+  );
+  const canGoBack = Boolean(pane.history?.length);
   // A session's pane (not a sub-agent's) hands work to the sessions delegated under it.
   const delegates = useMemo(
     () =>
@@ -286,6 +309,13 @@ function PaneView({ pane, session, state, dispatch, dnd, theme, windowsBuild, se
         sx={{ display: 'flex', alignItems: 'center', gap: '10px', p: '10px 8px 8px 10px', cursor: 'grab' }}
       >
         <Grip className="ah-grip" />
+        {canGoBack && (
+          <Tooltip title={t.back}>
+            <IconButton aria-label={t.back} onClick={() => dispatch({ type: 'back', paneId: pane.id })} sx={{ flex: 'none', width: 32, height: 32, ml: '-6px', color: v.on2 }}>
+              <BackIcon size={16} />
+            </IconButton>
+          </Tooltip>
+        )}
         {agent ? <AgentStatusIcon agent={agent} /> : <StatusIcon status={session.status} />}
         <ButtonBase
           onClick={() => dispatch({ type: 'focus', paneId: pane.id })}
@@ -301,7 +331,7 @@ function PaneView({ pane, session, state, dispatch, dnd, theme, windowsBuild, se
             {t.exited}
           </Box>
         )}
-        {!agentId && session.screen && hasConversation && <ModeSwitch mode={mode} onChange={(next) => dispatch({ type: 'setMode', paneId: pane.id, mode: next })} />}
+        {modes.length > 1 && <ModeSwitch mode={mode} modes={modes} onChange={(next) => dispatch({ type: 'setMode', paneId: pane.id, mode: next })} />}
         <IconButton
           aria-label={`${title} ${t.details}`}
           aria-expanded={open}
@@ -322,10 +352,12 @@ function PaneView({ pane, session, state, dispatch, dnd, theme, windowsBuild, se
       <DelegateChips delegates={delegates} dispatch={dispatch} dnd={dnd} onDropText={handOver} />
       <AgentChips session={session} parentId={agentId} dispatch={dispatch} dnd={dnd} />
       <Box
-        onPointerDown={mode === 'conversation' ? focus : undefined}
-        sx={{ flex: 1, minHeight: 0, m: '0 12px 12px', p: mode === 'conversation' ? '4px 4px 4px 14px' : '8px 4px 4px 10px', borderRadius: '10px', bgcolor: v.termBg, overflow: 'hidden' }}
+        onPointerDown={mode !== 'terminal' ? focus : undefined}
+        sx={{ flex: 1, minHeight: 0, m: '0 12px 12px', p: mode !== 'terminal' ? '4px 4px 4px 14px' : '8px 4px 4px 10px', borderRadius: '10px', bgcolor: v.termBg, overflow: 'hidden' }}
       >
-        {mode === 'conversation' && hasConversation ? (
+        {mode === 'flow' ? (
+          <FlowView session={session} placed={placed} links={links} focusAgent={state.flowFocus?.paneId === pane.id ? state.flowFocus.agentId : null} onOpen={openRow} />
+        ) : mode === 'conversation' && hasConversation ? (
           <ConversationView
             sessionId={session.id}
             agentId={agentId}

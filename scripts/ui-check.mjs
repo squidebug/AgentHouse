@@ -131,21 +131,33 @@ try {
     body: JSON.stringify({ vendor: 'fake', title: 'ui-agents', cwd: work, theme: 'dark' }),
   });
   check(agents.status === 201, 'a session for sub-agents starts', `HTTP ${agents.status}`);
-  await page.getByRole('button', { name: 'ui-agents 열기' }).click();
+  // The tree; the flow view and pane headers have buttons of the same names.
+  const tree = page.getByRole('complementary', { name: '세션' });
+  await tree.getByRole('button', { name: 'ui-agents 열기' }).click();
   await terminalShown();
   await box.fill('start agents please');
   await box.press('Control+Enter');
-  const nestedRow = page.getByRole('button', { name: 'Check the tests 열기' });
+  const nestedRow = tree.getByRole('button', { name: 'Check the tests 열기' });
   await nestedRow.waitFor({ timeout: 10_000 });
-  const indent = async (name) => page.getByRole('button', { name }).evaluate((el) => el.parentElement.getBoundingClientRect().left + parseFloat(getComputedStyle(el.parentElement).paddingLeft));
+  const indent = async (name) => tree.getByRole('button', { name }).evaluate((el) => el.parentElement.getBoundingClientRect().left + parseFloat(getComputedStyle(el.parentElement).paddingLeft));
   check((await indent('Check the tests 열기')) > (await indent('Plan the change 열기')), 'the agent a sub-agent started is nested under it');
   const rowDone = (name) => page.locator('.ah-row', { has: page.getByRole('button', { name: `${name} 열기` }) }).getByRole('img', { name: '완료' });
   for (const name of ['Look around', 'Check the tests', 'Plan the change']) await rowDone(name).waitFor({ timeout: 10_000 });
   check(true, 'all three are done once they report');
-  await page.getByRole('button', { name: 'Plan the change 열기' }).click();
+
+  // An agent picked in the tree shows its session's flow: a lane each, over time, that agent pointed out.
+  await tree.getByRole('button', { name: 'Plan the change 열기' }).click();
+  const flow = page.getByRole('region', { name: 'ui-agents' }).getByRole('list', { name: 'ui-agents 흐름' });
+  await flow.waitFor({ timeout: 10_000 });
+  check((await flow.getByRole('listitem').count()) === 4, "the tree's agent opens its session's flow: the session and its three agents");
+  const marked = async () => (await flow.locator('[aria-current="true"]').innerText()).trim();
+  check((await marked()) === 'Plan the change', 'the agent picked in the tree is pointed out', await marked());
+  await settle();
+  await page.screenshot({ path: path.join(out, 'flow-dark.png') });
+  await flow.getByRole('button', { name: 'Plan the change 열기' }).click();
   const agentPane = page.getByRole('region', { name: 'Plan the change' });
   await agentPane.getByText('plan ready', { exact: true }).waitFor({ timeout: 10_000 });
-  check(true, 'a sub-agent opens in a pane with its own conversation');
+  check(true, 'a row of the flow opens that agent in the same pane');
   const chip = agentPane.getByRole('group', { name: '서브에이전트' }).getByRole('button', { name: 'Check the tests 대화 열기' });
   check(await chip.isVisible(), 'its own sub-agent is a chip in its header');
   check(await agentPane.getByText('보고', { exact: true }).first().isVisible(), "the nested agent's report is in its conversation");
@@ -154,6 +166,11 @@ try {
   await page.getByRole('button', { name: '라이트 모드' }).click();
   await settle();
   await page.screenshot({ path: path.join(out, 'agents-light.png') });
+  await agentPane.getByRole('button', { name: '뒤로' }).click();
+  await flow.waitFor({ timeout: 5000 });
+  check((await marked()) === 'Plan the change', 'and back to the flow, the agent it came from pointed out', await marked());
+  await settle();
+  await page.screenshot({ path: path.join(out, 'flow-light.png') });
 
   // Grouping: a session dragged onto another one at the top goes under it, and stays there.
   const row = (title) => page.locator('.ah-row', { has: page.getByRole('button', { name: `${title} 열기`, exact: true }) });
@@ -170,7 +187,7 @@ try {
   await page.getByRole('button', { name: '다크 모드' }).click();
   await settle();
   await page.screenshot({ path: path.join(out, 'group-dark.png') });
-  await page.getByRole('button', { name: 'ui-agents 세부 정보' }).click();
+  await tree.getByRole('button', { name: 'ui-agents 세부 정보' }).click();
   await page.getByRole('button', { name: '최상위로' }).click();
   await row('ui-agents').getByRole('img', { name: '묶음' }).waitFor({ state: 'detached', timeout: 5000 });
   check((await left('ui-agents')) === (await left('ui-check')), 'and back at the top from its details');
