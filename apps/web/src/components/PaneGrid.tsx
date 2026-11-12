@@ -1,21 +1,29 @@
 import { Box, Button, ButtonBase, IconButton, Tooltip, Typography } from '@mui/material';
-import { useCallback } from 'react';
-import type { AgentInfo, SessionInfo, ThemeMode } from '@agenthouse/protocol';
+import { useCallback, useMemo } from 'react';
+import type { AgentInfo, DelegationInfo, SessionInfo, SessionLink, ThemeMode } from '@agenthouse/protocol';
 import { t } from '../strings';
 import { v } from '../theme/tokens';
 import { childAgents } from '../workspace/agents';
 import type { Dnd } from '../workspace/dnd';
 import { MAX_PANES, type Action, type Pane, type PaneMode, type WorkspaceState } from '../workspace/state';
-import { ConversationView } from './ConversationView';
+import { ConversationView, type DelegationView } from './ConversationView';
 import { AgentSubtitle, agentDetails, agentTitle, Details, SessionSubtitle, sessionDetails } from './Details';
-import { ChatIcon, ChevronIcon, CloseIcon, Grip, PlusIcon, TerminalIcon } from './icons';
+import { ChatIcon, ChevronIcon, CloseIcon, DelegateIcon, Grip, PlusIcon, TerminalIcon } from './icons';
 import { AgentStatusIcon, StatusIcon } from './StatusIcon';
 import { TerminalView } from './TerminalView';
 
 // Chips for this many sub-agents at most; the tree has them all.
 const MAX_CHIPS = 6;
 
-interface Props {
+/** Delegation: who works for whom, what was handed over, and how to hand more over or bring answers back. */
+export interface DelegationProps {
+  links: SessionLink[];
+  delegations: DelegationInfo[];
+  onDelegate: (parentId: string, childId: string, text: string) => void;
+  onDeliver: (task: DelegationInfo, header: string) => void;
+}
+
+interface Props extends DelegationProps {
   state: WorkspaceState;
   dispatch: (action: Action) => void;
   dnd: Dnd;
@@ -28,7 +36,7 @@ interface Props {
 // App bar, paddings and the composer take roughly this much of the viewport.
 const CHROME_PX = 196;
 
-export function PaneGrid({ state, dispatch, dnd, sessionById, mode, windowsBuild, onNew }: Props) {
+export function PaneGrid({ state, dispatch, dnd, sessionById, mode, windowsBuild, onNew, ...delegation }: Props) {
   const canAdd = state.panes.length < MAX_PANES;
   const rows = state.panes.length > 2 ? 2 : 1;
   const rowHeight = `max(320px, calc((100vh - ${CHROME_PX + (rows - 1) * 12}px) / ${rows}))`;
@@ -68,7 +76,18 @@ export function PaneGrid({ state, dispatch, dnd, sessionById, mode, windowsBuild
         {state.panes.map((pane) => {
           const session = sessionById(pane.sessionId);
           return session ? (
-            <PaneView key={pane.id} pane={pane} session={session} state={state} dispatch={dispatch} dnd={dnd} theme={mode} windowsBuild={windowsBuild} />
+            <PaneView
+              key={pane.id}
+              pane={pane}
+              session={session}
+              state={state}
+              dispatch={dispatch}
+              dnd={dnd}
+              theme={mode}
+              windowsBuild={windowsBuild}
+              sessionById={sessionById}
+              {...delegation}
+            />
           ) : null;
         })}
       </Box>
@@ -125,6 +144,42 @@ function ModeSwitch({ mode, onChange }: { mode: PaneMode; onChange: (mode: PaneM
 }
 
 /** The sub-agents a pane's session or agent started, as chips: busy ones first, then the latest finished. */
+const chipSx = { height: 28, display: 'inline-flex', alignItems: 'center', gap: '6px', px: '10px', borderRadius: '8px', bgcolor: v.surface2, fontSize: 12, fontWeight: 500, '&:hover': { bgcolor: v.surface3 } } as const;
+
+/** The sessions delegated under a pane's session: open one, or drop a piece of the conversation on it to hand it over. */
+function DelegateChips({ delegates, dispatch, dnd, onDropText }: { delegates: SessionInfo[]; dispatch: (action: Action) => void; dnd: Dnd; onDropText: (childId: string, text: string) => void }) {
+  if (!delegates.length) return null;
+  return (
+    <Box role="group" aria-label={t.delegate} sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px', p: '0 12px 8px 36px' }}>
+      {delegates.map((child) => {
+        const target = { type: 'delegate' as const, id: child.id };
+        const over = dnd.isOver(target);
+        return (
+          <ButtonBase
+            key={child.id}
+            draggable
+            onDragStart={dnd.start({ kind: 'session', id: child.id })}
+            onDragOver={dnd.over(target)}
+            onDrop={(event) => {
+              const moving = dnd.dragging;
+              const accepted = dnd.canDrop(target);
+              dnd.drop(target)(event);
+              if (accepted && moving?.kind === 'item') onDropText(child.id, moving.text);
+            }}
+            onClick={() => dispatch({ type: 'openNew', sessionId: child.id })}
+            aria-label={`${child.title} ${t.delegate}`}
+            sx={{ ...chipSx, boxShadow: over ? `0 0 0 2px ${v.primary}` : 'none', bgcolor: over ? v.dropBg : v.surface2 }}
+          >
+            <StatusIcon status={child.status} size={12} />
+            <DelegateIcon size={13} style={{ flex: 'none', color: v.primary }} />
+            {child.title}
+          </ButtonBase>
+        );
+      })}
+    </Box>
+  );
+}
+
 function AgentChips({ session, parentId, dispatch, dnd }: { session: SessionInfo; parentId: string | null; dispatch: (action: Action) => void; dnd: Dnd }) {
   const children = childAgents(session.agents, parentId);
   if (!children.length) return null;
@@ -140,7 +195,7 @@ function AgentChips({ session, parentId, dispatch, dnd }: { session: SessionInfo
             onDragStart={dnd.start({ kind: 'agent', id: agent.id, sessionId: session.id })}
             onClick={() => dispatch({ type: 'openNew', sessionId: session.id, agentId: agent.id })}
             aria-label={`${agentTitle(agent)} ${t.openConversation}`}
-            sx={{ height: 28, display: 'inline-flex', alignItems: 'center', gap: '6px', px: '10px', borderRadius: '8px', bgcolor: v.surface2, fontSize: 12, fontWeight: 500, '&:hover': { bgcolor: v.surface3 } }}
+            sx={chipSx}
           >
             <AgentStatusIcon agent={agent} size={12} />
             {agent.agentType}
@@ -152,7 +207,7 @@ function AgentChips({ session, parentId, dispatch, dnd }: { session: SessionInfo
   );
 }
 
-interface PaneViewProps {
+interface PaneViewProps extends DelegationProps {
   pane: Pane;
   session: SessionInfo;
   state: WorkspaceState;
@@ -160,9 +215,10 @@ interface PaneViewProps {
   dnd: Dnd;
   theme: ThemeMode;
   windowsBuild: number | null;
+  sessionById: (id: string) => SessionInfo | undefined;
 }
 
-function PaneView({ pane, session, state, dispatch, dnd, theme, windowsBuild }: PaneViewProps) {
+function PaneView({ pane, session, state, dispatch, dnd, theme, windowsBuild, sessionById, links, delegations, onDelegate, onDeliver }: PaneViewProps) {
   const active = pane.id === state.active;
   const open = Boolean(state.paneOpen[pane.id]);
   const target = { type: 'pane' as const, id: pane.id };
@@ -175,6 +231,28 @@ function PaneView({ pane, session, state, dispatch, dnd, theme, windowsBuild }: 
   const mode: PaneMode = agentId || !session.screen ? 'conversation' : hasConversation ? (state.paneMode[pane.id] ?? 'terminal') : 'terminal';
   const focus = () => dispatch({ type: 'focus', paneId: pane.id });
   const openAgent = useCallback((id: string) => dispatch({ type: 'openNew', sessionId: session.id, agentId: id }), [dispatch, session.id]);
+  // A session's pane (not a sub-agent's) hands work to the sessions delegated under it.
+  const delegates = useMemo(
+    () =>
+      agentId
+        ? []
+        : links
+            .filter((l) => l.kind === 'delegate' && l.parentId === session.id)
+            .map((l) => sessionById(l.childId))
+            .filter((s): s is SessionInfo => Boolean(s)),
+    [agentId, links, session.id, sessionById],
+  );
+  const handOver = useCallback((childId: string, text: string) => onDelegate(session.id, childId, text), [onDelegate, session.id]);
+  const dragText = useCallback((entryId: string, text: string) => dnd.start({ kind: 'item', id: entryId, sessionId: session.id, text }), [dnd, session.id]);
+  const titleOf = useCallback((id: string) => sessionById(id)?.title ?? id, [sessionById]);
+  const handed = useMemo<DelegationView>(
+    () => ({
+      tasks: agentId ? [] : delegations.filter((d) => d.parentId === session.id),
+      titleOf,
+      onDeliver: (task) => onDeliver(task, t.delegationResult(titleOf(task.childId))),
+    }),
+    [agentId, delegations, session.id, titleOf, onDeliver],
+  );
   const title = agentId ? (agent ? agentTitle(agent) : t.subagent) : session.title;
 
   return (
@@ -182,7 +260,13 @@ function PaneView({ pane, session, state, dispatch, dnd, theme, windowsBuild }: 
       component="section"
       aria-label={title}
       onDragOver={dnd.over(target)}
-      onDrop={dnd.drop(target)}
+      onDrop={(event) => {
+        // A piece of a parent's conversation dropped on its delegate's pane is work for it.
+        const moving = dnd.dragging;
+        const accepted = dnd.canDrop(target);
+        dnd.drop(target)(event);
+        if (accepted && moving?.kind === 'item') onDelegate(moving.sessionId, session.id, moving.text);
+      }}
       sx={{
         position: 'relative',
         display: 'flex',
@@ -235,13 +319,22 @@ function PaneView({ pane, session, state, dispatch, dnd, theme, windowsBuild }: 
           <Details items={agent ? agentDetails(agent, session.agents, session) : sessionDetails(session)} />
         </Box>
       )}
+      <DelegateChips delegates={delegates} dispatch={dispatch} dnd={dnd} onDropText={handOver} />
       <AgentChips session={session} parentId={agentId} dispatch={dispatch} dnd={dnd} />
       <Box
         onPointerDown={mode === 'conversation' ? focus : undefined}
         sx={{ flex: 1, minHeight: 0, m: '0 12px 12px', p: mode === 'conversation' ? '4px 4px 4px 14px' : '8px 4px 4px 10px', borderRadius: '10px', bgcolor: v.termBg, overflow: 'hidden' }}
       >
         {mode === 'conversation' && hasConversation ? (
-          <ConversationView sessionId={session.id} agentId={agentId} onOpenAgent={openAgent} />
+          <ConversationView
+            sessionId={session.id}
+            agentId={agentId}
+            onOpenAgent={openAgent}
+            delegates={delegates}
+            onDelegate={handOver}
+            onDragText={dragText}
+            delegations={handed}
+          />
         ) : agentId ? (
           <Typography sx={{ p: 1, color: v.termDim }}>{t.noConversation}</Typography>
         ) : session.screen ? (
@@ -268,7 +361,7 @@ function PaneView({ pane, session, state, dispatch, dnd, theme, windowsBuild }: 
             pointerEvents: 'none',
           }}
         >
-          {dnd.dragging?.kind === 'pane' ? t.swap : t.openHere}
+          {dnd.dragging?.kind === 'pane' ? t.swap : dnd.dragging?.kind === 'item' ? t.delegate : t.openHere}
         </Box>
       )}
     </Box>

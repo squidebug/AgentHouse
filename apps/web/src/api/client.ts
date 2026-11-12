@@ -1,4 +1,4 @@
-import type { ApiError, ComposeRequest, ComposeResult, EntryDetail, EnvReport, LaunchOptions, SessionInfo, SessionLink } from '@agenthouse/protocol';
+import type { ApiError, ComposeRequest, ComposeResult, DelegationInfo, EntryDetail, EnvReport, LaunchOptions, LinkKind, SessionInfo, SessionLink } from '@agenthouse/protocol';
 
 export class RequestError extends Error {
   constructor(
@@ -33,7 +33,13 @@ export const api = {
   remove: (id: string) => call<unknown>('DELETE', `/api/sessions/${encodeURIComponent(id)}`),
   compose: (id: string, req: ComposeRequest) => call<ComposeResult>('POST', `/api/sessions/${encodeURIComponent(id)}/compose`, req),
   /** Places a session under another one (grouping), or back at the top with null. */
-  link: (id: string, parentId: string | null) => call<{ links: SessionLink[] }>('PUT', `/api/sessions/${encodeURIComponent(id)}/link`, { parentId }),
+  link: (id: string, parentId: string | null, kind: LinkKind = 'group') =>
+    call<{ links: SessionLink[] }>('PUT', `/api/sessions/${encodeURIComponent(id)}/link`, parentId === null ? { parentId } : { parentId, kind }),
+  /** Hands text from a session to the session delegated under it. */
+  delegate: (parentId: string, childId: string, text: string) =>
+    call<DelegationInfo>('POST', `/api/sessions/${encodeURIComponent(parentId)}/delegations`, { childId, text }),
+  /** Hands a delegate's answer back to its parent, now or once the parent is idle. */
+  deliver: (id: string, header: string) => call<DelegationInfo>('POST', `/api/delegations/${encodeURIComponent(id)}/deliver`, { header }),
   /** An entry of a session's conversation, or of one of its sub-agents'. */
   entry: (id: string, entryId: string, agentId: string | null = null) =>
     call<EntryDetail>('GET', `/api/sessions/${encodeURIComponent(id)}/conversation/${encodeURIComponent(entryId)}${agentId ? `?agent=${encodeURIComponent(agentId)}` : ''}`),

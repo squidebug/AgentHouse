@@ -1,7 +1,7 @@
 import { Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, Typography } from '@mui/material';
 import { useColorScheme } from '@mui/material/styles';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import { isAsking, type SessionInfo, type ThemeMode } from '@agenthouse/protocol';
+import { isAsking, type DelegationInfo, type SessionInfo, type ThemeMode } from '@agenthouse/protocol';
 import { api } from './api/client';
 import { useEnv, useSessions } from './api/hooks';
 import { Composer } from './components/Composer';
@@ -14,14 +14,14 @@ import { TopBar } from './components/TopBar';
 import { t } from './strings';
 import { v } from './theme/tokens';
 import { makeDnd } from './workspace/dnd';
-import { parentsOf } from './workspace/tree';
+import { delegatesOf, parentsOf } from './workspace/tree';
 import { loadWorkspace, reducer, saveWorkspace, type Action, type DropContext, type WorkspaceState } from './workspace/state';
 
 export function App() {
   const { mode, systemMode, setMode } = useColorScheme();
   const resolved: ThemeMode = (mode === 'system' ? systemMode : mode) === 'dark' ? 'dark' : 'light';
   const { env, loading: envLoading, refresh: refreshEnv } = useEnv();
-  const { sessions, limits, links, connected, loaded } = useSessions();
+  const { sessions, limits, links, delegations, connected, loaded } = useSessions();
 
   // Sessions launched from this tab, until the live list includes them.
   const [launched, setLaunched] = useState<Record<string, SessionInfo>>({});
@@ -41,7 +41,7 @@ export function App() {
   }, [sessions, launched]);
   const sessionById = useCallback((id: string) => byId.get(id), [byId]);
   const runningIds = [...byId.values()].filter((s) => s.state === 'running').map((s) => s.id);
-  ctxRef.current = { runningIds, parents: parentsOf([...byId.values()], links) };
+  ctxRef.current = { runningIds, parents: parentsOf([...byId.values()], links), delegates: delegatesOf([...byId.values()], links) };
 
   useEffect(() => {
     const listed = new Set(sessions.map((s) => s.id));
@@ -83,6 +83,10 @@ export function App() {
   const activeSession = activePane ? byId.get(activePane.sessionId) : undefined;
   const noCli = env?.messages.find((m) => m.id === 'ENV_NO_CLI');
 
+  // Refusals (a delegate waiting on a dialog, an ended session) leave things as they are.
+  const onDelegate = useCallback((parentId: string, childId: string, text: string) => void api.delegate(parentId, childId, text).catch(() => {}), []);
+  const onDeliver = useCallback((task: DelegationInfo, header: string) => void api.deliver(task.id, header).catch(() => {}), []);
+
   const endSession = async (session: SessionInfo) => {
     setEnding(null);
     await api.remove(session.id).catch(() => {});
@@ -107,7 +111,7 @@ export function App() {
         <SessionTree
           sessions={[...byId.values()]}
           links={links}
-          onLink={(childId, parentId) => api.link(childId, parentId).catch(() => {})}
+          onLink={(childId, parentId, kind) => api.link(childId, parentId, kind).catch(() => {})}
           state={state}
           dispatch={dispatch}
           dnd={dnd}
@@ -124,6 +128,10 @@ export function App() {
             mode={resolved}
             windowsBuild={env?.windowsBuild ?? null}
             onNew={() => setLaunchOpen(true)}
+            links={links}
+            delegations={delegations}
+            onDelegate={onDelegate}
+            onDeliver={onDeliver}
           />
           <Composer state={state} dispatch={dispatch} dnd={dnd} sessionById={sessionById} activeSession={activeSession} />
         </Box>

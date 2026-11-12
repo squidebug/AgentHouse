@@ -181,6 +181,51 @@ try {
   await page.getByRole('button', { name: '최상위로' }).click();
   await row('ui-agents').getByRole('img', { name: '묶음' }).waitFor({ state: 'detached', timeout: 5000 });
 
+  // Delegation: a session works for another; a piece of the lead's conversation goes to it, and its answer comes back.
+  for (const title of ['ui-lead', 'ui-helper']) {
+    await fetch(`${origin}/api/sessions`, {
+      method: 'POST',
+      headers: { cookie: `ah_token=${token}`, origin, 'content-type': 'application/json' },
+      body: JSON.stringify({ vendor: 'fake', title, cwd: work, theme: 'dark' }),
+    });
+  }
+  await row('ui-helper').waitFor({ timeout: 10_000 });
+  await row('ui-helper').dragTo(row('ui-lead'));
+  await page.getByRole('group', { name: 'ui-helper → ui-lead' }).getByRole('button', { name: '위임' }).click();
+  await row('ui-helper').getByRole('img', { name: '위임' }).waitFor({ timeout: 5000 });
+  check(true, 'a session dropped on another can be delegated to');
+  await page.getByRole('button', { name: 'ui-lead 열기', exact: true }).click();
+  const lead = page.getByRole('region', { name: 'ui-lead' });
+  await lead.locator('.xterm-screen').waitFor({ timeout: 10_000 });
+  await box.fill('please outline the plan');
+  await box.press('Control+Enter');
+  await lead.getByRole('button', { name: '대화', exact: true }).click();
+  const answer = lead.locator('.ah-answer', { hasText: 'fake answer: please outline the plan' });
+  await answer.waitFor({ timeout: 10_000 });
+  const helperChip = lead.getByRole('button', { name: 'ui-helper 위임' });
+  check(await helperChip.isVisible(), "the delegate is a chip in the lead's header");
+  await answer.dragTo(helperChip);
+  const card = lead.getByRole('group', { name: '위임 · ui-helper' });
+  await card.getByRole('button', { name: '전달' }).waitFor({ timeout: 10_000 });
+  check(await card.getByText('fake answer: fake answer: please outline the plan').isVisible(), 'the delegate worked on it, and its answer shows on the card');
+  await settle();
+  await page.screenshot({ path: path.join(out, 'delegate-dark.png') });
+  await card.getByRole('button', { name: '전달' }).click();
+  await card.getByText('전달됨').waitFor({ timeout: 10_000 });
+  await lead.getByText('[위임 결과 · ui-helper]', { exact: false }).first().waitFor({ timeout: 10_000 });
+  check(true, 'handed back: the lead got the answer as a message');
+  // Without dragging: the answer's own 위임 button.
+  const second = lead.locator('.ah-answer', { hasText: 'fake answer: [위임 결과 · ui-helper]' });
+  await second.waitFor({ timeout: 10_000 });
+  await second.hover();
+  await second.getByRole('button', { name: '위임' }).click();
+  await page.getByRole('menuitem', { name: 'ui-helper' }).click();
+  await lead.getByRole('group', { name: '위임 · ui-helper' }).nth(1).waitFor({ timeout: 10_000 });
+  check(true, 'handed over from the menu as well');
+  await page.getByRole('button', { name: '라이트 모드' }).click();
+  await settle();
+  await page.screenshot({ path: path.join(out, 'delegate-light.png') });
+
   check(errors.length === 0, 'no errors in the browser console', errors.join(' | '));
   console.log(`INFO  screenshots: ${out}`);
 } catch (error) {

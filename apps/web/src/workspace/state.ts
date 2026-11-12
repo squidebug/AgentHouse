@@ -22,7 +22,12 @@ const paneOf = (id: string, target: Target): Pane => ({ id, sessionId: target.se
 /** What a pane shows of its session: the live terminal, or the conversation read from the transcript. */
 export type PaneMode = 'terminal' | 'conversation';
 
-export type Drag = { kind: 'session'; id: string } | { kind: 'agent'; id: string; sessionId: string } | { kind: 'pane'; id: string };
+export type Drag =
+  | { kind: 'session'; id: string }
+  | { kind: 'agent'; id: string; sessionId: string }
+  | { kind: 'pane'; id: string }
+  /** A piece of a session's conversation (an answer), to hand to a session delegated under it. */
+  | { kind: 'item'; id: string; sessionId: string; text: string };
 
 /** The session or sub-agent a drag carries, if it carries one. */
 function dragTarget(drag: Drag): Target | null {
@@ -30,8 +35,20 @@ function dragTarget(drag: Drag): Target | null {
   if (drag.kind === 'agent') return { sessionId: drag.sessionId, agentId: drag.id };
   return null;
 }
-/** `nest`: a session row in the tree, to place the dragged session under it; `root`: back at the top. */
-export type DropTarget = { type: 'pane'; id: string } | { type: 'slot' } | { type: 'composer' } | { type: 'nest'; id: string } | { type: 'root' };
+
+/** Whether the session delegated work may go to sits delegated under the session it comes from. */
+const delegateOf = (ctx: DropContext, childId: string | undefined, parentId: string) => Boolean(childId) && ctx.delegates?.[childId!] === parentId;
+/**
+ * `nest`: a session row in the tree, to place the dragged session under it; `root`: back at the top;
+ * `delegate`: a chip of a session delegated under a pane's session, to hand it a piece of the conversation.
+ */
+export type DropTarget =
+  | { type: 'pane'; id: string }
+  | { type: 'slot' }
+  | { type: 'composer' }
+  | { type: 'nest'; id: string }
+  | { type: 'root' }
+  | { type: 'delegate'; id: string };
 
 /** A session dropped on another, waiting for the user to choose how to link them. */
 export interface PendingLink {
@@ -117,6 +134,8 @@ export interface DropContext {
   runningIds: string[];
   /** The session each placed session sits under. */
   parents?: Record<string, string>;
+  /** The same for the sessions delegated under another: work can be handed to them. */
+  delegates?: Record<string, string>;
 }
 
 const sameDrop = (a: DropTarget, b: DropTarget) => a.type === b.type && (!('id' in a) || !('id' in b) || a.id === b.id);
@@ -128,6 +147,14 @@ function sameTarget(a: DropTarget | null, b: DropTarget): boolean {
 export function accepts(state: WorkspaceState, target: DropTarget, ctx: DropContext): boolean {
   const drag = state.drag;
   if (!drag) return false;
+  // A piece of a conversation goes to a session delegated under the one it comes from, and nowhere else.
+  if (drag.kind === 'item') {
+    if (target.type === 'delegate') return delegateOf(ctx, target.id, drag.sessionId);
+    if (target.type !== 'pane') return false;
+    const pane = state.panes.find((p) => p.id === target.id);
+    return !pane?.agentId && delegateOf(ctx, pane?.sessionId, drag.sessionId);
+  }
+  if (target.type === 'delegate') return false;
   if (target.type === 'pane') return drag.kind !== 'pane' || drag.id !== target.id;
   if (drag.kind === 'pane') return false;
   if (target.type === 'slot') return state.panes.length < MAX_PANES;
@@ -176,6 +203,8 @@ function drop(state: WorkspaceState, target: DropTarget): WorkspaceState {
   const drag = state.drag;
   if (!drag) return state;
   if (drag.kind === 'pane') return target.type === 'pane' ? swap(state, drag.id, target.id) : state;
+  // Handing work over is done by whoever handles the drop; the layout stays.
+  if (drag.kind === 'item') return state;
   // Linking asks first (nest); going back to the top is done by whoever handles the drop (root).
   if (target.type === 'nest') return { ...state, pending: { childId: drag.id, parentId: target.id } };
   if (target.type === 'root') return state;

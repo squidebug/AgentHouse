@@ -96,5 +96,13 @@ export const t = {
   group: '묶음',
   groupAction: '묶기',
   toTop: '최상위로',
+  delegate: '위임',
+  delegateAction: '위임',
+  delegateTo: '위임할 세션',
+  deliver: '전달',
+  delegation: { running: '진행 중', done: '완료', interrupted: '중단됨', failed: '실패' } as Record<string, string>,
+  delivery: { queued: '대기열', sent: '전달됨', failed: '전달 실패' } as Record<string, string>,
+  /** What the parent session gets in front of the delegate's answer. */
+  delegationResult: (title: string) => `[위임 결과 · ${title}]`,
   notice: { interrupted: '중단됨', cleared: '새 대화', compacted: '대화 요약', api_error: 'API 오류' } as Record<string, string>,
 } as const;

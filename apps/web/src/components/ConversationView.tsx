@@ -1,13 +1,13 @@
-import { Box, Button, ButtonBase, CircularProgress, IconButton, Tooltip, Typography } from '@mui/material';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { ConversationEntry, ConversationTurn, EntryDetail, ToolState } from '@agenthouse/protocol';
+import { Box, Button, ButtonBase, CircularProgress, IconButton, Menu, MenuItem, Tooltip, Typography } from '@mui/material';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent } from 'react';
+import type { ConversationEntry, ConversationTurn, DelegationInfo, EntryDetail, SessionInfo, ToolState } from '@agenthouse/protocol';
 import { api } from '../api/client';
 import { useConversation } from '../api/conversation';
 import { t } from '../strings';
 import { FONT_MONO } from '../theme/theme';
 import { v } from '../theme/tokens';
-import { arrange, compactCount, duration, modelName, summarize, type TurnView, type WorkEntry } from '../workspace/conversation';
-import { BranchIcon, ChatIcon, ChevronIcon } from './icons';
+import { arrange, compactCount, delegationTurns, duration, modelName, summarize, type TurnView, type WorkEntry } from '../workspace/conversation';
+import { BranchIcon, ChatIcon, ChevronIcon, DelegateIcon, ReturnIcon } from './icons';
 import { MarkdownText } from './Markdown';
 
 // The newest turns first; older ones a page at a time.
@@ -37,6 +37,105 @@ export interface ConversationSource {
   agentId: string | null;
   /** Opens a sub-agent's own conversation, from its block. */
   onOpenAgent?: ((agentId: string) => void) | undefined;
+  /** The sessions delegated under this one: an answer can be handed to them. */
+  delegates?: SessionInfo[] | undefined;
+  onDelegate?: ((childId: string, text: string) => void) | undefined;
+  /** Starts dragging a piece of the conversation (to a delegate's chip or pane). */
+  onDragText?: ((entryId: string, text: string) => (event: DragEvent) => void) | undefined;
+}
+
+/** An answer of the model; with sessions delegated under this one, it can be dragged to them or handed over from a menu. */
+function AnswerText({ entry, source }: { entry: Extract<ConversationEntry, { kind: 'text' }>; source: ConversationSource }) {
+  const [anchor, setAnchor] = useState<HTMLElement | null>(null);
+  const delegates = source.delegates ?? [];
+  if (!delegates.length || !source.onDelegate) {
+    return (
+      <Box>
+        <MarkdownText text={entry.text} />
+        {entry.truncated && <Partial />}
+      </Box>
+    );
+  }
+  return (
+    <Box
+      className="ah-answer"
+      draggable={Boolean(source.onDragText)}
+      onDragStart={source.onDragText?.(entry.id, entry.text)}
+      sx={{ position: 'relative', m: '-4px -6px', p: '4px 34px 4px 6px', borderRadius: '8px', cursor: 'grab', '&:hover': { bgcolor: v.surface2 }, '&:hover .ah-hand': { opacity: 1 } }}
+    >
+      <MarkdownText text={entry.text} />
+      {entry.truncated && <Partial />}
+      <Tooltip title={t.delegateAction}>
+        <IconButton
+          className="ah-hand"
+          aria-label={t.delegateAction}
+          aria-haspopup="menu"
+          onClick={(event) => setAnchor(event.currentTarget)}
+          sx={{ position: 'absolute', top: 2, right: 2, width: 28, height: 28, color: v.primary, opacity: anchor ? 1 : 0, '&:focus-visible': { opacity: 1 } }}
+        >
+          <DelegateIcon size={15} />
+        </IconButton>
+      </Tooltip>
+      <Menu anchorEl={anchor} open={Boolean(anchor)} onClose={() => setAnchor(null)} slotProps={{ list: { 'aria-label': t.delegateTo } }}>
+        {delegates.map((child) => (
+          <MenuItem
+            key={child.id}
+            onClick={() => {
+              setAnchor(null);
+              source.onDelegate?.(child.id, entry.text);
+            }}
+            sx={{ fontSize: 13 }}
+          >
+            {child.title}
+          </MenuItem>
+        ))}
+      </Menu>
+    </Box>
+  );
+}
+
+/** Work handed to a delegate: in progress, then its answer with the button that hands it to this session. */
+function DelegationCard({ task, title, onDeliver }: { task: DelegationInfo; title: string; onDeliver?: ((task: DelegationInfo) => void) | undefined }) {
+  if (task.status === 'running') {
+    return (
+      <Box role="status" sx={{ display: 'flex', alignItems: 'center', gap: '8px', p: '8px 10px', borderRadius: '10px', bgcolor: v.surface2, fontSize: 12, lineHeight: '16px' }}>
+        <DelegateIcon size={14} style={{ flex: 'none', color: v.primary }} />
+        <Box component="span" sx={{ fontWeight: 500 }}>
+          {title}
+        </Box>
+        <Box component="span" sx={{ color: v.on2 }}>
+          {t.delegation.running}
+        </Box>
+      </Box>
+    );
+  }
+  const canDeliver = Boolean(task.summary) && (task.delivery === 'none' || task.delivery === 'failed') && onDeliver;
+  return (
+    <Box role="group" aria-label={`${t.delegate} · ${title}`} sx={{ display: 'flex', alignItems: 'center', gap: '10px', p: '10px 12px', borderRadius: '12px', bgcolor: v.primaryContainer, color: v.onPrimaryContainer }}>
+      <ReturnIcon size={16} style={{ flex: 'none' }} />
+      <Box sx={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+        <Box component="span" sx={{ fontWeight: 600 }}>
+          {title}
+        </Box>
+        <Box component="span" sx={{ fontSize: 12, lineHeight: '16px', overflowWrap: 'anywhere' }}>
+          {task.status === 'done' && task.summary ? task.summary : [t.delegation[task.status], task.summary].filter(Boolean).join(' · ')}
+        </Box>
+      </Box>
+      {task.delivery === 'failed' && <Box component="span" sx={{ flex: 'none', fontSize: 12 }}>{t.delivery.failed}</Box>}
+      {canDeliver ? (
+        <Button
+          variant="contained"
+          disableElevation
+          onClick={() => onDeliver?.(task)}
+          sx={{ flex: 'none', height: 32, px: 1.75, borderRadius: '999px', fontSize: 12, fontWeight: 500, bgcolor: v.primary, color: v.onPrimary }}
+        >
+          {t.deliver}
+        </Button>
+      ) : (
+        task.delivery !== 'none' && task.delivery !== 'failed' && <Box component="span" sx={{ flex: 'none', fontSize: 12 }}>{t.delivery[task.delivery]}</Box>
+      )}
+    </Box>
+  );
 }
 
 /** The full content of an entry, loaded the first time it is opened (again if its state changed). */
@@ -368,12 +467,7 @@ function EntryView({ entry, source }: { entry: ConversationEntry; source: Conver
     case 'prompt':
       return <Prompt entry={entry} source={source} />;
     case 'text':
-      return (
-        <Box>
-          <MarkdownText text={entry.text} />
-          {entry.truncated && <Partial />}
-        </Box>
-      );
+      return <AnswerText entry={entry} source={source} />;
     case 'notice':
       return <Notice entry={entry} source={source} />;
     case 'command':
@@ -407,22 +501,52 @@ function TurnFooter({ turn }: { turn: ConversationTurn }) {
   );
 }
 
-function Turn({ view, source }: { view: TurnView; source: ConversationSource }) {
+function Turn({ view, source, cards }: { view: TurnView; source: ConversationSource; cards?: React.ReactNode }) {
   return (
     <Box component="article" aria-label={t.turn(view.turn.index + 1)} sx={{ display: 'flex', flexDirection: 'column', gap: '8px', py: '12px', '& + &': { borderTop: `1px solid ${v.outline}` } }}>
       {view.blocks.map((block) =>
         block.kind === 'work' ? <WorkRow key={block.id} entries={block.entries} source={source} /> : <EntryView key={block.entry.id} entry={block.entry} source={source} />,
       )}
       <TurnFooter turn={view.turn} />
+      {cards}
     </Box>
   );
 }
 
+/** What the session delegated, shown after the turn it came from. */
+export interface DelegationView {
+  tasks: DelegationInfo[];
+  titleOf: (sessionId: string) => string;
+  onDeliver?: ((task: DelegationInfo) => void) | undefined;
+}
+
 /** A session's conversation, read-only, from its transcript: the newest turns, following as they happen. */
-export function ConversationView({ sessionId, agentId = null, onOpenAgent }: { sessionId: string; agentId?: string | null; onOpenAgent?: (agentId: string) => void }) {
+export function ConversationView({
+  sessionId,
+  agentId = null,
+  onOpenAgent,
+  delegates,
+  onDelegate,
+  onDragText,
+  delegations,
+}: {
+  sessionId: string;
+  agentId?: string | null;
+  onOpenAgent?: (agentId: string) => void;
+  delegates?: SessionInfo[];
+  onDelegate?: (childId: string, text: string) => void;
+  onDragText?: (entryId: string, text: string) => (event: DragEvent) => void;
+  delegations?: DelegationView;
+}) {
   const conversation = useConversation(sessionId, agentId);
-  const source = useMemo<ConversationSource>(() => ({ sessionId, agentId, onOpenAgent }), [sessionId, agentId, onOpenAgent]);
+  const source = useMemo<ConversationSource>(
+    () => ({ sessionId, agentId, onOpenAgent, delegates, onDelegate, onDragText }),
+    [sessionId, agentId, onOpenAgent, delegates, onDelegate, onDragText],
+  );
   const turns = useMemo(() => arrange(conversation.turns, conversation.entries), [conversation]);
+  const placed = useMemo(() => delegationTurns(conversation.turns, delegations?.tasks ?? []), [conversation.turns, delegations?.tasks]);
+  const cardsAfter = (index: number) =>
+    placed.get(index)?.map((task) => <DelegationCard key={task.id} task={task} title={delegations!.titleOf(task.childId)} onDeliver={delegations!.onDeliver} />);
   const [shown, setShown] = useState(PAGE);
   const scroller = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
@@ -469,8 +593,9 @@ export function ConversationView({ sessionId, agentId = null, onOpenAgent }: { s
         </Button>
       )}
       {turns.slice(hidden).map((view) => (
-        <Turn key={view.turn.index} view={view} source={source} />
+        <Turn key={view.turn.index} view={view} source={source} cards={cardsAfter(view.turn.index)} />
       ))}
+      {placed.has(-1) && <Box sx={{ display: 'flex', flexDirection: 'column', gap: '8px', py: '12px' }}>{cardsAfter(-1)}</Box>}
     </Box>
   );
 }

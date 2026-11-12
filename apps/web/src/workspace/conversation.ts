@@ -1,6 +1,6 @@
 // How the conversation view lays out a session's turns, kept free of React so
 // it can be tested directly.
-import type { ConversationEntry, ConversationTurn } from '@agenthouse/protocol';
+import type { ConversationEntry, ConversationTurn, DelegationInfo } from '@agenthouse/protocol';
 
 export type WorkEntry = Extract<ConversationEntry, { kind: 'tool' | 'thinking' }>;
 
@@ -73,4 +73,20 @@ export function duration(ms: number): string {
   if (h) return `${h}시간 ${m}분`;
   if (m) return s ? `${m}분 ${s}초` : `${m}분`;
   return `${s}초`;
+}
+
+/**
+ * Where each delegation card goes: after the last turn that had started when
+ * the work was sent (the turn the handed-over answer came from), else after
+ * the first. Key -1: there are no turns yet; the cards go at the end.
+ */
+export function delegationTurns(turns: ConversationTurn[], tasks: DelegationInfo[]): Map<number, DelegationInfo[]> {
+  const placed = new Map<number, DelegationInfo[]>();
+  const ordered = [...turns].sort((a, b) => a.index - b.index);
+  for (const task of [...tasks].sort((a, b) => a.sentAt - b.sentAt)) {
+    let at = ordered[0]?.index ?? -1;
+    for (const turn of ordered) if (turn.startedAt !== null && turn.startedAt <= task.sentAt) at = turn.index;
+    placed.set(at, [...(placed.get(at) ?? []), task]);
+  }
+  return placed;
 }

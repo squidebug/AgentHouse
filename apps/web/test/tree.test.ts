@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { SessionInfo, SessionLink } from '@agenthouse/protocol';
 import { accepts, initialWorkspace, reducer, type Action, type DropContext, type WorkspaceState } from '../src/workspace/state';
-import { parentsOf, sessionTree } from '../src/workspace/tree';
+import { delegatesOf, parentsOf, sessionTree } from '../src/workspace/tree';
 
 const session = (id: string, cwd = '/work/shop'): SessionInfo => ({ id, cwd }) as SessionInfo;
 const group = (childId: string, parentId: string): SessionLink => ({ childId, parentId, kind: 'group' });
@@ -43,4 +43,26 @@ test('a session dropped on another at the top waits for the choice; it can go ba
   assert.equal(toTop('b'), true);
   assert.equal(toTop('c'), false, 'only a placed session goes back to the top');
   assert.equal(accepts(run(initialWorkspace, drag('c')), { type: 'composer' }, ctx), true, 'the other drops still work');
+});
+
+test('a piece of a conversation goes only to a session delegated under the one it comes from', () => {
+  const sessions = [session('lead'), session('helper'), session('other'), session('grouped')];
+  const links = [
+    { childId: 'helper', parentId: 'lead', kind: 'delegate' as const },
+    { childId: 'grouped', parentId: 'lead', kind: 'group' as const },
+  ];
+  const delegating: DropContext = { runningIds: ['lead', 'helper', 'other', 'grouped'], parents: parentsOf(sessions, links), delegates: delegatesOf(sessions, links) };
+  assert.deepEqual(delegating.delegates, { helper: 'lead' });
+  const panes = reducer(reducer(initialWorkspace, { type: 'open', sessionId: 'helper' }, delegating), { type: 'openNew', sessionId: 'other' }, delegating);
+  const dragging = reducer(panes, { type: 'dragStart', drag: { kind: 'item', id: 'e1', sessionId: 'lead', text: 'do this' } }, delegating);
+  const can = (target: Parameters<typeof accepts>[1]) => accepts(dragging, target, delegating);
+  assert.equal(can({ type: 'delegate', id: 'helper' }), true);
+  assert.equal(can({ type: 'delegate', id: 'grouped' }), false, 'grouped is not delegated');
+  assert.equal(can({ type: 'pane', id: 'p1' }), true, "the delegate's pane");
+  assert.equal(can({ type: 'pane', id: 'p2' }), false);
+  for (const target of [{ type: 'slot' }, { type: 'composer' }, { type: 'root' }, { type: 'nest', id: 'other' }] as const) assert.equal(can(target), false, target.type);
+  const dropped = reducer(dragging, { type: 'drop', target: { type: 'pane', id: 'p1' } }, delegating);
+  assert.deepEqual(dropped.panes, panes.panes, 'the layout stays; the drop handler hands the work over');
+  const fromHelper = reducer(panes, { type: 'dragStart', drag: { kind: 'item', id: 'e2', sessionId: 'helper', text: 'x' } }, delegating);
+  assert.equal(accepts(fromHelper, { type: 'delegate', id: 'helper' }, delegating), false, 'not back to itself');
 });

@@ -114,3 +114,17 @@ export const LinkIcon = (p: IconProps) => (
     <path d="M10 14 L14 10 M8.5 11.5 L6.5 13.5 A3.5 3.5 0 0 0 11.5 18.5 L13.5 16.5 M15.5 12.5 L17.5 10.5 A3.5 3.5 0 0 0 12.5 5.5 L10.5 7.5" />
   </Svg>
 );
+
+/** Work handed to a session delegated under another, as in the approved design. */
+export const DelegateIcon = (p: IconProps) => (
+  <Svg aria-hidden={p.role === 'img' ? undefined : true} {...p}>
+    <path d="M6 4 V11 A4 4 0 0 0 10 15 H18 M14 11 L18 15 L14 19" />
+  </Svg>
+);
+
+/** A delegate's answer coming back. */
+export const ReturnIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M18 20 V13 A4 4 0 0 0 14 9 H6 M10 5 L6 9 L10 13" />
+  </Svg>
+);

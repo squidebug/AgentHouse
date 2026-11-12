@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { ConversationEntry, ConversationTurn } from '@agenthouse/protocol';
-import { arrange, compactCount, duration, modelName, summarize, type WorkEntry } from '../src/workspace/conversation';
+import { arrange, compactCount, delegationTurns, duration, modelName, summarize, type WorkEntry } from '../src/workspace/conversation';
 
 const turn = (index: number): ConversationTurn => ({
   index,
@@ -62,4 +62,19 @@ test('numbers, durations and model names read short', () => {
   assert.equal(modelName('claude-sonnet-4-20250514'), 'Sonnet 4');
   assert.equal(modelName('claude-sonnet-4-5-20250929'), 'Sonnet 4.5');
   assert.equal(modelName('fake-model'), 'fake-model');
+});
+
+test('delegation cards go after the turn the work was handed from', () => {
+  const at = (index: number, startedAt: number | null): ConversationTurn => ({ ...turn(index), startedAt });
+  const task = (id: string, sentAt: number) =>
+    ({ id, parentId: 'p', childId: 'c', sentAt, status: 'running', endedAt: null, summary: null, delivery: 'none', deliveredAt: null }) as const;
+  const placed = delegationTurns([at(1, 2000), at(0, 1000), at(2, null)], [task('late', 2500), task('early', 1500), task('first', 500)]);
+  assert.deepEqual(
+    [...placed].map(([turnIndex, tasks]) => [turnIndex, tasks.map((t) => t.id)]),
+    [
+      [0, ['first', 'early']],
+      [1, ['late']],
+    ],
+  );
+  assert.deepEqual([...delegationTurns([], [task('alone', 1)]).keys()], [-1], 'no turns yet: at the end');
 });

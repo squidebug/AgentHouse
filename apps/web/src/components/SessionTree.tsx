@@ -1,6 +1,6 @@
 import { Box, Button, ButtonBase, IconButton, Menu, MenuItem, Tooltip, Typography } from '@mui/material';
 import { useState } from 'react';
-import type { AgentInfo, SessionInfo, SessionLink } from '@agenthouse/protocol';
+import type { AgentInfo, LinkKind, SessionInfo, SessionLink } from '@agenthouse/protocol';
 import { t } from '../strings';
 import { v } from '../theme/tokens';
 import { agentRows, SHOWN_FINISHED } from '../workspace/agents';
@@ -8,7 +8,7 @@ import type { Dnd } from '../workspace/dnd';
 import type { Action, WorkspaceState } from '../workspace/state';
 import { sessionTree, type SessionNode } from '../workspace/tree';
 import { AgentSubtitle, agentDetails, agentTitle, Details, SessionSubtitle, sessionDetails } from './Details';
-import { ChevronIcon, Grip, LinkIcon, PlusIcon } from './icons';
+import { ChevronIcon, DelegateIcon, Grip, LinkIcon, PlusIcon } from './icons';
 import { AgentStatusIcon, StatusIcon } from './StatusIcon';
 
 // Each level of nesting moves a row this far in.
@@ -108,13 +108,13 @@ function AgentRows({ session, base, state, dispatch, dnd }: Omit<AgentRowProps, 
   );
 }
 
-/** "묶기" without dragging: the sessions at the top this one can go under. */
-function GroupMenu({ session, candidates, onLink }: { session: SessionInfo; candidates: SessionInfo[]; onLink: Props['onLink'] }) {
+/** "묶기" or "위임" without dragging: the sessions at the top this one can go under. */
+function LinkMenu({ session, candidates, kind, onLink }: { session: SessionInfo; candidates: SessionInfo[]; kind: LinkKind; onLink: Props['onLink'] }) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   return (
     <>
       <Button size="small" color="inherit" aria-haspopup="menu" onClick={(event) => setAnchor(event.currentTarget)} sx={smallButton}>
-        {t.groupAction}
+        {kind === 'delegate' ? t.delegateAction : t.groupAction}
       </Button>
       <Menu anchorEl={anchor} open={Boolean(anchor)} onClose={() => setAnchor(null)}>
         {candidates.map((parent) => (
@@ -122,7 +122,7 @@ function GroupMenu({ session, candidates, onLink }: { session: SessionInfo; cand
             key={parent.id}
             onClick={() => {
               setAnchor(null);
-              onLink(session.id, parent.id);
+              onLink(session.id, parent.id, kind);
             }}
             sx={{ fontSize: 13 }}
           >
@@ -162,7 +162,8 @@ function SessionBranch(props: BranchProps) {
   const placing = pending ? byId.get(pending.childId) : undefined;
   const candidates = tops.filter((s) => s.id !== session.id);
   const details = sessionDetails(session);
-  if (parent) details.splice(1, 0, { k: t.group, v: parent.title });
+  const delegated = link?.kind === 'delegate';
+  if (parent) details.splice(1, 0, { k: delegated ? t.delegate : t.group, v: parent.title });
   return (
     <Box>
       <Box
@@ -197,7 +198,12 @@ function SessionBranch(props: BranchProps) {
           </Typography>
           <SessionSubtitle session={session} />
         </ButtonBase>
-        {link && <LinkIcon role="img" aria-label={t.group} size={14} style={{ flex: 'none', color: v.on2 }} />}
+        {link &&
+          (delegated ? (
+            <DelegateIcon role="img" aria-label={t.delegate} size={14} style={{ flex: 'none', color: v.primary }} />
+          ) : (
+            <LinkIcon role="img" aria-label={t.group} size={14} style={{ flex: 'none', color: v.on2 }} />
+          ))}
         <IconButton aria-label={`${session.title} ${t.details}`} aria-expanded={open} onClick={() => dispatch({ type: 'toggleRow', id: session.id })} sx={{ width: 36, height: 36, color: v.on2 }}>
           <ChevronIcon open={open} size={16} />
         </IconButton>
@@ -209,7 +215,13 @@ function SessionBranch(props: BranchProps) {
               {t.toTop}
             </Button>
           ) : (
-            !node.children.length && candidates.length > 0 && <GroupMenu session={session} candidates={candidates} onLink={onLink} />
+            !node.children.length &&
+            candidates.length > 0 && (
+              <>
+                <LinkMenu session={session} candidates={candidates} kind="delegate" onLink={onLink} />
+                <LinkMenu session={session} candidates={candidates} kind="group" onLink={onLink} />
+              </>
+            )
           )}
           {session.state === 'running' ? (
             <Button size="small" color="inherit" onClick={() => onEnd(session.id)} sx={{ ...smallButton, color: v.error }}>
@@ -227,12 +239,24 @@ function SessionBranch(props: BranchProps) {
           <Button
             size="small"
             onClick={() => {
-              onLink(pending.childId, session.id);
+              onLink(pending.childId, session.id, 'group');
               dispatch({ type: 'settleLink' });
             }}
             sx={{ ...smallButton, minHeight: 32, px: 1.75, bgcolor: v.surface2, color: v.on, fontWeight: 500, '&:hover': { bgcolor: v.surface3 } }}
           >
             {t.groupAction}
+          </Button>
+          <Button
+            size="small"
+            variant="contained"
+            disableElevation
+            onClick={() => {
+              onLink(pending.childId, session.id, 'delegate');
+              dispatch({ type: 'settleLink' });
+            }}
+            sx={{ ...smallButton, minHeight: 32, px: 1.75, bgcolor: v.primary, color: v.onPrimary, fontWeight: 500 }}
+          >
+            {t.delegateAction}
           </Button>
           <Button size="small" color="inherit" onClick={() => dispatch({ type: 'settleLink' })} sx={{ ...smallButton, minHeight: 32, color: v.on2 }}>
             {t.cancel}
@@ -256,8 +280,8 @@ interface Props {
   onNew: () => void;
   onEnd: (id: string) => void;
   onRemove: (id: string) => void;
-  /** Places a session under another one, or back at the top (null). */
-  onLink: (childId: string, parentId: string | null) => void;
+  /** Places a session under another one (grouped, or delegated to), or back at the top (null). */
+  onLink: (childId: string, parentId: string | null, kind?: LinkKind) => void;
 }
 
 export function SessionTree({ sessions, links, state, dispatch, dnd, onNew, onEnd, onRemove, onLink }: Props) {

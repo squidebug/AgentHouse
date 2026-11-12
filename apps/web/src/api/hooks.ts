@@ -1,12 +1,20 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { AccountLimits, EnvReport, EventServerMessage, SessionInfo, SessionLink } from '@agenthouse/protocol';
+import type { AccountLimits, DelegationInfo, EnvReport, EventServerMessage, SessionInfo, SessionLink } from '@agenthouse/protocol';
 import { api, socketUrl } from './client';
 
 /** Live sessions, plan usage and session links from /ws/events, reconnecting with backoff while the server restarts. */
-export function useSessions(): { sessions: SessionInfo[]; limits: AccountLimits[]; links: SessionLink[]; connected: boolean; loaded: boolean } {
+export function useSessions(): {
+  sessions: SessionInfo[];
+  limits: AccountLimits[];
+  links: SessionLink[];
+  delegations: DelegationInfo[];
+  connected: boolean;
+  loaded: boolean;
+} {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [limits, setLimits] = useState<AccountLimits[]>([]);
   const [links, setLinks] = useState<SessionLink[]>([]);
+  const [delegations, setDelegations] = useState<DelegationInfo[]>([]);
   const [connected, setConnected] = useState(true);
   const [loaded, setLoaded] = useState(false);
 
@@ -31,6 +39,8 @@ export function useSessions(): { sessions: SessionInfo[]; limits: AccountLimits[
           setLimits(message.limits);
         } else if (message.type === 'links') {
           setLinks(message.links);
+        } else if (message.type === 'delegations') {
+          setDelegations(message.delegations);
         }
       };
       ws.onclose = () => {
@@ -48,7 +58,7 @@ export function useSessions(): { sessions: SessionInfo[]; limits: AccountLimits[
     };
   }, []);
 
-  return { sessions, limits, links, connected, loaded };
+  return { sessions, limits, links, delegations, connected, loaded };
 }
 
 export function useEnv(): { env: EnvReport | null; refresh: () => Promise<void>; loading: boolean } {

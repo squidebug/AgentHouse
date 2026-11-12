@@ -34,6 +34,11 @@ export function parentsOf(sessions: SessionInfo[], links: SessionLink[]): Record
   return Object.fromEntries([...validLinks(sessions, links).values()].map((l) => [l.childId, l.parentId]));
 }
 
+/** The same, for the sessions delegated under another (they can be handed work). */
+export function delegatesOf(sessions: SessionInfo[], links: SessionLink[]): Record<string, string> {
+  return Object.fromEntries([...validLinks(sessions, links).values()].filter((l) => l.kind === 'delegate').map((l) => [l.childId, l.parentId]));
+}
+
 /**
  * Sessions at the top, grouped by working folder in the order they started,
  * each with the sessions placed under it (whatever their folder).
