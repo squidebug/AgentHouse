@@ -44,6 +44,7 @@ test('an observed claude session gets relay hooks and keeps the user status line
   process.env.CLAUDE_CONFIG_DIR = configDir;
   try {
     const spec = await buildLaunch({ vendor: 'claude' }, install, cwd, { observe: { port: 4321, token: 'secret' } });
+    const withAgents = await buildLaunch({ vendor: 'claude' }, install, cwd, { observe: { port: 4321, token: 'secret', subagents: true } });
     const settingsPath = spec.args[spec.args.indexOf('--settings') + 1] ?? '';
     const settings = JSON.parse(readFileSync(settingsPath, 'utf8'));
     assert.deepEqual(Object.keys(settings.hooks).sort(), [...HOOK_EVENTS].sort());
@@ -64,7 +65,11 @@ test('an observed claude session gets relay hooks and keeps the user status line
     assert.equal(settings.statusLine.padding, 1, "the user's padding is kept");
     const relayConfig = JSON.parse(readFileSync(relayConfigPath, 'utf8'));
     assert.deepEqual(relayConfig, { port: 4321, token: 'secret', statusCommand: 'my-status --short' });
+    assert.equal(settings.subagentStatusLine, undefined, 'the sub-agent status line only where the CLI is known to have it');
+    const agentSettings = JSON.parse(readFileSync(withAgents.args[withAgents.args.indexOf('--settings') + 1] ?? '', 'utf8'));
+    assert.match(agentSettings.subagentStatusLine.command, /["'] '?subagent'? ["']/);
     await rm(spec.tempPaths[0] ?? '', { recursive: true, force: true });
+    await rm(withAgents.tempPaths[0] ?? '', { recursive: true, force: true });
   } finally {
     if (previous === undefined) delete process.env.CLAUDE_CONFIG_DIR;
     else process.env.CLAUDE_CONFIG_DIR = previous;

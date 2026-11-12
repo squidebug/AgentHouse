@@ -27,6 +27,9 @@ export interface ManagerOptions {
 
 // `claude agents --json` (lists sessions as idle, busy or waiting) arrived in 2.1.145.
 const AGENTS_JSON_SINCE = [2, 1, 145];
+// The sub-agent status line (each sub-agent's model and tokens), first checked on
+// 2.1.322; older versions may have it too, but an unknown settings key is not risked.
+const SUBAGENT_STATUS_LINE_SINCE = [2, 1, 322];
 
 /** Compares the first x.y.z in a CLI's version text; an unknown version counts as recent enough. */
 export function versionAtLeast(version: string | null, minimum: number[]): boolean {
@@ -110,7 +113,7 @@ export class SessionManager extends EventEmitter {
     // line; the relay proves which session it speaks for with this token.
     const hookToken = opts.vendor === 'codex' ? null : randomBytes(24).toString('base64url');
     const spec = await buildLaunch(opts, install, cwd, {
-      ...(hookToken ? { observe: { port: this.options.host.port, token: hookToken } } : {}),
+      ...(hookToken ? { observe: { port: this.options.host.port, token: hookToken, subagents: versionAtLeast(install.version, SUBAGENT_STATUS_LINE_SINCE) } } : {}),
       tempRoot: this.options.host.runDir,
     });
     try {

@@ -62,12 +62,13 @@ export function gitBashPath(env: NodeJS.ProcessEnv = process.env): string | null
  * The status line the user would see without AgentHouse: the first one in local
  * project, shared project, then user settings (Claude's own order below managed
  * policy and the --settings flag). AgentHouse's status line runs it and prints
- * its output, so the user's status line stays as it was.
+ * its output, so the user's status line stays as it was. The same goes for the
+ * sub-agent status line (`subagentStatusLine`).
  */
-export function userStatusLine(cwd: string, env: NodeJS.ProcessEnv = process.env): StatusLineSetting | null {
+export function userStatusLine(cwd: string, env: NodeJS.ProcessEnv = process.env, key: 'statusLine' | 'subagentStatusLine' = 'statusLine'): StatusLineSetting | null {
   const files = [path.join(cwd, '.claude', 'settings.local.json'), path.join(cwd, '.claude', 'settings.json'), path.join(claudeConfigDir(env), 'settings.json')];
   for (const file of files) {
-    const statusLine = readSettings(file)?.statusLine as { type?: unknown; command?: unknown; padding?: unknown } | undefined;
+    const statusLine = readSettings(file)?.[key] as { type?: unknown; command?: unknown; padding?: unknown } | undefined;
     if (statusLine?.type === 'command' && typeof statusLine.command === 'string' && statusLine.command.trim()) {
       return { command: statusLine.command, ...(typeof statusLine.padding === 'number' ? { padding: statusLine.padding } : {}) };
     }

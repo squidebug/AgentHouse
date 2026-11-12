@@ -1,17 +1,27 @@
 import path from 'node:path';
 import type { AccountLimits, RateWindow, SessionStatus, SessionTelemetry, StatusValue } from '@agenthouse/protocol';
 
-/** The fields of a Claude Code hook event that status tracking reads; everything else is dropped. */
+/** The fields of a Claude Code hook event that the status and the agent tree read; everything else is dropped. */
 export interface HookEvent {
   hook_event_name?: unknown;
   session_id?: unknown;
   transcript_path?: unknown;
   source?: unknown;
   tool_name?: unknown;
+  tool_use_id?: unknown;
+  /** Agent tool: `{ description, subagent_type }`. */
+  tool_input?: unknown;
+  /** Agent tool: `{ agentId, description, resolvedModel, status }` (2.1.322). */
+  tool_response?: unknown;
   notification_type?: unknown;
   error?: unknown;
   error_type?: unknown;
+  /** Set when a sub-agent, not the main conversation, caused the event. */
   agent_id?: unknown;
+  agent_type?: unknown;
+  agent_transcript_path?: unknown;
+  /** Stop: the sub-agents still running, `{ id, type, status, description, agent_type }`. */
+  background_tasks?: unknown;
 }
 
 const text = (value: unknown): string | null => (typeof value === 'string' && value ? value : null);
@@ -27,7 +37,7 @@ export const unobservedStatus = (at = Date.now()) => status('unobserved', at);
 export const initialTelemetry = (): SessionTelemetry => ({ level: 'minimal', model: null, effort: null, contextPct: null, contextWindow: null, costUsd: null });
 
 // Tools that wait for the user instead of running.
-const ASKING_TOOLS: Record<string, string> = { AskUserQuestion: 'question', ExitPlanMode: 'plan' };
+export const ASKING_TOOLS: Record<string, string> = { AskUserQuestion: 'question', ExitPlanMode: 'plan' };
 
 /**
  * Hook events the status reads. The launch settings subscribe to exactly

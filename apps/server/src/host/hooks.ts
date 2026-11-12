@@ -14,13 +14,14 @@ export interface RelayInbox {
 }
 
 /**
- * POST /hook and /status from a session's relay. The hook token picks the
- * session; browsers (which always send Origin) are refused like on /control.
- * Returns false for any other request, which the caller answers.
+ * POST /hook, /status and /subagents (the sub-agent status line) from a
+ * session's relay. The hook token picks the session; browsers (which always
+ * send Origin) are refused like on /control. Returns false for any other
+ * request, which the caller answers.
  */
 export function receiveFromRelay(req: IncomingMessage, res: ServerResponse, inbox: RelayInbox): boolean {
   const route = req.method === 'POST' ? req.url : undefined;
-  if (route !== '/hook' && route !== '/status') return false;
+  if (route !== '/hook' && route !== '/status' && route !== '/subagents') return false;
   const bearer = req.headers.authorization?.match(/^Bearer (.+)$/)?.[1];
   const observer = req.headers.origin === undefined && bearer ? inbox.find(bearer) : undefined;
   if (!observer) {
@@ -48,6 +49,10 @@ export function receiveFromRelay(req: IncomingMessage, res: ServerResponse, inbo
     if (!payload || typeof payload !== 'object') return;
     if (route === '/hook') {
       observer.onHook(payload as HookEvent);
+      return;
+    }
+    if (route === '/subagents') {
+      observer.onSubagentStatusLine(payload as { tasks?: unknown });
       return;
     }
     observer.onStatusLine(payload as StatusLineInput);

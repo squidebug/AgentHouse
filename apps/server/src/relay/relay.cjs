@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 'use strict';
-// Claude Code runs this for each hook event (`relay.cjs hook <config>`) and as its
-// status line (`relay.cjs status <config>`); it hands what it receives to the
-// AgentHouse session host. As a hook it prints nothing (hook output can reach the
-// model) and always exits 0 (exit code 2 would block a tool). As the status line
-// it runs the user's own status line command and prints that output unchanged.
+// Claude Code runs this for each hook event (`relay.cjs hook <config>`), as its
+// status line (`relay.cjs status <config>`) and as its sub-agent status line
+// (`relay.cjs subagent <config>`); it hands what it receives to the AgentHouse
+// session host. As a hook it prints nothing (hook output can reach the model) and
+// always exits 0 (exit code 2 would block a tool). As a status line it runs the
+// user's own command for it and prints that output unchanged; with none, the
+// sub-agent status line prints nothing and Claude keeps its own rows.
 // No dependencies: it starts on every event and must stay fast.
 const fs = require('fs');
 const http = require('http');
@@ -14,8 +16,9 @@ const { spawn } = require('child_process');
 const [mode, configPath] = process.argv.slice(2);
 const finish = () => process.exit(0);
 process.on('uncaughtException', finish);
+const statusLine = mode === 'status' || mode === 'subagent';
 // Never outlive a slow host or a stuck status command.
-setTimeout(finish, mode === 'status' ? 15000 : 3000).unref();
+setTimeout(finish, statusLine ? 15000 : 3000).unref();
 
 let config = null;
 try {
@@ -86,12 +89,13 @@ process.stdin.on('data', (chunk) => chunks.push(chunk));
 process.stdin.on('error', finish);
 process.stdin.on('end', async () => {
   const body = Buffer.concat(chunks);
-  if (mode !== 'status') {
+  if (!statusLine) {
     await post('/hook', body);
     return finish();
   }
-  const posted = post('/status', body);
-  const output = config && config.statusCommand ? await runStatusCommand(config.statusCommand, body) : Buffer.alloc(0);
+  const posted = post(mode === 'subagent' ? '/subagents' : '/status', body);
+  const command = config && (mode === 'subagent' ? config.subagentCommand : config.statusCommand);
+  const output = command ? await runStatusCommand(command, body) : Buffer.alloc(0);
   process.stdout.write(output, async () => {
     await posted;
     finish();

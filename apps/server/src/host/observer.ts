@@ -1,7 +1,8 @@
 import { execFile } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { open } from 'node:fs/promises';
-import { isAsking, type SessionStatus, type SessionTelemetry, type StatusValue, type TranscriptSegment } from '@agenthouse/protocol';
+import { isAsking, type AgentInfo, type SessionStatus, type SessionTelemetry, type StatusValue, type TranscriptSegment } from '@agenthouse/protocol';
+import { AgentTracker, agentTranscript, type AgentAsk } from '../claude/agents';
 import { claudeConfigDir } from '../claude/settings';
 import {
   applyAgents,
@@ -67,6 +68,11 @@ export class Observer extends EventEmitter {
   /** Where the CLI keeps the conversation, one entry per conversation (Claude: a new one after /clear). */
   transcripts: TranscriptSegment[] = [];
 
+  /** The sub-agents the CLI started; none for a CLI that does not report them. */
+  get agents(): AgentInfo[] {
+    return [];
+  }
+
   constructor(vendorSessionId: string | null, status: SessionStatus = unobservedStatus()) {
     super();
     this.vendorSessionId = vendorSessionId;
@@ -104,13 +110,31 @@ export class ClaudeObserver extends Observer {
   private recheckPending = false;
   private done = false;
   private readonly hookWait: NodeJS.Timeout;
+  /**
+   * What the main conversation is doing, from its own events. Sub-agents run
+   * in the background, so their tool calls say nothing about it; only a dialog
+   * one of them opens in the terminal shows in the session's status.
+   */
+  private main: SessionStatus;
+  private readonly tracker: AgentTracker;
+  private askShown: { ask: AgentAsk; status: SessionStatus } | null = null;
 
   constructor(private readonly options: ClaudeObserverOptions) {
     super(options.vendorSessionId, initialStatus());
+    this.main = this.status;
+    const configDir = claudeConfigDir(options.env);
+    this.tracker = new AgentTracker(
+      (id) => agentTranscript(this.transcripts.at(-1)?.path, id, configDir),
+      (file) => isClaudeTranscript(file, configDir),
+    );
     this.hookWait = setTimeout(() => {
-      if (this.status.value === 'starting') this.setStatus(unobservedStatus());
+      if (this.main.value === 'starting') this.setMain(unobservedStatus());
     }, FIRST_HOOK_WAIT_MS);
     this.hookWait.unref();
+  }
+
+  get agents(): AgentInfo[] {
+    return this.tracker.list();
   }
 
   /** True when a hook relay presents this session's token. */
@@ -122,6 +146,7 @@ export class ClaudeObserver extends Observer {
   onHook(event: HookEvent): void {
     if (this.done) return;
     clearTimeout(this.hookWait);
+    const at = Date.now();
     let changed = this.noteTranscript(event);
     if (event.hook_event_name === 'SessionStart' && typeof event.session_id === 'string' && event.session_id !== this.vendorSessionId) {
       this.vendorSessionId = event.session_id;
@@ -131,10 +156,38 @@ export class ClaudeObserver extends Observer {
       this.telemetry = { ...this.telemetry, level: 'full' };
       changed = true;
     }
-    const next = applyHook(this.status, event);
-    if (next !== this.status) this.status = next;
+    if (this.tracker.onHook(event, at)) changed = true;
+    const fromAgent = typeof event.agent_id === 'string' && event.agent_id !== '';
+    if (!fromAgent) this.main = applyHook(this.main, event, at);
+    const shown = this.shown();
+    if (shown !== this.status) this.status = shown;
     else if (!changed) return;
     this.emit('change');
+  }
+
+  /** The sub-agent status line's input: its tasks, with model and tokens. */
+  onSubagentStatusLine(line: { tasks?: unknown }): void {
+    if (this.done) return;
+    if (this.tracker.onStatusLine(line.tasks)) this.emit('change');
+  }
+
+  /** The main conversation's status, unless a sub-agent's dialog waits for the user. */
+  private shown(): SessionStatus {
+    const ask = this.tracker.asking();
+    if (!ask || isAsking(this.main.value) || this.main.value === 'exited') {
+      this.askShown = null;
+      return this.main;
+    }
+    if (this.askShown?.ask !== ask) {
+      const value: StatusValue = ask.kind === 'permission' ? 'awaiting_permission' : 'awaiting_input';
+      this.askShown = { ask, status: { value, reason: ask.tool, tool: ask.tool, error: false, at: ask.at } };
+    }
+    return this.askShown.status;
+  }
+
+  private setMain(next: SessionStatus): void {
+    this.main = next;
+    this.setStatus(this.shown());
   }
 
   /**
@@ -171,7 +224,9 @@ export class ClaudeObserver extends Observer {
   exited(code: number, at: number): void {
     this.done = true;
     clearTimeout(this.hookWait);
+    this.tracker.stopAll(at);
     super.exited(code, at);
+    this.main = this.status;
   }
 
   /**
@@ -196,15 +251,24 @@ export class ClaudeObserver extends Observer {
   private async recheck(since: number): Promise<void> {
     const stale = () => this.done || this.status.at !== since || !BUSY.has(this.status.value);
     if (stale()) return;
+    // A sub-agent's dialog is answered in that agent's transcript; the main one only tells about the main turn.
+    const agentAsks = () => this.tracker.asking() !== null && !isAsking(this.main.value);
     const transcript = this.transcripts.at(-1)?.path;
-    if (transcript && endsWithInterrupt(await readTail(transcript, 64 * 1024))) {
-      if (!stale()) this.setStatus(interruptedStatus());
+    if (!agentAsks() && transcript && endsWithInterrupt(await readTail(transcript, 64 * 1024))) {
+      if (!stale()) this.setMain(interruptedStatus());
       return;
     }
     const command = this.options.agentsCommand;
     if (!command) return;
     const entries = await listAgents(command, this.options.env);
     const mine = entries?.find((e) => e.pid === this.options.pid || (this.vendorSessionId !== null && e.sessionId === this.vendorSessionId));
-    if (mine && !stale()) this.setStatus(applyAgents(this.status, mine));
+    if (!mine || stale()) return;
+    if (mine.status !== 'waiting' && agentAsks()) {
+      // The sub-agent's dialog is gone; the main conversation is as it was.
+      this.tracker.clearAsks();
+      this.setStatus(this.shown());
+      return;
+    }
+    this.setMain(applyAgents(this.main, mine));
   }
 }

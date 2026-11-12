@@ -9,6 +9,9 @@
 // when CLAUDE_CONFIG_DIR is set (tests point it at a temporary folder), a
 // transcript in Claude's format. An Enter on its own submits what was typed or
 // pasted as a prompt; "tool" in it adds a tool call, "/clear" starts over.
+// "agents" starts sub-agents the way Claude Code 2.1.322 does (two in the
+// background, one of which starts a third, each reporting back), and
+// "agentask" one whose tool waits for approval for a moment.
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
@@ -64,7 +67,128 @@ const usage = { input_tokens: 3, cache_read_input_tokens: 1200, cache_creation_i
 const reply = (content, id = `msg_${randomUUID()}`) =>
   write({ type: 'assistant', effort: 'low', message: { id, model: 'fake-model', role: 'assistant', type: 'message', content: [content], usage } });
 
+const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const shortId = () => randomUUID().replace(/-/g, '').slice(0, 16);
+const agentFile = (id) => (projects ? path.join(projects, sessionId, 'subagents', `agent-${id}.jsonl`) : null);
+const agentParents = new Map();
+/** Writes a record to a sub-agent's own transcript, or the session's for null. */
+function writeTo(agent, record) {
+  if (!agent) return write(record);
+  const file = agentFile(agent.id);
+  if (!file) return;
+  mkdirSync(path.dirname(file), { recursive: true });
+  const uuid = randomUUID();
+  const line = { parentUuid: agentParents.get(agent.id) ?? null, isSidechain: true, agentId: agent.id, cwd: process.cwd(), sessionId, version: 'fake', uuid, timestamp: new Date().toISOString(), ...record };
+  appendFileSync(file, JSON.stringify(line) + '\n');
+  agentParents.set(agent.id, uuid);
+}
+const replyIn = (agent, content) =>
+  writeTo(agent, { type: 'assistant', effort: 'low', message: { id: 'msg_' + randomUUID(), model: 'fake-small', role: 'assistant', type: 'message', content: [content], usage } });
+const as = (agent) => (agent ? { agent_id: agent.id, agent_type: agent.type } : {});
+
+/** The Agent tool, called by the main conversation (null) or by a sub-agent: it starts one in the background. */
+function launch(caller, type, description, report) {
+  const agent = { id: 'a' + shortId(), type, description, report, toolUseId: 'toolu_' + shortId(), startedAt: Date.now() };
+  const input = { description, prompt: description + ', briefly.', subagent_type: type };
+  hook('PreToolUse', { tool_name: 'Agent', tool_use_id: agent.toolUseId, tool_input: input, ...as(caller) });
+  replyIn(caller, { type: 'tool_use', id: agent.toolUseId, name: 'Agent', input });
+  hook('SubagentStart', { agent_id: agent.id, agent_type: type });
+  const response = { isAsync: true, status: 'async_launched', agentId: agent.id, description, resolvedModel: 'fake-small', prompt: input.prompt };
+  hook('PostToolUse', { tool_name: 'Agent', tool_use_id: agent.toolUseId, tool_input: input, tool_response: response, ...as(caller) });
+  const launched = [{ type: 'tool_result', tool_use_id: agent.toolUseId, content: [{ type: 'text', text: 'Async agent launched successfully.' }] }];
+  writeTo(caller, { type: 'user', message: { role: 'user', content: launched }, toolUseResult: response });
+  writeTo(agent, { type: 'user', message: { role: 'user', content: input.prompt } });
+  return agent;
+}
+
+const notification = (agent) =>
+  [
+    '<task-notification>',
+    '<task-id>' + agent.id + '</task-id>',
+    '<tool-use-id>' + agent.toolUseId + '</tool-use-id>',
+    '<status>completed</status>',
+    '<summary>Agent "' + agent.description + '" finished</summary>',
+    '<result>' + agent.report + '</result>',
+    '<usage><subagent_tokens>1234</subagent_tokens><tool_uses>1</tool_uses><duration_ms>420</duration_ms></usage>',
+    '</task-notification>',
+  ].join('\n');
+
+/** The agent ends its turn with its report, which its caller gets as a task notification. */
+function finish(agent, caller) {
+  replyIn(agent, { type: 'text', text: agent.report });
+  hook('SubagentStop', { agent_id: agent.id, agent_type: agent.type, agent_transcript_path: agentFile(agent.id), last_assistant_message: agent.report });
+  const origin = { kind: 'task-notification', producer: 'session-task' };
+  if (caller) {
+    writeTo(caller, { type: 'user', isMeta: true, origin, message: { role: 'user', content: '[SYSTEM NOTIFICATION - NOT USER INPUT]\n\n' + notification(agent) } });
+    return;
+  }
+  const text = notification(agent);
+  hook('UserPromptSubmit', { prompt: text });
+  write({ type: 'user', message: { role: 'user', content: text }, origin });
+  reply({ type: 'text', text: agent.description + ': ' + agent.report });
+  write({ type: 'system', subtype: 'turn_duration', durationMs: 60 });
+  hook('Stop', { background_tasks: [] });
+}
+
+/** The sub-agent status line: what Claude passes it for each sub-agent. */
+const tasks = (list, status) =>
+  post('/subagents', {
+    tasks: list.map((a, i) => ({ id: a.id, type: 'local_agent', agentType: a.type, status: status[i], description: a.description, label: a.description, startTime: a.startedAt, model: 'fake-small', contextWindowSize: 200000, tokenCount: 1000 + i, tokenSamples: [1000 + i] })),
+  });
+
+const running = (list) => list.map((a) => ({ id: a.id, type: 'subagent', status: 'running', description: a.description, agent_type: a.type }));
+
+async function runAgents(prompt) {
+  hook('UserPromptSubmit', { prompt });
+  write({ type: 'user', message: { role: 'user', content: prompt }, origin: { kind: 'human' } });
+  await pause(60);
+  const explore = launch(null, 'Explore', 'Look around', 'explore report');
+  const planner = launch(null, 'general-purpose', 'Plan the change', 'plan ready');
+  reply({ type: 'text', text: 'Two agents are running.' });
+  write({ type: 'system', subtype: 'turn_duration', durationMs: 90 });
+  hook('Stop', { background_tasks: running([explore, planner]) });
+  tasks([explore, planner], ['running', 'running']);
+  await pause(300);
+  // While the main conversation waits, the explorer reads and the planner starts an agent of its own.
+  const read = 'toolu_' + shortId();
+  hook('PreToolUse', { tool_name: 'Read', tool_use_id: read, ...as(explore) });
+  replyIn(explore, { type: 'tool_use', id: read, name: 'Read', input: { file_path: path.join(process.cwd(), 'README.md') } });
+  writeTo(explore, { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: read, content: '# readme' }] }, toolUseResult: { type: 'text' } });
+  hook('PostToolUse', { tool_name: 'Read', tool_use_id: read, ...as(explore) });
+  const checker = launch(planner, 'Explore', 'Check the tests', 'tests pass');
+  replyIn(planner, { type: 'text', text: 'Waiting for the check.' });
+  hook('SubagentStop', { agent_id: planner.id, agent_type: planner.type, agent_transcript_path: agentFile(planner.id), last_assistant_message: 'Waiting for the check.' });
+  tasks([explore, planner, checker], ['running', 'running', 'running']);
+  await pause(300);
+  finish(explore, null);
+  await pause(300);
+  finish(checker, planner);
+  hook('SubagentStart', { agent_id: planner.id, agent_type: planner.type });
+  await pause(150);
+  finish(planner, null);
+  tasks([explore, planner, checker], ['completed', 'completed', 'completed']);
+}
+
+async function runAgentAsks(prompt) {
+  hook('UserPromptSubmit', { prompt });
+  write({ type: 'user', message: { role: 'user', content: prompt }, origin: { kind: 'human' } });
+  await pause(60);
+  const writer = launch(null, 'general-purpose', 'Write a file', 'file written');
+  reply({ type: 'text', text: 'The agent is on it.' });
+  hook('Stop', { background_tasks: running([writer]) });
+  await pause(200);
+  const use = 'toolu_' + shortId();
+  hook('PreToolUse', { tool_name: 'Write', tool_use_id: use, ...as(writer) });
+  hook('PermissionRequest', { tool_name: 'Write', ...as(writer) });
+  await pause(1500);
+  hook('PostToolUse', { tool_name: 'Write', tool_use_id: use, ...as(writer) });
+  await pause(100);
+  finish(writer, null);
+}
+
 function submit(prompt) {
+  if (prompt.includes('agentask')) return void runAgentAsks(prompt);
+  if (prompt.includes('agents')) return void runAgents(prompt);
   if (prompt === '/clear') {
     hook('SessionEnd', { reason: 'clear' });
     sessionId = randomUUID();

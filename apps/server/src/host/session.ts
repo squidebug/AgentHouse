@@ -336,6 +336,7 @@ export class Session extends EventEmitter {
       status: this.observer.status,
       telemetry: this.observer.telemetry,
       transcripts: this.observer.transcripts,
+      agents: this.observer.agents,
     };
   }
 }

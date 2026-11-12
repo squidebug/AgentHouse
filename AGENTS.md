@@ -10,15 +10,16 @@ AgentHouse is three programs plus a browser app. Know which one a file runs in b
 |---|---|---|
 | Browser | `apps/web/src` (React + MUI) | reload |
 | Web server | everything else in `apps/server/src` (`main.ts`, `web/`, ...) | freely; `tsx watch` restarts it in dev |
-| Session host | `apps/server/src/host/` and what it loads: `src/shared/`, `src/claude/status.ts` and `settings.ts`, `packages/protocol/src/` | ends every session: `pnpm dev:stop` (dev) or `pnpm stop` |
-| Relay | `apps/server/src/relay/relay.cjs`, run by Claude Code for each hook and as its status line | per event |
+| Session host | `apps/server/src/host/` and what it loads: `src/shared/`, `src/claude/status.ts`, `agents.ts` and `settings.ts`, `packages/protocol/src/` | ends every session: `pnpm dev:stop` (dev) or `pnpm stop` |
+| Relay | `apps/server/src/relay/relay.cjs`, run by Claude Code for each hook and as its status line and sub-agent status line | per event |
 
-- `src/claude/` is what AgentHouse knows about Claude Code (hook events, status line, settings files, the transcript format in `transcript.ts`); `src/shared/` is used by both servers.
+- `src/claude/` is what AgentHouse knows about Claude Code (hook events, status line, settings files, sub-agents in `agents.ts`, the transcript format in `transcript.ts`); `src/shared/` is used by both servers.
 - The conversation view is read in the web server (`web/conversations.ts`): only the transcripts the host reported, only under Claude's projects folder, in small pieces so the event loop stays free.
 - The session host owns the PTYs, so sessions survive web server restarts. The web server prepares launches, checks the environment, serves the UI and relays terminals to the host.
 - Browser ↔ web server types: `packages/protocol`. Web server ↔ host messages: `apps/server/src/shared/host-protocol.ts`; bump `HOST_PROTOCOL` whenever they change, and keep the hello's proof and the `shutdown` request as they are, so `--stop` still reaches older hosts.
 - Until the host restarts after its code changed, the environment check warns (`shared/build.ts` hashes the files listed above).
 - Claude status comes from hooks (`claude/status.ts`: `STATUS_EVENTS` and its handler map are the single list the injected hooks are built from), the status line (model, effort, context, plan limits) and, when no hook can tell (Esc, a dialog answered in the terminal), the transcript and `claude agents --json`.
+- Sub-agents (`claude/agents.ts`) run in the background. Hooks name them (SubagentStart/Stop; the Agent tool's result names the agent it started; events a sub-agent causes carry its `agent_id`), and the sub-agent status line adds model and tokens. Their tool calls never change the session's status; a dialog they open does.
 
 ## State
 
@@ -31,7 +32,7 @@ AgentHouse is three programs plus a browser app. Know which one a file runs in b
 
 - `pnpm dev` / `pnpm dev:stop`: dev servers with their own state folder and port (7358); never touch the user's real sessions.
 - `pnpm build`, `pnpm start` / `pnpm stop`.
-- `pnpm typecheck`, `pnpm test` (a fake agent stands in for the CLIs, no login; launched like Claude Code it sends hook events and, under a temporary `CLAUDE_CONFIG_DIR`, writes a transcript), `pnpm licenses:check`.
+- `pnpm typecheck`, `pnpm test` (a fake agent stands in for the CLIs, no login; launched like Claude Code it sends hook events and, under a temporary `CLAUDE_CONFIG_DIR`, writes a transcript; `agents` in a prompt runs background sub-agents), `pnpm licenses:check`.
 - `pnpm canary:claude [-- --turn | --scenario]`: the built app against the installed Claude Code; no prompt unless `--turn` (one) or `--scenario` (haiku, low effort: reply, approve, deny with Esc, interrupt, `/clear`, then the conversation view from the real transcript; runs in `%TEMP%/agenthouse-canary-work` and tells Claude to trust it the first time).
 - `pnpm ui:check [-- --out <folder>]`: the built app in the installed Chrome (playwright-core, nothing downloaded) with the fake agent and a made-up ended session (`scripts/ui-sample.mjs`); light and dark screenshots.
 - Tests that need a host use a temporary state folder (`tempStateDir()`, or `AGENTHOUSE_HOME` for a spawned server); never the real `~/.agenthouse`.

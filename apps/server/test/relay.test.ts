@@ -44,7 +44,7 @@ after(async () => {
 });
 
 let configs = 0;
-async function runRelay(mode: 'hook' | 'status', config: object, input: string, env: NodeJS.ProcessEnv = {}) {
+async function runRelay(mode: 'hook' | 'status' | 'subagent', config: object, input: string, env: NodeJS.ProcessEnv = {}) {
   const configPath = path.join(dir, `relay-${(configs += 1)}.json`);
   await writeFile(configPath, JSON.stringify(config));
   const started = Date.now();
@@ -104,5 +104,14 @@ describe('hook relay', () => {
   test('without a status line of the user it prints nothing', async () => {
     const result = await runRelay('status', { port, token: 'secret' }, '{}');
     assert.deepEqual([result.code, result.stdout], [0, '']);
+  });
+
+  test("as the sub-agent status line it passes the tasks on and prints the user's own, or nothing", { skip: !shell }, async () => {
+    const input = JSON.stringify({ tasks: [{ id: 'a1', type: 'local_agent', agentType: 'Explore', status: 'running', tokenCount: 12 }] });
+    const quiet = await runRelay('subagent', { port, token: 'secret', statusCommand: 'echo not-this-one' }, input, { SHELL: shell });
+    assert.deepEqual([quiet.code, quiet.stdout], [0, ''], "nothing printed: Claude keeps its own rows");
+    assert.ok(received.some((r) => r.path === '/subagents' && r.body === input), 'the tasks reach the host');
+    const rows = await runRelay('subagent', { port, token: 'secret', subagentCommand: `cat > /dev/null; printf '{"id":"a1","content":"mine"}'` }, input, { SHELL: shell });
+    assert.deepEqual([rows.code, rows.stdout], [0, '{"id":"a1","content":"mine"}']);
   });
 });

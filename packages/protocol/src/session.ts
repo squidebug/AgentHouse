@@ -91,6 +91,35 @@ export interface TranscriptSegment {
   since: number;
 }
 
+/**
+ * A sub-agent the CLI started (Claude Code: the Agent tool), as its hooks and
+ * sub-agent status line report it. Claude runs them in the background: the
+ * main conversation can be idle while they work.
+ */
+export interface AgentInfo {
+  /** The CLI's id for it (Claude: the `agent-<id>.jsonl` transcript). */
+  id: string;
+  /** The agent that started it; null when the session's main conversation did. */
+  parentId: string | null;
+  /** Its kind, e.g. Explore or general-purpose. */
+  agentType: string;
+  /** What it was asked to do, in a few words (the Agent tool's description). */
+  description: string | null;
+  /** `stopped`: its turn ended. It may be resumed, and its own sub-agents may still run. */
+  state: 'running' | 'stopped';
+  /** The tool it runs now, or the one waiting for the user. */
+  tool: string | null;
+  /** One of its tools waits for an approval or an answer in the terminal. */
+  asking: boolean;
+  model: string | null;
+  /** Tokens it has used, as the CLI counts them. */
+  tokens: number | null;
+  startedAt: number;
+  endedAt: number | null;
+  /** Its own transcript (under Claude's projects folder), once known. */
+  transcriptPath: string | null;
+}
+
 export interface SessionInfo {
   id: string;
   vendor: SessionVendor;
@@ -114,6 +143,8 @@ export interface SessionInfo {
   telemetry: SessionTelemetry;
   /** The transcripts this session wrote, oldest first; empty when the CLI reports none. */
   transcripts: TranscriptSegment[];
+  /** Its sub-agents in the order they started, nested through parentId; the CLI's internal helpers are left out. */
+  agents: AgentInfo[];
 }
 
 export interface CliInstall {

@@ -8,7 +8,7 @@ import { sameSecret } from './compare';
  * stay the same in every version, so `--stop` can end a host of any version:
  * the hello's `protocol`, `pid` and `proof`, and the `shutdown` request.
  */
-export const HOST_PROTOCOL = 4;
+export const HOST_PROTOCOL = 5;
 
 /**
  * The host's answer to a web server's nonce. A process squatting on a dead

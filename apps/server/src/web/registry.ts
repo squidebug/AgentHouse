@@ -19,6 +19,8 @@ function asEnded(info: SessionInfo): SessionInfo {
     screen: false,
     exit: info.exit ?? { code: null, signal: null, at },
     status: info.status.value === 'exited' ? info.status : { value: 'exited', reason: null, tool: null, error: false, at },
+    // Whatever still ran ended with the session.
+    agents: info.agents.map((a) => (a.state === 'running' || a.asking ? { ...a, state: 'stopped', endedAt: a.endedAt ?? at, tool: null, asking: false } : a)),
   };
 }
 
@@ -50,7 +52,8 @@ export class SessionRegistry {
     try {
       const data = JSON.parse(readFileSync(file, 'utf8')) as { version?: unknown; sessions?: unknown };
       if (data.version === FILE_VERSION && Array.isArray(data.sessions)) {
-        for (const entry of data.sessions) if (isEntry(entry)) this.sessions.set(entry.id, entry);
+        // Entries written before sub-agents were tracked have none.
+        for (const entry of data.sessions) if (isEntry(entry)) this.sessions.set(entry.id, { ...entry, agents: Array.isArray(entry.agents) ? entry.agents : [] });
       }
     } catch {
       // none yet, or unreadable: start over

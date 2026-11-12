@@ -90,6 +90,21 @@ describe('conversation view', () => {
     await request(app.port, 'DELETE', `/api/sessions/${session.id}`, { headers });
   });
 
+  test("a sub-agent's dialog makes the session wait while the main conversation is idle", async () => {
+    const created = await request(app.port, 'POST', '/api/sessions', { headers, body: { vendor: 'fake', title: 'asks' } });
+    const session = created.json as SessionInfo;
+    const now = async () => ((await request(app.port, 'GET', '/api/sessions', { headers })).json as SessionInfo[]).find((s) => s.id === session.id);
+    await eventually(now, (s) => s?.status.value === 'idle', 8000);
+    await request(app.port, 'POST', `/api/sessions/${session.id}/compose`, { headers, body: { text: 'agentask now', enterDelayMs: 50, quietMs: 50 } });
+    const waiting = await eventually(now, (s) => s?.status.value === 'awaiting_permission', 5000);
+    assert.deepEqual([waiting?.status.value, waiting?.status.tool, waiting?.agents[0]?.asking], ['awaiting_permission', 'Write', true]);
+    const refused = await request(app.port, 'POST', `/api/sessions/${session.id}/compose`, { headers, body: { text: 'hello' } });
+    assert.equal((refused.json as { sent: boolean }).sent, false, 'nothing is typed into the dialog');
+    const back = await eventually(now, (s) => s?.status.value === 'idle' && s.agents[0]?.state === 'stopped', 8000);
+    assert.deepEqual([back?.status.value, back?.agents[0]?.asking], ['idle', false]);
+    await request(app.port, 'DELETE', `/api/sessions/${session.id}`, { headers });
+  });
+
   test('sessions without a transcript have no conversation socket', async () => {
     assert.equal((await openSocket(app.port, '/ws/conversation?id=missing', headers)).status, 404);
     assert.equal((await openSocket(app.port, '/ws/conversation?id=x', { ...headers, origin: 'http://evil.example' })).status, 403);

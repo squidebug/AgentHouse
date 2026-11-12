@@ -53,6 +53,8 @@ function model(value: string | undefined): string | undefined {
 export interface ObserveTarget {
   port: number;
   token: string;
+  /** Also take over the sub-agent status line (its tasks carry each sub-agent's model and tokens). */
+  subagents?: boolean;
 }
 
 // The events the status reads, plus the sub-agent events for the agent tree.
@@ -70,24 +72,31 @@ function shellQuote(value: string): string {
  * A bare `node` with double-quoted paths reads the same in all of them. Only
  * when node is not on PATH is its absolute path used, quoted for bash and sh.
  */
-function relayCommand(mode: 'hook' | 'status', configPath: string): string {
+function relayCommand(mode: 'hook' | 'status' | 'subagent', configPath: string): string {
   const files = [relayPath(), configPath].map((p) => p.replace(/\\/g, '/'));
   if (findOnPath('node').length && files.every((p) => !/["$`]/.test(p))) return `node "${files[0]}" ${mode} "${files[1]}"`;
   return [process.execPath, relayPath(), mode, configPath].map(shellQuote).join(' ');
 }
 
 /**
- * Hooks and a status line that pass everything to the session host through the
- * relay. The user's own status line keeps showing: the relay runs it.
+ * Hooks and status lines that pass everything to the session host through the
+ * relay. The user's own status lines keep showing: the relay runs them.
  */
 async function observeSettings(dir: string, target: ObserveTarget, cwd: string): Promise<Record<string, unknown>> {
   const userLine = userStatusLine(cwd);
+  const userAgentLine = target.subagents ? userStatusLine(cwd, process.env, 'subagentStatusLine') : null;
   const configPath = path.join(dir, 'relay.json');
-  const config = { port: target.port, token: target.token, ...(userLine ? { statusCommand: userLine.command } : {}) };
+  const config = {
+    port: target.port,
+    token: target.token,
+    ...(userLine ? { statusCommand: userLine.command } : {}),
+    ...(userAgentLine ? { subagentCommand: userAgentLine.command } : {}),
+  };
   await writeFile(configPath, JSON.stringify(config), { mode: 0o600 });
   const hook = [{ hooks: [{ type: 'command', command: relayCommand('hook', configPath), async: true }] }];
   return {
     statusLine: { type: 'command', command: relayCommand('status', configPath), ...(userLine?.padding !== undefined ? { padding: userLine.padding } : {}) },
+    ...(target.subagents ? { subagentStatusLine: { type: 'command', command: relayCommand('subagent', configPath) } } : {}),
     hooks: Object.fromEntries(HOOK_EVENTS.map((name) => [name, hook])),
   };
 }
