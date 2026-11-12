@@ -9,7 +9,7 @@ import { HOST_PROTOCOL, HostRequestError, hostProof, type HostMessage, type Host
 import { clearState, removeTree, runDir, writeState } from '../shared/state';
 import { receiveFromRelay } from './hooks';
 import { ClaudeObserver, Observer } from './observer';
-import { Session } from './session';
+import { Session, type ViewerBacklog } from './session';
 
 export interface HostOptions {
   stateDir: string;
@@ -18,6 +18,8 @@ export interface HostOptions {
   /** Browser login token kept for the host's lifetime, so a browser stays logged in across web server restarts. */
   webToken?: string;
   log?: (line: string) => void;
+  /** Tests make it small, so a stalled viewer outgrows it whatever the OS buffers on the socket. */
+  viewerBacklog?: ViewerBacklog;
 }
 
 export interface SessionHost {
@@ -114,6 +116,7 @@ export async function createSessionHost(options: HostOptions): Promise<SessionHo
             ? new ClaudeObserver({ token: spec.hookToken, vendorSessionId: spec.vendorSessionId, agentsCommand: spec.agentsCommand, env: spec.env, pid })
             : new Observer(spec.vendorSessionId),
         cleanup: removeTemp,
+        ...(options.viewerBacklog ? { backlog: options.viewerBacklog } : {}),
       });
     } catch (error) {
       removeTemp().catch(() => {});

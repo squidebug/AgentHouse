@@ -21,10 +21,14 @@ const require = createRequire(import.meta.url);
 const { Terminal: HeadlessTerminal } = require('@xterm/headless') as typeof import('@xterm/headless');
 const { SerializeAddon } = require('@xterm/addon-serialize') as typeof import('@xterm/addon-serialize');
 
-// A viewer that falls this far behind stops receiving live output and is
-// resynchronised from a snapshot instead; the PTY itself is never paused.
-const MAX_BUFFERED = 4 * 1024 * 1024;
-const RESYNC_BELOW = 256 * 1024;
+/** How far a viewer may fall behind before it stops receiving live output, and when it is resynchronised from a snapshot. */
+export interface ViewerBacklog {
+  max: number;
+  resyncBelow: number;
+}
+
+// The PTY itself is never paused for a slow viewer.
+export const DEFAULT_BACKLOG: ViewerBacklog = { max: 4 * 1024 * 1024, resyncBelow: 256 * 1024 };
 // node-pty flushes the last output for up to 1 s after the process exits.
 const RELEASE_AFTER_EXIT_MS = 1500;
 
@@ -35,7 +39,10 @@ export class Viewer {
   stale = false;
   pending: string[] = [];
 
-  constructor(readonly ws: WebSocket) {}
+  constructor(
+    readonly ws: WebSocket,
+    private readonly maxBuffered = DEFAULT_BACKLOG.max,
+  ) {}
 
   send(message: TerminalServerMessage): void {
     if (this.ws.readyState === this.ws.OPEN) this.ws.send(JSON.stringify(message));
@@ -47,7 +54,7 @@ export class Viewer {
       return;
     }
     if (this.stale) return;
-    if (this.ws.bufferedAmount > MAX_BUFFERED) {
+    if (this.ws.bufferedAmount > this.maxBuffered) {
       this.stale = true;
       return;
     }
@@ -73,6 +80,7 @@ export interface SessionOptions {
   cliVersion: string | null;
   /** What reports the CLI's status, made once its process id is known. */
   observe: (pid: number) => Observer;
+  backlog?: ViewerBacklog;
   cleanup: () => Promise<void>;
 }
 
@@ -100,12 +108,14 @@ export class Session extends EventEmitter {
   private readonly serializer: InstanceType<typeof SerializeAddon>;
   private readonly pty: IPty;
   private readonly resyncTimer: NodeJS.Timeout;
+  private readonly backlog: ViewerBacklog;
 
   constructor(private readonly options: SessionOptions) {
     super();
     this.id = options.id;
     this.cols = options.cols;
     this.rows = options.rows;
+    this.backlog = options.backlog ?? DEFAULT_BACKLOG;
     this.colors = new ColorQueryResponder(options.colors);
     this.mirror = new HeadlessTerminal({ cols: this.cols, rows: this.rows, scrollback: 5000, allowProposedApi: true });
     this.serializer = new SerializeAddon();
@@ -176,7 +186,7 @@ export class Session extends EventEmitter {
 
   private resyncStaleViewers(): void {
     for (const viewer of this.viewers) {
-      if (viewer.stale && viewer.ws.bufferedAmount < RESYNC_BELOW) this.sync(viewer);
+      if (viewer.stale && viewer.ws.bufferedAmount < this.backlog.resyncBelow) this.sync(viewer);
     }
   }
 
@@ -207,7 +217,7 @@ export class Session extends EventEmitter {
   }
 
   attach(ws: WebSocket): Viewer {
-    const viewer = new Viewer(ws);
+    const viewer = new Viewer(ws, this.backlog.max);
     this.viewers.add(viewer);
     this.sync(viewer);
     if (this.exit) viewer.send({ type: 'exit', code: this.exit.code, signal: this.exit.signal });

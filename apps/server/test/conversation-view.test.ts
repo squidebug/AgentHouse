@@ -53,8 +53,12 @@ describe('conversation view', () => {
 
     const compose = (text: string) => request(app.port, 'POST', `/api/sessions/${session.id}/compose`, { headers, body: { text, enterDelayMs: 50, quietMs: 50 } });
     await compose('run a tool please');
-    const answered = () => follow(socket.messages).entries.some((e) => e.kind === 'text' && e.text === 'fake answer: run a tool please');
-    assert.ok(await waitFor(answered, 8000), 'prompt, tool call and answer arrive');
+    // The answer and the turn's length are separate lines; the view may be read between them.
+    const answered = () => {
+      const view = follow(socket.messages);
+      return view.entries.some((e) => e.kind === 'text' && e.text === 'fake answer: run a tool please') && (view.turns[0]?.durationMs ?? null) !== null;
+    };
+    assert.ok(await waitFor(answered, 8000), 'prompt, tool call, answer and the turn length arrive');
     const view = follow(socket.messages);
     assert.deepEqual(
       view.entries.map((e) => e.kind),
@@ -118,7 +122,8 @@ describe('conversation view', () => {
       ],
     );
 
-    assert.ok(await waitFor(() => follow(socket.messages).entries.filter((e) => e.kind === 'task').length === 2, 8000), 'both reports arrive');
+    const answeredBoth = () => follow(socket.messages).entries.some((e) => e.kind === 'text' && e.text === 'Plan the change: plan ready');
+    assert.ok(await waitFor(answeredBoth, 8000), 'both reports arrive, and the answer to the last');
     const main = follow(socket.messages);
     assert.deepEqual(
       main.entries.map((e) => (e.kind === 'agent' || e.kind === 'task' ? `${e.kind}:${e.state}` : e.kind)),

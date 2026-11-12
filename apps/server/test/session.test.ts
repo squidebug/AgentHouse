@@ -16,7 +16,8 @@ let client: HostClient;
 
 before(async () => {
   stateDir = await tempStateDir();
-  host = await createSessionHost({ stateDir, idleExitMs: null });
+  // Small, so the stalled viewer below falls behind whatever the OS buffers on the socket.
+  host = await createSessionHost({ stateDir, idleExitMs: null, viewerBacklog: { max: 256 * 1024, resyncBelow: 64 * 1024 } });
   client = await HostClient.connect({ stateDir, spawn: false });
 });
 
