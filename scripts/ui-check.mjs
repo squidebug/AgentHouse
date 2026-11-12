@@ -99,14 +99,38 @@ try {
   await terminalShown();
   check(true, 'and back to the terminal');
   // The same from the keyboard, with the terminal focused: Ctrl+` never reaches the CLI.
+  // The composer is folded while the terminal takes the typing, and opens for the conversation without moving the panes.
+  const sendButton = page.getByRole('button', { name: '보내기' });
+  const paneBox = () => page.getByRole('region', { name: 'ui-check', exact: true }).boundingBox();
   await page.locator('.xterm-screen').first().click();
+  await sendButton.waitFor({ state: 'detached', timeout: 5000 });
+  check(true, 'while the terminal takes the typing, the composer is folded');
+  const before = await paneBox();
   await page.keyboard.press('Control+Backquote');
   await page.getByRole('button', { name: /도구 1/ }).waitFor({ timeout: 5000 });
-  check(true, 'Ctrl+` in the terminal shows the conversation');
+  await sendButton.waitFor({ state: 'visible', timeout: 5000 });
+  check(true, 'Ctrl+` in the terminal shows the conversation, and the composer opens');
+  await page.waitForTimeout(400);
+  const after = await paneBox();
+  check(Boolean(before && after && before.y === after.y && before.height === after.height), 'the pane stays where it was', JSON.stringify({ before, after }));
+  const motion = await page.evaluate(() => {
+    const rules = [...document.styleSheets].flatMap((sheet) => {
+      try {
+        return [...sheet.cssRules];
+      } catch {
+        return [];
+      }
+    });
+    const reveal = rules.find((rule) => rule instanceof CSSKeyframesRule && rule.name === 'ah-reveal');
+    const section = document.querySelector('section[aria-label="입력"]');
+    return { keyframes: reveal?.cssText ?? '', transition: section ? getComputedStyle(section).transitionProperty : '' };
+  });
+  check(motion.keyframes.includes('max-width') && motion.transition.includes('padding'), 'it opens and folds with an animation', JSON.stringify(motion));
   await page.keyboard.press('Control+Backquote');
   await terminalShown();
   await page.waitForFunction(() => Boolean(document.activeElement?.closest('.xterm')), null, { timeout: 5000 });
-  check(true, 'and again: the terminal, ready to type');
+  await sendButton.waitFor({ state: 'detached', timeout: 5000 });
+  check(true, 'and again: the terminal, ready to type, the composer folded');
   await page.reload();
   await terminalShown();
   await settle();

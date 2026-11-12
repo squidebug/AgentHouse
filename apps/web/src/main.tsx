@@ -22,7 +22,12 @@ const globalStyles = {
   '.xterm .xterm-viewport': { backgroundColor: 'transparent !important' },
   '@keyframes ah-pulse': { '0%, 100%': { opacity: 1 }, '50%': { opacity: 0.35 } },
   '.ah-working': { animation: 'ah-pulse 1.6s ease-in-out infinite' },
-  '@media (prefers-reduced-motion: reduce)': { '.ah-working': { animation: 'none' } },
+  // Composer parts that slide open sideways when they first appear.
+  '@keyframes ah-reveal': { from: { 'max-width': 0, opacity: 0, 'margin-left': 0, 'margin-right': 0 } },
+  '@media (prefers-reduced-motion: reduce)': {
+    '.ah-working': { animation: 'none' },
+    '.ah-fold': { animation: 'none !important', transition: 'none !important' },
+  },
 } as const;
 
 const root = document.getElementById('root');
