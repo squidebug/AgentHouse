@@ -64,6 +64,7 @@ export const t = {
   terminal: '터미널',
   conversation: '대화',
   flow: '흐름',
+  withModeShortcut: (label: string) => `${label} · Ctrl+\``,
   back: '뒤로',
   filterAll: '전체',
   filterRunning: '실행 중',

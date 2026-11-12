@@ -1,6 +1,18 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { initialWorkspace, loadWorkspace, MAX_PANES, reducer, saveWorkspace, type Action, type WorkspaceState } from '../src/workspace/state';
+import {
+  initialWorkspace,
+  isModeShortcut,
+  loadWorkspace,
+  MAX_PANES,
+  paneModes,
+  reducer,
+  saveWorkspace,
+  shownMode,
+  switchedMode,
+  type Action,
+  type WorkspaceState,
+} from '../src/workspace/state';
 
 const ctx = { runningIds: ['a', 'b', 'c', 'd', 'e'] };
 const run = (state: WorkspaceState, ...actions: Action[]) => actions.reduce((s, a) => reducer(s, a, ctx), state);
@@ -117,6 +129,27 @@ test('a pane remembers whether it shows the terminal or the conversation, across
   s = run(s, { type: 'closePane', paneId: 'p2' });
   saveWorkspace(s, storage);
   assert.deepEqual(loadWorkspace(storage).paneMode, {}, 'a closed pane is forgotten');
+});
+
+test('Ctrl+` takes a pane from its terminal to its conversation and back; from the flow, the terminal first', () => {
+  const live = { screen: true, transcripts: ['t1'] };
+  const modes = paneModes({}, live);
+  assert.deepEqual(modes, ['terminal', 'conversation', 'flow']);
+  assert.deepEqual(
+    (['terminal', 'conversation', 'flow'] as const).map((mode) => switchedMode(mode, modes)),
+    ['conversation', 'terminal', 'terminal'],
+  );
+  assert.equal(switchedMode('terminal', paneModes({}, { screen: true, transcripts: [] })), null, 'no transcript yet: nowhere to go');
+  assert.equal(switchedMode('flow', paneModes({}, { screen: false, transcripts: ['t1'] })), 'conversation', 'an ended session: its conversation');
+  assert.deepEqual(paneModes({ agentId: 'a1' }, live), ['conversation'], 'a sub-agent has its conversation only');
+  assert.equal(shownMode(undefined, modes), 'terminal');
+  assert.equal(shownMode('conversation', ['terminal', 'flow']), 'terminal', 'a mode the pane no longer has falls back to its first');
+
+  const key = { code: 'Backquote', ctrlKey: true, altKey: false, metaKey: false, shiftKey: false };
+  assert.equal(isModeShortcut(key), true);
+  assert.equal(isModeShortcut({ ...key, shiftKey: true }), false);
+  assert.equal(isModeShortcut({ ...key, ctrlKey: false }), false);
+  assert.equal(isModeShortcut({ ...key, isComposing: true }), false, 'not while the IME composes');
 });
 
 test('hovering the same target twice keeps the same state object', () => {

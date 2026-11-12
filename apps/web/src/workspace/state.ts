@@ -31,8 +31,31 @@ export interface Target {
 const shows = (pane: Pane, target: Target) => pane.sessionId === target.sessionId && (pane.agentId ?? null) === (target.agentId ?? null);
 const paneOf = (id: string, target: Target): Pane => ({ id, sessionId: target.sessionId, ...(target.agentId ? { agentId: target.agentId } : {}) });
 
-/** What a pane shows of its session: the live terminal, the conversation, or the flow (who works, since when, under whom). */
+/** What a pane shows of its session: the live terminal, the conversation, or the flow (who worked when). */
 export type PaneMode = 'terminal' | 'conversation' | 'flow';
+
+/**
+ * What a pane can show. A sub-agent: its conversation. A session: its terminal
+ * (while the host has it), its conversation (once it has a transcript) and its flow.
+ */
+export function paneModes(pane: Pick<Pane, 'agentId'>, session: { screen: boolean; transcripts: unknown[] }): PaneMode[] {
+  if (pane.agentId) return ['conversation'];
+  return [...(session.screen ? (['terminal'] as const) : []), ...(session.transcripts.length ? (['conversation'] as const) : []), 'flow'];
+}
+
+/** The mode a pane shows: the one chosen for it while it has that, else its first. */
+export const shownMode = (chosen: PaneMode | undefined, modes: PaneMode[]): PaneMode => (chosen && modes.includes(chosen) ? chosen : (modes[0] ?? 'flow'));
+
+/** Ctrl+`: the shortcut between a pane's terminal and its conversation. */
+export const isModeShortcut = (key: { code: string; ctrlKey: boolean; altKey: boolean; metaKey: boolean; shiftKey: boolean; isComposing?: boolean }) =>
+  key.code === 'Backquote' && key.ctrlKey && !key.altKey && !key.metaKey && !key.shiftKey && !key.isComposing;
+
+/** Where the shortcut takes a pane: the terminal to the conversation and back; from the flow, the terminal first. Null when there is nowhere to go. */
+export function switchedMode(mode: PaneMode, modes: PaneMode[]): PaneMode | null {
+  const next: PaneMode = mode === 'terminal' ? 'conversation' : 'terminal';
+  if (modes.includes(next)) return next;
+  return mode === 'flow' && modes.includes('conversation') ? 'conversation' : null;
+}
 
 export type Drag =
   | { kind: 'session'; id: string }

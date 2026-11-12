@@ -21,16 +21,20 @@ interface Props {
   mode: ThemeMode;
   windowsBuild: number | null;
   onFocus?: () => void;
+  /** In the pane the user works in: takes the keyboard when it opens, unless something else has it. */
+  autoFocus?: boolean;
 }
 
-export function TerminalView({ sessionId, mode, windowsBuild, onFocus }: Props) {
+export function TerminalView({ sessionId, mode, windowsBuild, onFocus, autoFocus = false }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const sendRef = useRef<(message: TerminalClientMessage) => void>(() => {});
   const modeRef = useRef(mode);
   const focusRef = useRef(onFocus);
+  const autoFocusRef = useRef(autoFocus);
   modeRef.current = mode;
   focusRef.current = onFocus;
+  autoFocusRef.current = autoFocus;
 
   useEffect(() => {
     let disposed = false;
@@ -122,6 +126,9 @@ export function TerminalView({ sessionId, mode, windowsBuild, onFocus }: Props) 
       term.textarea?.addEventListener('focus', onFocusIn);
       const observer = new ResizeObserver(() => reportSize());
       observer.observe(element);
+      // Back from the conversation (Ctrl+`) or after a reload: ready to type, unless the composer or another field has the keyboard.
+      const idle = document.activeElement === null || document.activeElement === document.body;
+      if (autoFocusRef.current && idle) term.focus();
 
       teardown = () => {
         clearTimeout(retry);

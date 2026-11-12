@@ -6,7 +6,7 @@ import { v } from '../theme/tokens';
 import { childAgents } from '../workspace/agents';
 import type { Dnd } from '../workspace/dnd';
 import type { FlowRow } from '../workspace/flow';
-import { MAX_PANES, type Action, type Pane, type PaneMode, type WorkspaceState } from '../workspace/state';
+import { MAX_PANES, paneModes, shownMode, type Action, type Pane, type PaneMode, type WorkspaceState } from '../workspace/state';
 import { ConversationView, type DelegationView } from './ConversationView';
 import { AgentSubtitle, agentDetails, agentTitle, Details, SessionSubtitle, sessionDetails } from './Details';
 import { FlowView } from './FlowView';
@@ -131,7 +131,7 @@ function ModeSwitch({ mode, modes, onChange }: { mode: PaneMode; modes: PaneMode
   return (
     <Box role="group" sx={{ flex: 'none', display: 'inline-flex', p: '2px', borderRadius: '10px', bgcolor: v.surface2 }}>
       {MODES.filter((m) => modes.includes(m.mode)).map(({ mode: value, label, Icon }) => (
-        <Tooltip key={value} title={label}>
+        <Tooltip key={value} title={value === 'flow' ? label : t.withModeShortcut(label)}>
           <IconButton
             aria-label={label}
             aria-pressed={mode === value}
@@ -230,11 +230,9 @@ function PaneView({ pane, session, state, dispatch, dnd, theme, windowsBuild, se
   const agentId = pane.agentId ?? null;
   const agent = agentId ? session.agents.find((a) => a.id === agentId) : undefined;
   const hasConversation = agentId ? Boolean(agent?.transcriptPath) : session.transcripts.length > 0;
-  // An ended session from an earlier host has only its conversation left.
-  // A session's pane can show its terminal (while the host has it), its conversation, or its flow.
-  const modes: PaneMode[] = agentId ? ['conversation'] : [...(session.screen ? ['terminal' as const] : []), ...(hasConversation ? ['conversation' as const] : []), 'flow'];
-  const chosen = state.paneMode[pane.id];
-  const mode: PaneMode = chosen && modes.includes(chosen) ? chosen : (modes[0] ?? 'flow');
+  // An ended session from an earlier host has only its conversation (and flow) left.
+  const modes = paneModes(pane, session);
+  const mode = shownMode(state.paneMode[pane.id], modes);
   const focus = () => dispatch({ type: 'focus', paneId: pane.id });
   // An agent opened from a conversation takes this pane, with the way back.
   const openAgent = useCallback((id: string) => dispatch({ type: 'drill', paneId: pane.id, sessionId: session.id, agentId: id }), [dispatch, pane.id, session.id]);
@@ -370,7 +368,7 @@ function PaneView({ pane, session, state, dispatch, dnd, theme, windowsBuild, se
         ) : agentId ? (
           <Typography sx={{ p: 1, color: v.termDim }}>{t.noConversation}</Typography>
         ) : session.screen ? (
-          <TerminalView sessionId={session.id} mode={theme} windowsBuild={windowsBuild} onFocus={focus} />
+          <TerminalView sessionId={session.id} mode={theme} windowsBuild={windowsBuild} onFocus={focus} autoFocus={active} />
         ) : (
           <Typography sx={{ p: 1, color: v.termDim }}>{t.noScreen}</Typography>
         )}

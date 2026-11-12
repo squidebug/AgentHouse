@@ -15,7 +15,7 @@ import { t } from './strings';
 import { v } from './theme/tokens';
 import { makeDnd } from './workspace/dnd';
 import { delegatesOf, parentsOf } from './workspace/tree';
-import { loadWorkspace, reducer, saveWorkspace, type Action, type DropContext, type WorkspaceState } from './workspace/state';
+import { isModeShortcut, loadWorkspace, paneModes, reducer, saveWorkspace, shownMode, switchedMode, type Action, type DropContext, type WorkspaceState } from './workspace/state';
 
 export function App() {
   const { mode, systemMode, setMode } = useColorScheme();
@@ -77,6 +77,28 @@ export function App() {
       };
     }
   }, [asking]);
+
+  // Ctrl+`: the active pane between its terminal and its conversation, from anywhere on the page.
+  // Taken before the terminal sees it, so it never reaches the CLI.
+  const latest = useRef({ state, byId });
+  latest.current = { state, byId };
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!isModeShortcut(event)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.repeat) return;
+      const { state: now, byId: known } = latest.current;
+      const pane = now.panes.find((p) => p.id === now.active);
+      const session = pane ? known.get(pane.sessionId) : undefined;
+      if (!pane || !session) return;
+      const modes = paneModes(pane, session);
+      const next = switchedMode(shownMode(now.paneMode[pane.id], modes), modes);
+      if (next) dispatch({ type: 'setMode', paneId: pane.id, mode: next });
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, []);
 
   const dnd = makeDnd(state, dispatch, ctxRef.current);
   const activePane = state.panes.find((p) => p.id === state.active);

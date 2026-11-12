@@ -98,6 +98,15 @@ try {
   await page.getByRole('button', { name: '터미널', exact: true }).click();
   await terminalShown();
   check(true, 'and back to the terminal');
+  // The same from the keyboard, with the terminal focused: Ctrl+` never reaches the CLI.
+  await page.locator('.xterm-screen').first().click();
+  await page.keyboard.press('Control+Backquote');
+  await page.getByRole('button', { name: /도구 1/ }).waitFor({ timeout: 5000 });
+  check(true, 'Ctrl+` in the terminal shows the conversation');
+  await page.keyboard.press('Control+Backquote');
+  await terminalShown();
+  await page.waitForFunction(() => Boolean(document.activeElement?.closest('.xterm')), null, { timeout: 5000 });
+  check(true, 'and again: the terminal, ready to type');
   await page.reload();
   await terminalShown();
   await settle();
