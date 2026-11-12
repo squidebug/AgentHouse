@@ -174,6 +174,16 @@ export class SessionManager extends EventEmitter {
     return [...live, ...this.registry.past(live)].sort((a, b) => a.startedAt - b.startedAt);
   }
 
+  /**
+   * Ends the session. It stays listed, ended, with its conversation and the
+   * work delegated to or from it, like a session that quit by itself.
+   */
+  async end(id: string): Promise<CloseResult> {
+    const result = this.options.host.get(id) ? await this.options.host.closeSession(id) : { exited: true, stillAlive: false };
+    this.emit('change');
+    return result;
+  }
+
   /** Ends the session (if still running) and removes it from the list. */
   async remove(id: string): Promise<CloseResult> {
     const result = this.options.host.get(id) ? await this.options.host.closeSession(id) : { exited: true, stillAlive: false };

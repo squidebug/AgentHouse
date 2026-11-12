@@ -30,6 +30,8 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
 export const api = {
   env: (refresh = false) => call<EnvReport>('GET', refresh ? '/api/env?refresh=1' : '/api/env'),
   launch: (opts: LaunchOptions) => call<SessionInfo>('POST', '/api/sessions', opts),
+  /** Ends the CLI; the session stays listed, ended. */
+  end: (id: string) => call<unknown>('POST', `/api/sessions/${encodeURIComponent(id)}/end`),
   remove: (id: string) => call<unknown>('DELETE', `/api/sessions/${encodeURIComponent(id)}`),
   compose: (id: string, req: ComposeRequest) => call<ComposeResult>('POST', `/api/sessions/${encodeURIComponent(id)}/compose`, req),
   /** Places a session under another one (grouping), or back at the top with null. */

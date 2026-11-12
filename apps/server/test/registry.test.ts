@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, test } from 'node:test';
 import type { AccountLimits, SessionInfo } from '@agenthouse/protocol';
-import { killTree } from '../src/shared/kill-tree';
+import { isAlive, killTree } from '../src/shared/kill-tree';
 import { HostClient, stopHosts } from '../src/web/host-client';
 import { createAgentHouseServer } from '../src/web/http/server';
 import { registryFile, SessionRegistry } from '../src/web/registry';
@@ -68,7 +68,15 @@ describe('session registry', () => {
       assert.equal((await openSocket(app.port, `/ws/session?id=${session.id}`, headers)).status, 404, 'no terminal is left');
       assert.ok(await waitFor(() => readRegistry(stateDir).find((s) => s.id === session.id)?.state === 'exited', 3000));
 
-      assert.equal((await request(app.port, 'DELETE', `/api/sessions/${session.id}`, { headers })).status, 200);
+      // Ended from AgentHouse, a session stays listed too, ended, until it is removed.
+      const other = (await request(app.port, 'POST', '/api/sessions', { headers, body: { vendor: 'fake', title: 'ended here' } })).json as SessionInfo;
+      assert.ok(await waitFor(() => readRegistry(stateDir).some((s) => s.id === other.id), 3000));
+      assert.equal((await request(app.port, 'POST', `/api/sessions/${other.id}/end`, { headers })).status, 200);
+      const after = ((await request(app.port, 'GET', '/api/sessions', { headers })).json as SessionInfo[]).find((s) => s.id === other.id);
+      assert.deepEqual([after?.state, after?.screen, after?.title], ['exited', false, 'ended here']);
+      assert.equal(isAlive(other.pid), false, 'its CLI has ended');
+
+      for (const id of [session.id, other.id]) assert.equal((await request(app.port, 'DELETE', `/api/sessions/${id}`, { headers })).status, 200);
       assert.deepEqual((await request(app.port, 'GET', '/api/sessions', { headers })).json, []);
       open = false;
       await app.close();

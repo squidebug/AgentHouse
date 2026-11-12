@@ -21,7 +21,7 @@ pnpm start        # prints http://127.0.0.1:7357/auth?token=… and opens it; if
 pnpm stop         # ends the server, every session and the session host
 ```
 
-Sessions run in a separate session host, so they keep running when the server stops or restarts, and an open page reconnects by itself. State lives in `~/.agenthouse`: the host's address, a log, per-session files, the session list and the last plan usage. Sessions from before a host restart (or a reboot) stay listed as ended until you remove them.
+Sessions run in a separate session host, so they keep running when the server stops or restarts, and an open page reconnects by itself. State lives in `~/.agenthouse`: the host's address, a log, per-session files, the session list and the last plan usage. Sessions from before a host restart (or a reboot), and sessions you end, stay listed as ended with their conversation until you remove them (the 50 newest ended ones are kept).
 
 Development:
 
@@ -44,6 +44,7 @@ pnpm dev:stop     # ends the dev sessions and the dev session host
 - **Conversation**: the switch in a pane header shows a Claude Code session's conversation instead of its terminal: prompts, replies, tool calls folded into one row (open one for its input and output), sub-agents, and model, effort and tokens per turn. Read-only. A session from before a host restart has only this left. ``Ctrl+` `` switches the active pane between its terminal and its conversation from anywhere on the page, the terminal included (the CLI never gets the key).
 - **Flow**: the last view in the switch shows when everything under a session worked, as a graph: a lane for the session, each of its sub-agents and the sessions grouped or delegated under it, in the tree's order, its name on its bars (filled: working, striped: waiting for you, outlined: done), up to an hour back. Who is under whom stays in the tree. 실행 중 keeps only what runs now and the lanes above it. Click a lane to open it in the same pane, a sub-agent's conversation or a session's terminal; ← in the pane header goes back, with the lane you came from marked.
 - **Sub-agents**: the agents a Claude Code session starts show under it in the tree, each under the agent that started it, with its kind and model; open one for its tokens and run time. Click one for its session's flow, with that agent marked; an agent in a conversation opens in the same pane, a chip in the pane header in a pane beside it; or drag it to a pane or the `+` strip. Many finished ones fold behind "완료 N". Claude runs them in the background, so a session can be idle while its agents work.
+- **Terminal keys**: as in Windows Terminal, `Ctrl+C` copies a selection (without one it interrupts, as always) and `Ctrl+V` pastes; `Ctrl+Shift+C`/`V` too.
 - **Details**: the chevron on a row or pane shows CLI version, model, effort, context use, folder and PID.
 
 ## Checks

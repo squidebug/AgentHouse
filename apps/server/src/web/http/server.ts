@@ -233,6 +233,11 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
         send(res, 200, await manager.remove(session.id));
         return;
       }
+      // Ends the CLI; the session stays listed, ended.
+      if (parts[3] === 'end' && parts.length === 4 && req.method === 'POST') {
+        send(res, 200, await manager.end(session.id));
+        return;
+      }
       if (parts[3] === 'conversation' && parts[4] && parts.length === 5 && req.method === 'GET') {
         const agent = agentParam(url);
         const detail = agent === undefined ? null : await conversations.detail(session.id, parts[4], agent);

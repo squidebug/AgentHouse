@@ -139,6 +139,21 @@ try {
   await page.waitForFunction(() => Boolean(document.activeElement?.closest('.xterm')), null, { timeout: 5000 });
   await sendButton.waitFor({ state: 'detached', timeout: 5000 });
   check(true, 'and again: the terminal, ready to type, the composer folded');
+
+  // Windows Terminal's keys: Ctrl+C copies a selection instead of interrupting, Ctrl+V pastes.
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin });
+  const screenBox = await page.locator('.xterm-screen').first().boundingBox();
+  await page.mouse.dblclick(screenBox.x + 24, screenBox.y + 8); // the word 'fake-agent' on the first line
+  await page.keyboard.press('Control+c');
+  const copied = await page.evaluate(() => navigator.clipboard.readText());
+  check(copied === 'fake-agent', 'Ctrl+C in the terminal copies the selection', copied);
+  await page.keyboard.press('Control+v');
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Control+Backquote');
+  await page.getByText('fake answer: fake-agent', { exact: true }).waitFor({ timeout: 10_000 });
+  check(true, 'Ctrl+V pastes it, and nothing interrupted the CLI');
+  await page.keyboard.press('Control+Backquote');
+  await terminalShown();
   await page.reload();
   await terminalShown();
   await settle();
@@ -295,6 +310,15 @@ try {
   const nested = await deep.locator('ul ul ul').count();
   check(nested === 0 && (await deep.innerText()).includes('- - - '), 'an answer nested too deep to draw shows as plain text', `nested lists: ${nested}`);
   check(await tree.isVisible(), 'and the rest of the app stays');
+
+  // Ended from AgentHouse, a session stays listed, ended, with its conversation.
+  const agentsDetails = tree.getByRole('button', { name: 'ui-agents 세부 정보' });
+  if ((await agentsDetails.getAttribute('aria-expanded')) === 'true') await agentsDetails.click(); // left open above
+  await tree.getByRole('button', { name: 'ui-helper 세부 정보' }).click();
+  await tree.getByRole('button', { name: '세션 종료' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: '세션 종료' }).click();
+  await row('ui-helper').getByRole('img', { name: /^종료/ }).waitFor({ timeout: 10_000 });
+  check(true, 'a session ended from AgentHouse stays listed, ended');
 
   check(errors.length === 0, 'no errors in the browser console', errors.join(' | '));
   console.log(`INFO  screenshots: ${out}`);

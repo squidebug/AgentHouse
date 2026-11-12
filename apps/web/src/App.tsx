@@ -1,8 +1,8 @@
-import { Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, Typography } from '@mui/material';
+import { Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, Snackbar, Typography } from '@mui/material';
 import { useColorScheme } from '@mui/material/styles';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { isAsking, type DelegationInfo, type SessionInfo, type ThemeMode } from '@agenthouse/protocol';
-import { api } from './api/client';
+import { api, RequestError } from './api/client';
 import { useEnv, useSessions } from './api/hooks';
 import { Composer } from './components/Composer';
 import { CopyCommand } from './components/CopyCommand';
@@ -105,13 +105,16 @@ export function App() {
   const activeSession = activePane ? byId.get(activePane.sessionId) : undefined;
   const noCli = env?.messages.find((m) => m.id === 'ENV_NO_CLI');
 
-  // Refusals (a delegate waiting on a dialog, an ended session) leave things as they are.
-  const onDelegate = useCallback((parentId: string, childId: string, text: string) => void api.delegate(parentId, childId, text).catch(() => {}), []);
-  const onDeliver = useCallback((task: DelegationInfo, header: string) => void api.deliver(task.id, header).catch(() => {}), []);
+  // A refused or failed change (a delegate waiting on a dialog, the host away) leaves things as they
+  // are and says so for a moment, with the server's reason when there is one.
+  const [problem, setProblem] = useState<string | null>(null);
+  const failed = useCallback((label: string) => (error: unknown) => setProblem(error instanceof RequestError ? `${label} · ${error.message}` : label), []);
+  const onDelegate = useCallback((parentId: string, childId: string, text: string) => void api.delegate(parentId, childId, text).catch(failed(t.failure.delegate)), [failed]);
+  const onDeliver = useCallback((task: DelegationInfo, header: string) => void api.deliver(task.id, header).catch(failed(t.failure.deliver)), [failed]);
 
   const endSession = async (session: SessionInfo) => {
     setEnding(null);
-    await api.remove(session.id).catch(() => {});
+    await api.end(session.id).catch(failed(t.failure.end));
   };
 
   return (
@@ -133,13 +136,13 @@ export function App() {
         <SessionTree
           sessions={[...byId.values()]}
           links={links}
-          onLink={(childId, parentId, kind) => api.link(childId, parentId, kind).catch(() => {})}
+          onLink={(childId, parentId, kind) => api.link(childId, parentId, kind).catch(failed(t.failure.link))}
           state={state}
           dispatch={dispatch}
           dnd={dnd}
           onNew={() => setLaunchOpen(true)}
           onEnd={(id) => setEnding(byId.get(id) ?? null)}
-          onRemove={(id) => api.remove(id).catch(() => {})}
+          onRemove={(id) => api.remove(id).catch(failed(t.failure.remove))}
         />
         <Box component="main" sx={{ flex: '999 1 560px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: '12px' }}>
           <PaneGrid
@@ -186,6 +189,8 @@ export function App() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <Snackbar open={Boolean(problem)} message={problem} autoHideDuration={6000} onClose={() => setProblem(null)} anchorOrigin={{ vertical: 'top', horizontal: 'center' }} />
     </Box>
   );
 }

@@ -16,6 +16,8 @@ const fontsReady: Promise<unknown> =
     ? Promise.resolve()
     : Promise.all([document.fonts.load('13px "JetBrains Mono"'), document.fonts.load('13px "Nanum Gothic Coding"', '가')]).catch(() => undefined);
 
+const MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
+
 interface Props {
   sessionId: string;
   mode: ThemeMode;
@@ -92,9 +94,9 @@ export function TerminalView({ sessionId, mode, windowsBuild, onFocus, autoFocus
         ws.onmessage = (event) => {
           const message = JSON.parse(String(event.data)) as TerminalServerMessage;
           if (message.type === 'snapshot') {
-            term.reset();
             if (!owner) term.resize(message.cols, message.rows);
-            term.write(message.data);
+            // Reset through the write queue (RIS): output still queued from before cannot land on top of the snapshot.
+            term.write(`\x1bc${message.data}`);
           } else if (message.type === 'output') {
             term.write(message.data);
           } else if (message.type === 'size') {
@@ -117,6 +119,20 @@ export function TerminalView({ sessionId, mode, windowsBuild, onFocus, autoFocus
       // already did, so a second reply must not reach the CLI.
       const dataSub = term.onData((data) => {
         if (!isAutoResponse(data)) send({ type: 'input', data });
+      });
+      // Windows Terminal's keys: Ctrl+C copies a selection (without one it interrupts, as always) and
+      // Ctrl+V pastes; Ctrl+Shift+C/V too. On a Mac, Cmd+C/V do that already and Ctrl keeps its terminal meaning.
+      term.attachCustomKeyEventHandler((event) => {
+        if (MAC || event.type !== 'keydown' || !event.ctrlKey || event.altKey || event.metaKey) return true;
+        if (event.code === 'KeyC' && (event.shiftKey || term.hasSelection())) {
+          const selected = term.getSelection();
+          if (selected) navigator.clipboard?.writeText(selected).catch(() => {});
+          term.clearSelection();
+          event.preventDefault();
+          return false;
+        }
+        // Left to the browser: its paste reaches xterm as a paste (bracketed, when the CLI asked for that).
+        return event.code !== 'KeyV';
       });
       const binarySub = term.onBinary((data) => send({ type: 'input', data, binary: true }));
       const onFocusIn = () => {

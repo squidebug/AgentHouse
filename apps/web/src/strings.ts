@@ -20,6 +20,7 @@ export const t = {
   noScreen: '터미널 화면 없음',
   cannotShow: '표시할 수 없음',
   reload: '새로고침',
+  failure: { delegate: '위임 실패', deliver: '전달 실패', end: '종료 실패', remove: '제거 실패', link: '옮기기 실패' },
   running: '실행 중',
   exited: '종료',
   lightMode: '라이트 모드',
