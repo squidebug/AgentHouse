@@ -48,8 +48,10 @@ export type ConversationEntry =
   | (EntryBase & { kind: 'text'; text: string; truncated: boolean })
   | (EntryBase & { kind: 'thinking'; chars: number })
   | (EntryBase & { kind: 'tool'; name: string; summary: string; state: ToolState })
-  /** A sub-agent the model started (the Agent tool). */
+  /** A sub-agent the model started (the Agent tool). One running in the background stays `running` until it reports back. */
   | (EntryBase & { kind: 'agent'; agentType: string | null; description: string; state: ToolState; agentId: string | null })
+  /** A background sub-agent reported back (Claude's task notification); this starts a turn. */
+  | (EntryBase & { kind: 'task'; agentId: string | null; description: string; state: ToolState; tokens: number | null; durationMs: number | null })
   /** A slash command typed into the CLI, with what it printed. */
   | (EntryBase & { kind: 'command'; name: string; args: string; output: string })
   | (EntryBase & { kind: 'notice'; notice: NoticeKind; text: string });

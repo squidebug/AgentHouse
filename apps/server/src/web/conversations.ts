@@ -209,28 +209,37 @@ class Conversation {
   }
 }
 
-/** The transcripts AgentHouse may read: Claude's own, as hooks reported them or sessions.json kept them. */
-function transcriptsOf(session: SessionInfo): TranscriptSegment[] {
+/**
+ * The transcripts AgentHouse may read: Claude's own, as hooks reported them or
+ * sessions.json kept them. A sub-agent has one, next to the session's.
+ */
+function transcriptsOf(session: SessionInfo, agentId: string | null): TranscriptSegment[] {
   const configDir = claudeConfigDir();
-  return session.transcripts.filter((t) => isClaudeTranscript(t.path, configDir));
+  if (agentId === null) return session.transcripts.filter((t) => isClaudeTranscript(t.path, configDir));
+  const agent = session.agents.find((a) => a.id === agentId);
+  if (!agent?.transcriptPath || !isClaudeTranscript(agent.transcriptPath, configDir)) return [];
+  return [{ vendorSessionId: null, path: agent.transcriptPath, since: agent.startedAt }];
 }
 
+const keyOf = (sessionId: string, agentId: string | null) => `${sessionId}
+${agentId ?? ''}`;
+
 /**
- * The conversation views of the sessions, read in the web server: a session's
- * transcripts are read once, then followed as they grow, while a browser shows
- * them (and a minute after, for switching back and forth).
+ * The conversation views of the sessions and their sub-agents, read in the web
+ * server: a transcript is read once, then followed as it grows, while a browser
+ * shows it (and a minute after, for switching back and forth).
  */
 export class Conversations {
-  private readonly open = new Map<string, Conversation>();
+  private readonly open = new Map<string, { sessionId: string; agentId: string | null; conversation: Conversation }>();
   private readonly onChange = () => {
-    for (const [id, conversation] of this.open) {
-      const session = this.manager.get(id);
+    for (const [key, { sessionId, agentId, conversation }] of this.open) {
+      const session = this.manager.get(sessionId);
       if (!session) {
         conversation.dispose();
-        this.open.delete(id);
+        this.open.delete(key);
         continue;
       }
-      conversation.setSegments(transcriptsOf(session));
+      conversation.setSegments(transcriptsOf(session, agentId));
       conversation.nudge();
     }
   };
@@ -239,30 +248,38 @@ export class Conversations {
     manager.on('change', this.onChange);
   }
 
-  /** Sends the conversation to the listener as it is read and grows; null for a session without a transcript. */
-  subscribe(sessionId: string, listener: Listener): (() => void) | null {
+  /** Whether there is a transcript to show: the session's, or with an agent id that sub-agent's. */
+  available(sessionId: string, agentId: string | null = null): boolean {
     const session = this.manager.get(sessionId);
-    if (!session || !transcriptsOf(session).length) return null;
-    let conversation = this.open.get(sessionId);
+    return Boolean(session && transcriptsOf(session, agentId).length);
+  }
+
+  /** Sends the conversation to the listener as it is read and grows; null when there is no transcript. */
+  subscribe(sessionId: string, listener: Listener, agentId: string | null = null): (() => void) | null {
+    const session = this.manager.get(sessionId);
+    const segments = session ? transcriptsOf(session, agentId) : [];
+    if (!segments.length) return null;
+    const key = keyOf(sessionId, agentId);
+    let conversation = this.open.get(key)?.conversation;
     if (!conversation) {
-      const created = new Conversation(transcriptsOf(session), () => {
+      const created = new Conversation(segments, () => {
         created.dispose();
-        if (this.open.get(sessionId) === created) this.open.delete(sessionId);
+        if (this.open.get(key)?.conversation === created) this.open.delete(key);
       });
       conversation = created;
-      this.open.set(sessionId, created);
+      this.open.set(key, { sessionId, agentId, conversation: created });
     }
     return conversation.subscribe(listener);
   }
 
   /** The full content of one entry of a conversation being viewed. */
-  detail(sessionId: string, entryId: string): Promise<EntryDetail | null> {
-    return this.open.get(sessionId)?.detail(entryId) ?? Promise.resolve(null);
+  detail(sessionId: string, entryId: string, agentId: string | null = null): Promise<EntryDetail | null> {
+    return this.open.get(keyOf(sessionId, agentId))?.conversation.detail(entryId) ?? Promise.resolve(null);
   }
 
   close(): void {
     this.manager.off('change', this.onChange);
-    for (const conversation of this.open.values()) conversation.dispose();
+    for (const { conversation } of this.open.values()) conversation.dispose();
     this.open.clear();
   }
 }

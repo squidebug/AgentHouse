@@ -150,6 +150,47 @@ describe('conversation from a Claude Code transcript', () => {
     assert.equal(big.truncated, true);
   });
 
+  test('a background agent runs until it reports back; the report starts a turn and is no prompt', () => {
+    const launched = { isAsync: true, status: 'async_launched', agentId: 'a1b2', description: 'Look around', resolvedModel: 'claude-haiku-5-5' };
+    const report = (id: string, useId: string | null, status: string, result: string) =>
+      [
+        '<task-notification>',
+        `<task-id>${id}</task-id>`,
+        ...(useId ? [`<tool-use-id>${useId}</tool-use-id>`] : []),
+        `<status>${status}</status>`,
+        '<summary>Agent "Look around" finished</summary>',
+        `<result>${result}</result>`,
+        '<usage><subagent_tokens>35278</subagent_tokens><tool_uses>2</tool_uses><duration_ms>1635</duration_ms></usage>',
+        '</task-notification>',
+      ].join('\n');
+    const fromTask = { origin: { kind: 'task-notification', producer: 'session-task' } };
+    const use = assistant('msg_1', toolUse('toolu_7', 'Agent', { subagent_type: 'Explore', description: 'Look around', prompt: 'Look…' }));
+    const result = toolResult('toolu_7', 'Async agent launched successfully. agentId: a1b2 (internal ID)', { toolUseResult: launched });
+    const builder = build([prompt('Look around in the background'), use, result, assistant('msg_2', text('It is running.')), system('turn_duration', { durationMs: 900 })]);
+    const running = builder.snapshot().entries.find((e) => e.kind === 'agent');
+    assert.deepEqual(running?.kind === 'agent' && [running.state, running.agentId], ['running', 'a1b2']);
+    assert.equal(entryDetail(running!, [use, result]).text, undefined, 'the launch result is internal');
+
+    const done = prompt(report('a1b2', 'toolu_7', 'completed', 'Three folders.'), fromTask);
+    build([done, assistant('msg_3', text('Three folders, it says.'))], builder);
+    const { turns, entries } = builder.snapshot();
+    assert.deepEqual(kinds(entries), ['prompt', 'agent', 'text', 'task', 'text']);
+    const agent = entries.find((e) => e.kind === 'agent')!;
+    const task = entries.find((e) => e.kind === 'task')!;
+    assert.equal(agent.kind === 'agent' && agent.state, 'done');
+    assert.deepEqual(task.kind === 'task' && [task.agentId, task.description, task.state, task.tokens, task.durationMs, task.turn], ['a1b2', 'Look around', 'done', 35278, 1635, 1]);
+    assert.equal(turns.length, 2);
+    assert.equal(builder.sources.get(agent.id)?.lines.length, 3, 'the call, its launch and its report');
+    assert.equal(entryDetail(agent, [use, result, done]).text, 'Three folders.');
+    assert.equal(entryDetail(task, [done]).text, 'Three folders.');
+
+    // Resumed later, it reports again without the tool use id; a nested agent's report in an agent's own transcript is a note.
+    build([prompt(report('a1b2', null, 'failed', 'Gave up.'), fromTask)], builder);
+    assert.equal(builder.entry(agent.id)?.kind === 'agent' && (builder.entry(agent.id) as { state: string }).state, 'error');
+    const nested = build([prompt('[SYSTEM NOTIFICATION - NOT USER INPUT]\n\n' + report('a9', 'toolu_9', 'completed', 'beta'), { ...fromTask, isMeta: true })]);
+    assert.deepEqual(kinds(nested.snapshot().entries), ['task']);
+  });
+
   test('tool summaries', () => {
     assert.equal(toolSummary('Grep', { pattern: 'TODO', path: path.join(CWD, 'src') }, CWD), 'TODO  src');
     assert.equal(toolSummary('WebFetch', { url: 'https://example.com/a' }, CWD), 'https://example.com/a');

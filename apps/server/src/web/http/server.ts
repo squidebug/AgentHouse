@@ -80,6 +80,14 @@ async function readJson(req: IncomingMessage, limit = 256 * 1024): Promise<unkno
   }
 }
 
+// A sub-agent's id as Claude writes it; anything else names no transcript.
+const AGENT_ID = /^[A-Za-z0-9_-]{1,64}$/;
+const agentParam = (url: URL): string | null | undefined => {
+  const value = url.searchParams.get('agent');
+  if (value === null) return null;
+  return AGENT_ID.test(value) ? value : undefined;
+};
+
 function parse<T>(schema: { safeParse(v: unknown): { success: true; data: T } | { success: false } }, value: unknown): T {
   const result = schema.safeParse(value);
   if (!result.success) throw new HttpError(400, '요청 값이 올바르지 않습니다.', 'INVALID_REQUEST');
@@ -185,7 +193,8 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
         return;
       }
       if (parts[3] === 'conversation' && parts[4] && parts.length === 5 && req.method === 'GET') {
-        const detail = await conversations.detail(session.id, parts[4]);
+        const agent = agentParam(url);
+        const detail = agent === undefined ? null : await conversations.detail(session.id, parts[4], agent);
         if (!detail) throw new HttpError(404, '찾을 수 없습니다.');
         send(res, 200, detail);
         return;
@@ -255,12 +264,18 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
     if (!access.authenticated(req)) return reject(401);
     const url = new URL(req.url ?? '/', 'http://localhost');
     if (url.pathname === '/ws/conversation') {
+      // A session's conversation, or with agent=<id> one of its sub-agents'.
       const id = url.searchParams.get('id') ?? '';
-      if (!manager.get(id)?.transcripts.length) return reject(404);
+      const agent = agentParam(url);
+      if (agent === undefined || !conversations.available(id, agent)) return reject(404);
       wss.handleUpgrade(req, socket, head, (ws) => {
-        const unsubscribe = conversations.subscribe(id, (message) => {
-          if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(message));
-        });
+        const unsubscribe = conversations.subscribe(
+          id,
+          (message) => {
+            if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(message));
+          },
+          agent,
+        );
         if (!unsubscribe) return ws.close();
         conversationSockets.add(ws);
         ws.on('close', () => {

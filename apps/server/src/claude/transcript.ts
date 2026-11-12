@@ -5,7 +5,13 @@ import type { ConversationEntry, ConversationTurn, EntryDetail, ToolState } from
 //  - user: a prompt (string or text/image blocks), tool results (tool_result
 //    blocks; toolUseResult holds the structured result), interrupt markers,
 //    slash commands (<command-name>…), the summary after a compaction
-//    (isCompactSummary). isMeta records are the CLI's own notes: skipped.
+//    (isCompactSummary), a background agent's report (origin.kind
+//    task-notification, a <task-notification> block). isMeta records are the
+//    CLI's own notes: skipped, except such a report.
+//  - Agent tool: its result says async_launched when the agent runs in the
+//    background (the default in 2.1.322); the agent is done when it reports.
+//    A sub-agent's own transcript (<session>/subagents/agent-<id>.jsonl) has
+//    the same records.
 //  - assistant: one content block per record (text, thinking, tool_use). The
 //    records of one API response share message.id and carry the same usage.
 //  - system: turn_duration ends a turn, compact_boundary marks a compaction,
@@ -54,6 +60,44 @@ function tag(text: string, name: string): string | null {
 }
 
 const INTERRUPT = /^\[Request interrupted by user/;
+
+/** What a background agent's report says (a `<task-notification>` block in a user record). */
+interface TaskReport {
+  agentId: string | null;
+  toolUseId: string | null;
+  state: ToolState;
+  summary: string | null;
+  result: string | null;
+  tokens: number | null;
+  durationMs: number | null;
+}
+
+const TASK_STATES: Record<string, ToolState> = { completed: 'done', failed: 'error', error: 'error', killed: 'interrupted', stopped: 'interrupted', cancelled: 'interrupted' };
+
+function taskReport(content: string): TaskReport | null {
+  const block = tag(content, 'task-notification');
+  if (block === null) return null;
+  const field = (name: string) => {
+    const value = tag(block, name)?.trim();
+    return value ? value : null;
+  };
+  const count = (name: string) => {
+    const value = Number(field(name));
+    return Number.isFinite(value) && value > 0 ? value : null;
+  };
+  const status = field('status');
+  return {
+    agentId: field('task-id'),
+    toolUseId: field('tool-use-id'),
+    state: (status && TASK_STATES[status]) || 'done',
+    summary: field('summary'),
+    result: field('result'),
+    tokens: count('subagent_tokens'),
+    durationMs: count('duration_ms'),
+  };
+}
+
+const contentText = (content: unknown): string => (typeof content === 'string' ? content : resultText(content));
 
 /** A file path relative to the session's folder, when it is inside it. */
 function shortPath(file: string, cwd: string | null): string {
@@ -135,6 +179,8 @@ export class ConversationBuilder {
   private segment = 0;
   private lastCommand: string | null = null;
   private lastCompact: string | null = null;
+  /** The Agent entry of each sub-agent, by its agent id, for its report. */
+  private readonly agentEntries = new Map<string, string>();
   private serial = 0;
 
   /** Records from here on are from the next transcript (Claude Code started a new one: /clear, /resume). */
@@ -247,9 +293,13 @@ export class ConversationBuilder {
   }
 
   private user(r: Json, at: number | null, line: LineRange): void {
-    if (r.isMeta === true) return;
     const message = obj(r.message);
     const content = message?.content;
+    if (obj(r.origin)?.kind === 'task-notification') {
+      const report = taskReport(contentText(content));
+      if (report) return this.report(report, r, at, line);
+    }
+    if (r.isMeta === true) return;
     if (r.isCompactSummary === true) {
       const notice = this.lastCompact ? this.entries.get(this.lastCompact) : undefined;
       if (notice) this.sources.set(notice.id, this.source(line));
@@ -289,6 +339,24 @@ export class ConversationBuilder {
     this.put({ kind: 'prompt', id: this.key(str(r.uuid) ?? `prompt-${(this.serial += 1)}`), turn: this.turnIndex(), at, text: shown.text, images, from, truncated: shown.truncated }, this.source(line));
   }
 
+  /** A background agent reported back: its block is settled, and the report starts the turn that answers it. */
+  private report(report: TaskReport, r: Json, at: number | null, line: LineRange): void {
+    const byUse = report.toolUseId ? this.key(report.toolUseId) : null;
+    const entryId = byUse && this.entries.has(byUse) ? byUse : report.agentId ? this.agentEntries.get(report.agentId) : undefined;
+    const agent = entryId ? this.entries.get(entryId) : undefined;
+    if (agent?.kind === 'agent') {
+      this.put({ ...agent, state: report.state, agentId: agent.agentId ?? report.agentId });
+      const source = this.sources.get(agent.id);
+      if (source) this.sources.set(agent.id, { ...source, lines: [...source.lines.slice(0, 2), line] });
+    }
+    this.newTurn(at);
+    const description = agent?.kind === 'agent' ? agent.description : (report.summary ?? '');
+    this.put(
+      { kind: 'task', id: this.key(str(r.uuid) ?? `task-${(this.serial += 1)}`), turn: this.turnIndex(), at, agentId: report.agentId, description, state: report.state, tokens: report.tokens, durationMs: report.durationMs },
+      this.source(line),
+    );
+  }
+
   private toolResult(r: Json, block: Json, line: LineRange): void {
     const useId = str(block.tool_use_id);
     const entry = useId ? this.entries.get(this.key(useId)) : undefined;
@@ -298,9 +366,15 @@ export class ConversationBuilder {
     if (typeof r.toolDenialKind === 'string') state = 'denied';
     else if (result?.interrupted === true) state = 'interrupted';
     else if (block.is_error === true) state = 'error';
+    // Started in the background: it runs until it reports back.
+    else if (entry.kind === 'agent' && (result?.status === 'async_launched' || result?.isAsync === true)) state = 'running';
     const source = this.sources.get(entry.id);
     this.sources.set(entry.id, { segment: source?.segment ?? this.segment, lines: [...(source?.lines.slice(0, 1) ?? []), line] });
-    if (entry.kind === 'agent') this.put({ ...entry, state, agentId: str(result?.agentId) ?? entry.agentId });
+    if (entry.kind === 'agent') {
+      const agentId = str(result?.agentId) ?? entry.agentId;
+      if (agentId) this.agentEntries.set(agentId, entry.id);
+      this.put({ ...entry, state, agentId });
+    }
     else this.put({ ...entry, state });
   }
 
@@ -396,6 +470,7 @@ export function entryDetail(entry: ConversationEntry, records: unknown[]): Entry
   const text = (value: string) => clip(value, state) as string;
   const [first, second] = records.map(obj);
   const blocks = (r: Json | null | undefined) => (Array.isArray(obj(r?.message)?.content) ? (obj(r?.message)!.content as unknown[]).map(obj) : []);
+  const reportIn = (r: Json | null | undefined) => (obj(r?.origin)?.kind === 'task-notification' ? taskReport(contentText(obj(r?.message)?.content)) : null);
   switch (entry.kind) {
     case 'tool':
     case 'agent': {
@@ -403,6 +478,10 @@ export function entryDetail(entry: ConversationEntry, records: unknown[]): Entry
       const use = blocks(first).find((b) => b?.type === 'tool_use' && b.id === useId);
       const result = blocks(second).find((b) => b?.type === 'tool_result' && b.tool_use_id === useId);
       const structured = obj(second?.toolUseResult);
+      // A background agent: its launch result is internal; what it reported is what it did.
+      const report = records.map(obj).map(reportIn).find(Boolean);
+      const launched = structured?.status === 'async_launched' || structured?.isAsync === true;
+      const output = report?.result ?? (result && !launched ? resultText(result.content) : null);
       const patch = Array.isArray(structured?.structuredPatch)
         ? (structured.structuredPatch as unknown[]).map(obj).filter(Boolean).map((hunk) => ({
             oldStart: num(hunk!.oldStart),
@@ -412,11 +491,13 @@ export function entryDetail(entry: ConversationEntry, records: unknown[]): Entry
         : undefined;
       return {
         input: clip(use?.input ?? null, state),
-        ...(result ? { text: text(resultText(result.content)) } : {}),
+        ...(output !== null ? { text: text(output) } : {}),
         ...(patch?.length ? { patch } : {}),
         truncated: state.truncated,
       };
     }
+    case 'task':
+      return { text: text(reportIn(first)?.result ?? ''), truncated: state.truncated };
     case 'thinking': {
       const block = blocks(first).find((b) => b?.type === 'thinking');
       return { text: text(str(block?.thinking) ?? ''), truncated: state.truncated };

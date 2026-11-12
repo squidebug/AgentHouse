@@ -90,6 +90,62 @@ describe('conversation view', () => {
     await request(app.port, 'DELETE', `/api/sessions/${session.id}`, { headers });
   });
 
+  test('background sub-agents: the tree, their reports, and each one’s own conversation', async () => {
+    const created = await request(app.port, 'POST', '/api/sessions', { headers, body: { vendor: 'fake', title: 'agents' } });
+    const session = created.json as SessionInfo;
+    const now = async () => ((await request(app.port, 'GET', '/api/sessions', { headers })).json as SessionInfo[]).find((s) => s.id === session.id);
+    await eventually(now, (s) => s?.status.value === 'idle' && s.transcripts.length === 1, 8000);
+    const socket = await openSocket(app.port, `/ws/conversation?id=${session.id}`, headers);
+    await request(app.port, 'POST', `/api/sessions/${session.id}/compose`, { headers, body: { text: 'start agents please', enterDelayMs: 50, quietMs: 50 } });
+
+    const settled = await eventually(now, (s) => s?.agents.length === 3 && s.agents.every((a) => a.state === 'stopped') && s.status.value === 'idle', 10_000);
+    const agents = settled?.agents ?? [];
+    assert.deepEqual(
+      agents.map((a) => [a.agentType, a.description, a.parentId === null ? null : agents.findIndex((p) => p.id === a.parentId)]),
+      [
+        ['Explore', 'Look around', null],
+        ['general-purpose', 'Plan the change', null],
+        ['Explore', 'Check the tests', 1],
+      ],
+      'two in parallel, the third started by the second',
+    );
+    assert.deepEqual(
+      agents.map((a) => [a.model, a.tokens, Boolean(a.transcriptPath)]),
+      [
+        ['fake-small', 1000, true],
+        ['fake-small', 1001, true],
+        ['fake-small', 1002, true],
+      ],
+    );
+
+    assert.ok(await waitFor(() => follow(socket.messages).entries.filter((e) => e.kind === 'task').length === 2, 8000), 'both reports arrive');
+    const main = follow(socket.messages);
+    assert.deepEqual(
+      main.entries.map((e) => (e.kind === 'agent' || e.kind === 'task' ? `${e.kind}:${e.state}` : e.kind)),
+      ['prompt', 'agent:done', 'agent:done', 'text', 'task:done', 'text', 'task:done', 'text'],
+    );
+    assert.equal(main.turns.length, 3, 'each report starts a turn');
+
+    // A sub-agent's own conversation, with the agent it started and that one's report.
+    const planner = agents[1]!;
+    const own = await openSocket(app.port, `/ws/conversation?id=${session.id}&agent=${planner.id}`, headers);
+    assert.equal(own.status, 101);
+    assert.ok(await waitFor(() => follow(own.messages).entries.some((e) => e.kind === 'text' && e.text === 'plan ready'), 5000));
+    const view = follow(own.messages);
+    assert.deepEqual(
+      view.entries.map((e) => (e.kind === 'agent' || e.kind === 'task' ? `${e.kind}:${e.state}` : e.kind)),
+      ['prompt', 'agent:done', 'text', 'task:done', 'text'],
+    );
+    const nested = view.entries.find((e) => e.kind === 'agent')!;
+    const detail = await request(app.port, 'GET', `/api/sessions/${session.id}/conversation/${encodeURIComponent(nested.id)}?agent=${planner.id}`, { headers });
+    assert.equal((detail.json as EntryDetail).text, 'tests pass', "an agent block opens to what it reported");
+
+    for (const bad of ['../x', 'unknown', '']) assert.equal((await openSocket(app.port, `/ws/conversation?id=${session.id}&agent=${encodeURIComponent(bad)}`, headers)).status, 404, bad);
+    socket.ws?.close();
+    own.ws?.close();
+    await request(app.port, 'DELETE', `/api/sessions/${session.id}`, { headers });
+  });
+
   test("a sub-agent's dialog makes the session wait while the main conversation is idle", async () => {
     const created = await request(app.port, 'POST', '/api/sessions', { headers, body: { vendor: 'fake', title: 'asks' } });
     const session = created.json as SessionInfo;
