@@ -49,6 +49,8 @@ export function findOnPath(name: string, env: NodeJS.ProcessEnv = process.env): 
  *   "%dp0%\node_modules\pkg\bin\foo.exe"   %*
  * or, for packages whose bin is a script,
  *   "%_prog%"  "%dp0%\node_modules\pkg\bin\foo.js" %*
+ * and pnpm's (global installs) with
+ *   "%~dp0\node.exe"  "%~dp0\..\pkg\bin\foo.js" %*
  */
 export function resolveShim(candidate: string, shimText?: string): Omit<ResolvedCommand, 'shim'> | null {
   if (!isWindows) return { file: candidate, args: [] };
@@ -58,7 +60,7 @@ export function resolveShim(candidate: string, shimText?: string): Omit<Resolved
   if (ext !== '.cmd') return null;
   const dir = path.dirname(candidate);
   const text = shimText ?? readFileSync(candidate, 'utf8');
-  const targets = [...text.matchAll(/"%dp0%\\([^"]+)"/g)].map((m) => path.join(dir, m[1] ?? ''));
+  const targets = [...text.matchAll(/"%(?:dp0%|~dp0)\\([^"]+)"/g)].map((m) => path.join(dir, m[1] ?? ''));
   const exe = targets.find((t) => /\.exe$/i.test(t) && !/\\node\.exe$/i.test(t));
   if (exe && existsSync(exe)) return { file: exe, args: [] };
   const script = targets.find((t) => /\.[cm]?js$/i.test(t));

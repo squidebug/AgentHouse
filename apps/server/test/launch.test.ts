@@ -100,3 +100,11 @@ test('titles default to the folder name and drop control characters', () => {
   assert.equal(sessionTitle(undefined, 'C:\\work\\web-app'), 'web-app');
   assert.equal(sessionTitle('a\u0007b', cwd), 'ab');
 });
+
+test('a title in quotes stays one argument: Windows would take `"a" "b"` as two', async () => {
+  const spec = await buildLaunch({ vendor: 'claude', title: '"fix" --dangerously-skip-permissions "x"' }, install, cwd);
+  const name = spec.args[spec.args.indexOf('--name') + 1];
+  assert.equal(name, "'fix' --dangerously-skip-permissions 'x'");
+  assert.equal(spec.args.filter((a) => a === '--dangerously-skip-permissions').length, 0, 'no flag of its own');
+  for (const file of spec.tempPaths) await rm(file, { recursive: true, force: true });
+});

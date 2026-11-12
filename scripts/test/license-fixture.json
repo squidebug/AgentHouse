@@ -2,7 +2,11 @@
   "prod": {
     "MIT": [{ "name": "ok-mit", "versions": ["1.0.0"] }],
     "(MIT OR GPL-3.0)": [{ "name": "ok-dual", "versions": ["1.0.0"] }],
+    "MIT AND (ISC OR GPL-3.0)": [{ "name": "ok-and-or", "versions": ["1.0.0"] }],
+    "Apache-2.0 WITH LLVM-exception": [{ "name": "ok-with", "versions": ["1.0.0"] }],
     "GPL-3.0": [{ "name": "bad-gpl", "versions": ["2.0.0"] }],
+    "(MIT OR Apache-2.0) AND GPL-3.0-only": [{ "name": "bad-and-gpl", "versions": ["1.0.0"] }],
+    "MIT OR": [{ "name": "bad-unparsed", "versions": ["1.0.0"] }],
     "MPL-2.0": [{ "name": "bad-mpl-in-prod", "versions": ["1.0.0"] }]
   },
   "dev": {

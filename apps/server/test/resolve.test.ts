@@ -56,6 +56,30 @@ test('an npm .cmd shim that runs a script resolves to node + script', windowsOnl
   }
 });
 
+test('a pnpm .cmd shim (global install) resolves to node + script', windowsOnly, () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'agenthouse-shim-'));
+  try {
+    const bin = path.join(dir, 'bin');
+    const script = path.join(dir, '@anthropic-ai', 'claude-code', 'cli.js');
+    mkdirSync(path.dirname(script), { recursive: true });
+    mkdirSync(bin);
+    writeFileSync(script, '');
+    const shim = path.join(bin, 'claude.cmd');
+    const text = [
+      '@SETLOCAL',
+      '@IF EXIST "%~dp0\\node.exe" (',
+      '  "%~dp0\\node.exe"  "%~dp0\\..\\@anthropic-ai\\claude-code\\cli.js" %*',
+      ') ELSE (',
+      '  node  "%~dp0\\..\\@anthropic-ai\\claude-code\\cli.js" %*',
+      ')',
+      '',
+    ].join('\r\n');
+    assert.deepEqual(resolveShim(shim, text), { file: process.execPath, args: [script] });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('shims for other shells are skipped', windowsOnly, () => {
   assert.equal(resolveShim('C:\\npm\\claude.ps1', ''), null);
   assert.equal(resolveShim('C:\\npm\\claude', ''), null);

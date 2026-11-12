@@ -44,12 +44,52 @@ function list(scope) {
   return trimmed.startsWith('{') ? JSON.parse(trimmed) : {};
 }
 
-/** Evaluates simple SPDX expressions: "A OR B" passes if either passes, "A AND B" needs both. */
+/**
+ * Evaluates an SPDX expression the way SPDX reads it: AND binds tighter than
+ * OR, parentheses group, and "X WITH exception" counts as X. So
+ * "(MIT OR Apache-2.0) AND GPL-3.0-only" needs GPL-3.0-only too. Anything
+ * that does not parse is not permitted.
+ */
 function permitted(expression, allowed) {
-  const clean = expression.replace(/[()]/g, '').trim();
-  if (/ OR /i.test(clean)) return clean.split(/ OR /i).some((part) => permitted(part, allowed));
-  if (/ AND /i.test(clean)) return clean.split(/ AND /i).every((part) => permitted(part, allowed));
-  return allowed.has(clean.split(/ WITH /i)[0].trim());
+  const tokens = expression.match(/\(|\)|[^\s()]+/g) ?? [];
+  let at = 0;
+  const keyword = () => tokens[at]?.toUpperCase();
+  const atom = () => {
+    if (tokens[at] === '(') {
+      at += 1;
+      const value = any();
+      if (tokens[at] !== ')') throw new Error('unbalanced');
+      at += 1;
+      return value;
+    }
+    const id = tokens[at];
+    if (!id || id === ')' || ['AND', 'OR', 'WITH'].includes(id.toUpperCase())) throw new Error('expected a license');
+    at += 1;
+    if (keyword() === 'WITH') at += 2;
+    return allowed.has(id);
+  };
+  const all = () => {
+    let value = atom();
+    while (keyword() === 'AND') {
+      at += 1;
+      value = atom() && value;
+    }
+    return value;
+  };
+  const any = () => {
+    let value = all();
+    while (keyword() === 'OR') {
+      at += 1;
+      value = all() || value;
+    }
+    return value;
+  };
+  try {
+    const value = any();
+    return at === tokens.length && value;
+  } catch {
+    return false;
+  }
 }
 
 function isExcepted(name, version) {

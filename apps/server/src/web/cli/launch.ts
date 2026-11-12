@@ -124,7 +124,9 @@ export async function buildLaunch(
     // A pre-chosen id makes the transcript path known before the CLI writes it.
     const vendorSessionId = randomUUID();
     args.push('--session-id', vendorSessionId);
-    if (opts.title) args.push('--name', title);
+    // On Windows node-pty passes an argument already wrapped in quotes as it is: a title like
+    // `"a" "b"` would turn into two arguments, the second a prompt or a flag. The name keeps none.
+    if (opts.title) args.push('--name', title.replace(/"/g, "'"));
     const chosenModel = model(opts.model);
     if (chosenModel) args.push('--model', chosenModel);
     const effort = pick(opts.effort, CLAUDE_EFFORTS, 'effort');
