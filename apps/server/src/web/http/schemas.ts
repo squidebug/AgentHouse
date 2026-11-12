@@ -22,7 +22,17 @@ export const ComposeBody = z.object({
 
 export const LinkBody = z.object({
   parentId: z.string().min(1).max(64).nullable(),
-  kind: z.enum(['group']).optional(),
+  kind: z.enum(['group', 'delegate']).optional(),
+});
+
+export const DelegateBody = z.object({
+  childId: z.string().min(1).max(64),
+  text: z.string().min(1).max(200_000),
+});
+
+export const DeliverBody = z.object({
+  /** One line in front of the answer, in the browser's words. */
+  header: z.string().min(1).max(200).regex(/^[^\r\n]*$/),
 });
 
 export const TerminalClient = z.discriminatedUnion('type', [

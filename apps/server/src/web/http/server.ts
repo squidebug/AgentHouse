@@ -7,10 +7,11 @@ import { EnvService } from '../doctor';
 import { HostUnavailableError, type HostClient } from '../host-client';
 import { HostRequestError } from '../../shared/host-protocol';
 import { Conversations } from '../conversations';
+import { DelegationError, Delegations, delegationsFile } from '../delegations';
 import { LinkError } from '../links';
 import { SessionManager } from '../manager';
 import { AccessControl } from './access';
-import { ComposeBody, LaunchBody, LinkBody, TerminalClient } from './schemas';
+import { ComposeBody, DelegateBody, DeliverBody, LaunchBody, LinkBody, TerminalClient } from './schemas';
 import { serveStatic } from './static';
 
 export interface ServerOptions {
@@ -158,6 +159,7 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
   const eventClients = new Set<WebSocket>();
   const terminals = new Set<WebSocket>();
   const conversations = new Conversations(manager);
+  const delegations = new Delegations(manager, delegationsFile(host.stateDir));
   const conversationSockets = new Set<WebSocket>();
 
   const broadcast = (message: EventServerMessage) => {
@@ -167,6 +169,8 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
   const broadcastSessions = () => broadcast({ type: 'sessions', sessions: manager.list() });
   const broadcastLimits = () => broadcast({ type: 'limits', limits: manager.limits() });
   const broadcastLinks = () => broadcast({ type: 'links', links: manager.links() });
+  const broadcastDelegations = () => broadcast({ type: 'delegations', delegations: delegations.list() });
+  delegations.on('change', broadcastDelegations);
   manager.on('change', broadcastSessions);
   manager.on('limits', broadcastLimits);
   manager.on('links', broadcastLinks);
@@ -181,6 +185,12 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
     }
     if (url.pathname === '/api/sessions' && req.method === 'GET') {
       send(res, 200, manager.list());
+      return;
+    }
+    // Hands a delegate's answer back to the session that delegated the work.
+    if (parts[0] === 'api' && parts[1] === 'delegations' && parts[2] && parts[3] === 'deliver' && parts.length === 4 && req.method === 'POST') {
+      const body = parse(DeliverBody, await readJson(req));
+      send(res, 200, await delegated(() => delegations.deliver(parts[2]!, body.header)));
       return;
     }
     if (url.pathname === '/api/sessions' && req.method === 'POST') {
@@ -202,6 +212,12 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
         send(res, 200, detail);
         return;
       }
+      // Sends work from this session to the session delegated under it.
+      if (parts[3] === 'delegations' && parts.length === 4 && req.method === 'POST') {
+        const body = parse(DelegateBody, await readJson(req));
+        send(res, 201, await delegated(() => delegations.delegate(session.id, body.childId, body.text)));
+        return;
+      }
       // Places the session under another one (grouping), or back at the top.
       if (parts[3] === 'link' && parts.length === 4 && req.method === 'PUT') {
         const body = parse(LinkBody, await readJson(req));
@@ -221,6 +237,16 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
       }
     }
     throw new HttpError(404, '찾을 수 없습니다.');
+  }
+
+  /** A delegation call, its refusals as HTTP errors. */
+  async function delegated<T>(run: () => Promise<T>): Promise<T> {
+    try {
+      return await run();
+    } catch (error) {
+      if (error instanceof DelegationError) throw new HttpError(error.code === 'NOT_FOUND' ? 404 : error.code === 'BUSY' ? 409 : 400, error.message, error.code);
+      throw error;
+    }
   }
 
   const server = http.createServer(async (req, res) => {
@@ -306,9 +332,11 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
         const sessions: EventServerMessage = { type: 'sessions', sessions: manager.list() };
         const limits: EventServerMessage = { type: 'limits', limits: manager.limits() };
         const links: EventServerMessage = { type: 'links', links: manager.links() };
+        const delegated: EventServerMessage = { type: 'delegations', delegations: delegations.list() };
         ws.send(JSON.stringify(sessions));
         ws.send(JSON.stringify(limits));
         ws.send(JSON.stringify(links));
+        ws.send(JSON.stringify(delegated));
       });
       return;
     }
@@ -342,6 +370,8 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
       manager.off('change', broadcastSessions);
       manager.off('limits', broadcastLimits);
       manager.off('links', broadcastLinks);
+      delegations.off('change', broadcastDelegations);
+      delegations.close();
       manager.close();
       conversations.close();
       for (const ws of conversationSockets) ws.terminate();

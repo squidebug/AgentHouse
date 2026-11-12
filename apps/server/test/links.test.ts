@@ -24,16 +24,16 @@ describe('session links', () => {
       assert.equal(store.set('b', 'a', 'group', all), true);
       assert.equal(store.set('b', 'a', 'group', all), false, 'the same link twice changes nothing');
       assert.equal(store.set('c', 'a', 'group', all), true);
-      const refused = (child: string, parent: string | null, kind: 'group' | 'delegate' = 'group') =>
+      const refused = (child: string, parent: string | null, kind: string = 'group') =>
         assert.throws(
-          () => store.set(child, parent, kind, all),
+          () => store.set(child, parent, kind as 'group', all),
           (error: unknown) => error instanceof LinkError,
         );
       refused('d', 'b'); // b is under a
       refused('a', 'd'); // a has sessions under it
       refused('d', 'd');
       refused('d', 'gone');
-      refused('d', 'a', 'delegate'); // not yet
+      refused('d', 'a', 'teammate'); // no such kind
       assert.throws(() => store.set('gone', null, 'group', all), (error: unknown) => error instanceof LinkError && error.code === 'NOT_FOUND');
       assert.deepEqual(pairs(store.list()), ['b<a', 'c<a']);
 
@@ -71,7 +71,10 @@ describe('session links', () => {
       assert.ok(await waitFor(() => events.messages.some((m) => m.type === 'links' && (m.links as SessionLink[]).length === 1), 3000), 'every browser hears of it');
       assert.equal((await link(c, b)).status, 400, 'not under a session that is under another');
       assert.equal((await link('missing', a)).status, 404);
-      assert.equal((await request(app.port, 'PUT', `/api/sessions/${c}/link`, { headers, body: { parentId: a, kind: 'delegate' } })).status, 400);
+      assert.equal((await request(app.port, 'PUT', `/api/sessions/${c}/link`, { headers, body: { parentId: a, kind: 'teammate' } })).status, 400);
+      const delegated = await request(app.port, 'PUT', `/api/sessions/${c}/link`, { headers, body: { parentId: a, kind: 'delegate' } });
+      assert.deepEqual((delegated.json as { links: SessionLink[] }).links.find((l) => l.childId === c), { childId: c, parentId: a, kind: 'delegate' }, 'delegation is a link too');
+      assert.equal((await link(c, null)).status, 200);
       assert.equal((await request(app.port, 'PUT', `/api/sessions/${c}/link`, { headers: { ...headers, origin: 'http://evil.example' }, body: { parentId: a } })).status, 403);
 
       // A new web server reads them back.

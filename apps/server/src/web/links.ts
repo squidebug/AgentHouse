@@ -3,8 +3,7 @@ import path from 'node:path';
 import type { LinkKind, SessionLink } from '@agenthouse/protocol';
 
 const FILE_VERSION = 1;
-// Delegation comes later; until then a link only groups.
-const KINDS: readonly LinkKind[] = ['group'];
+const KINDS: readonly LinkKind[] = ['group', 'delegate'];
 
 export const linksFile = (stateDir: string) => path.join(stateDir, 'state.json');
 

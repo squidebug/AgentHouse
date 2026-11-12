@@ -133,6 +133,26 @@ export interface SessionLink {
   kind: LinkKind;
 }
 
+/**
+ * Work a session handed to the session delegated under it: the text was sent
+ * to the child, and its answer goes back to the parent when the user says so.
+ * The answer itself stays in the child's transcript; only where it is is kept.
+ */
+export interface DelegationInfo {
+  id: string;
+  parentId: string;
+  childId: string;
+  sentAt: number;
+  /** `done`: the child is idle again with no sub-agent running; `failed`: it ended or the turn failed. */
+  status: 'running' | 'done' | 'interrupted' | 'failed';
+  endedAt: number | null;
+  /** The first line of the child's answer, once done. */
+  summary: string | null;
+  /** The answer handed to the parent: `queued` waits until the parent is idle (never into a dialog). */
+  delivery: 'none' | 'queued' | 'sent' | 'failed';
+  deliveredAt: number | null;
+}
+
 export interface SessionInfo {
   id: string;
   vendor: SessionVendor;

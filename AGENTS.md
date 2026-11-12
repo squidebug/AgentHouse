@@ -19,12 +19,13 @@ AgentHouse is three programs plus a browser app. Know which one a file runs in b
 - Browser ↔ web server types: `packages/protocol`. Web server ↔ host messages: `apps/server/src/shared/host-protocol.ts`; bump `HOST_PROTOCOL` whenever they change, and keep the hello's proof and the `shutdown` request as they are, so `--stop` still reaches older hosts.
 - Until the host restarts after its code changed, the environment check warns (`shared/build.ts` hashes the files listed above).
 - Claude status comes from hooks (`claude/status.ts`: `STATUS_EVENTS` and its handler map are the single list the injected hooks are built from), the status line (model, effort, context, plan limits) and, when no hook can tell (Esc, a dialog answered in the terminal), the transcript and `claude agents --json`.
+- Delegation (`web/delegations.ts`, web server): text sent to a delegated session through the composer path; done once that session is idle with no sub-agent running; its last answer after the send is read from its transcript and, when the user says so, composed into the parent (queued while the parent is busy or asking, never typed into a dialog).
 - Sub-agents (`claude/agents.ts`) run in the background. Hooks name them (SubagentStart/Stop; the Agent tool's result names the agent it started; events a sub-agent causes carry its `agent_id`), and the sub-agent status line adds model and tokens. Their tool calls never change the session's status; a dialog they open does.
 
 ## State
 
 - `~/.agenthouse/` (dev: `~/.agenthouse-dev/`): `host-<protocol>.json` (host port and token, user-only), `logs/host.log`, `run/<protocol>/` (per-session settings and relay config, removed when the session ends; a starting host clears leftovers).
-- Written by the web server: `sessions.json` (session registry: what the host reported last, so ended sessions and their transcripts stay listed after a host restart), `usage/limits-YYYY-MM.jsonl` (plan usage, a line per change; the last one shows until a session reports again), `state.json` (which session the user placed under which; one level, links of removed sessions dropped).
+- Written by the web server: `sessions.json` (session registry: what the host reported last, so ended sessions and their transcripts stay listed after a host restart), `usage/limits-YYYY-MM.jsonl` (plan usage, a line per change; the last one shows until a session reports again), `state.json` (which session the user placed under which, grouped or delegated; one level, links of removed sessions dropped), `delegations.json` (work handed to a delegated session: where its answer is in that session's transcript, never the answer itself).
 - Browser localStorage: layout (`ah-layout`), last folder (`ah-last-cwd`), theme (`mui-mode`).
 - Everything else lives in memory. There is no database: anything that must persist goes into local JSON/JSONL files under the state folder, one writer per file, written atomically.
 
