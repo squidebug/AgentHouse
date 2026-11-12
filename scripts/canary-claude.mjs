@@ -5,10 +5,11 @@
 // touches running sessions. Without --turn or --scenario no prompt is sent.
 //   pnpm build && pnpm canary:claude              start, observe, end
 //   pnpm canary:claude -- --turn                  also one short prompt (haiku, low effort)
-//   pnpm canary:claude -- --scenario              five short prompts (haiku, low effort): a reply,
+//   pnpm canary:claude -- --scenario              short prompts (haiku, low effort): a reply,
 //       a permission approved, a permission denied with Esc, a turn cut short with Esc, three
-//       sub-agents (two in parallel, one nested), then /clear; the status and agent tree after
-//       each, and the conversation views read from the real transcripts.
+//       sub-agents (two in parallel, one nested), /clear, then work delegated to a second session
+//       and its answer handed back; the status and agent tree after each, and the conversation
+//       views read from the real transcripts.
 //       Runs in a folder of its own in the temp folder; the first run tells Claude to trust it.
 import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync } from 'node:fs';
@@ -49,6 +50,13 @@ const api = async (method, route, body) => {
   return { status: res.status, json: await res.json().catch(() => null) };
 };
 const sessionNow = async (id) => (await api('GET', '/api/sessions')).json.find((s) => s.id === id);
+/** Polls a condition on what the events socket brought. */
+const until = async (predicate, ms) => {
+  const deadline = Date.now() + ms;
+  while (!predicate() && Date.now() < deadline) await sleep(300);
+  return predicate();
+};
+let delegations = [];
 const waitFor = async (id, predicate, ms) => {
   const deadline = Date.now() + ms;
   while (Date.now() < deadline) {
@@ -218,7 +226,40 @@ async function runScenario(id, term) {
 
   const before = (await sessionNow(id))?.vendorSessionId;
   await turn(id, '/clear: a new conversation in a new transcript', '/clear', (s) => s.transcripts.length === 2 && s.vendorSessionId !== before && idle(s), 20_000);
+  await runDelegation(id);
   return agents ?? [];
+}
+
+const HEADER = '[위임 결과 · canary-helper]';
+
+/**
+ * Work handed from this session to a second one delegated under it (haiku):
+ * done once that one is idle, its answer found in its transcript, then
+ * handed back to this session as a message.
+ */
+async function runDelegation(parentId) {
+  const created = await api('POST', '/api/sessions', { vendor: 'claude', title: 'canary-helper', model: 'haiku', effort: 'low', permissionMode: 'manual', cwd: work, theme: 'dark' });
+  if (!check(created.status === 201, 'delegation: a second session starts', `HTTP ${created.status}`)) return;
+  const childId = created.json.id;
+  try {
+    const ready = await waitFor(childId, (s) => s.status.value === 'idle', 30_000);
+    if (!check(ready?.status.value === 'idle', 'delegation: the second session reports in', describe(ready))) return;
+    const linked = await api('PUT', `/api/sessions/${childId}/link`, { parentId, kind: 'delegate' });
+    check(linked.status === 200, 'delegation: it is placed under the first, delegated', `HTTP ${linked.status}`);
+    const sent = await api('POST', `/api/sessions/${parentId}/delegations`, { childId, text: 'Reply with exactly the word: gamma' });
+    if (!check(sent.status === 201, 'delegation: the work is sent', `HTTP ${sent.status}`)) return;
+    const task = () => delegations.find((d) => d.id === sent.json.id);
+    await until(() => task()?.status !== undefined && task().status !== 'running', 90_000);
+    check(task()?.status === 'done' && /gamma/i.test(task()?.summary ?? ''), 'delegation: done when the second session is idle, its answer found', `${task()?.status} · ${task()?.summary}`);
+    const before = (await sessionNow(parentId))?.status.at;
+    await api('POST', `/api/delegations/${sent.json.id}/deliver`, { header: HEADER });
+    await until(() => task()?.delivery === 'sent', 30_000);
+    check(task()?.delivery === 'sent', 'delegation: handed back to the first session', task()?.delivery);
+    const answered = await waitFor(parentId, (s) => s.status.at !== before && s.status.value === 'idle' && Date.now() - s.status.at > 2000, 90_000);
+    check(answered?.status.value === 'idle', 'delegation: the first session took it as a turn', describe(answered));
+  } finally {
+    await api('DELETE', `/api/sessions/${childId}`);
+  }
 }
 
 /**
@@ -287,6 +328,7 @@ try {
   let limits = [];
   const events = socket('/ws/events', (message) => {
     if (message.type === 'limits') limits = message.limits;
+    if (message.type === 'delegations') delegations = message.delegations;
   });
 
   if (scenario) {
@@ -305,6 +347,11 @@ try {
     check(notices('cleared') === 1 && entries.some((e) => e.kind === 'command' && e.name === '/clear'), 'conversation: /clear starts the next part');
     const turns = view.turns();
     check(turns.some((t) => /haiku/.test(t.model ?? '') && t.usage.calls > 0 && t.usage.output > 0), 'conversation: turns have model and tokens', turns.map((t) => `${t.usage.calls}/${t.usage.output}`).join(' '));
+    check(
+      entries.some((e) => e.kind === 'prompt' && e.text.startsWith(HEADER) && /gamma/i.test(e.text)),
+      "conversation: the delegate's answer came back as a message",
+      entries.filter((e) => e.kind === 'prompt').map((e) => JSON.stringify(e.text.slice(0, 60))).at(-1),
+    );
     const blocks = entries.filter((e) => e.kind === 'agent');
     const reports = entries.filter((e) => e.kind === 'task');
     check(blocks.length === 2 && blocks.every((e) => e.state === 'done') && reports.length >= 2, 'conversation: agent blocks done, their reports start turns', `${blocks.map((e) => e.state).join(',')} / ${reports.length} reports`);
