@@ -16,9 +16,12 @@ const SUMMARY_CHARS = 200;
 const DELIVER_CHARS = 100_000;
 // An answer is looked for in the newest part of the delegate's transcript only.
 const TAIL_BYTES = 8 * 1024 * 1024;
-// The transcript is written a moment before or after the turn ends: look again.
-const ANSWER_RETRIES = 3;
+// The transcript is written a moment before or after the turn ends: look again, for this long.
+const ANSWER_WAIT_MS = 3000;
 const RETRY_MS = 1000;
+// A background agent's report starts a turn at once; if none came by then (an agent the tree
+// placed at the top by mistake reports to its parent agent instead), the work is settled anyway.
+const REPORT_WAIT_MS = 60_000;
 
 export const delegationsFile = (stateDir: string) => path.join(stateDir, 'delegations.json');
 
@@ -156,7 +159,10 @@ export class Delegations extends EventEmitter {
   private readonly tasks = new Map<string, Task>();
   private readonly summaries = new Map<string, string>();
   private readonly sending = new Set<string>();
-  private readonly retries = new Map<string, number>();
+  /** When the answer of a settled-looking task was first looked for. */
+  private readonly looking = new Map<string, number>();
+  /** Tasks with a look-again set for a report that has not come. */
+  private readonly waitingReport = new Set<string>();
   private checking: Promise<void> | null = null;
   private again = false;
   private closed = false;
@@ -205,6 +211,9 @@ export class Delegations extends EventEmitter {
     }
     if (child.state !== 'running') throw new DelegationError('끝난 세션입니다.', 'INVALID_REQUEST');
     if (isAsking(child.status.value)) throw new DelegationError(refusal(child.status.value), 'BUSY');
+    // A delegate in the middle of a turn would take the work after it, and the end of the turn
+    // already under way would look like the end of the work.
+    if (child.status.value === 'working') throw new DelegationError('작업 중인 세션입니다.', 'BUSY');
     const transcript = [...child.transcripts].reverse().find((t) => isClaudeTranscript(t.path, claudeConfigDir()))?.path ?? null;
     const from = transcript ? await stat(transcript).then((s) => s.size).catch(() => 0) : 0;
     const sentAt = Date.now();
@@ -314,7 +323,14 @@ export class Delegations extends EventEmitter {
     if (changed) this.changed();
   }
 
-  /** The delegate is done once idle after the work was sent, with no sub-agent still running. */
+  /**
+   * The delegate is done once idle after the work was sent, with no sub-agent
+   * running and no report still to come. A background agent the main
+   * conversation started reports back in a turn of its own; between the
+   * agent's end and that turn, the delegate looks idle with nothing running
+   * (review 2, M4-6). So it must have been idle again since the last such
+   * agent ended: that is the turn with the answer.
+   */
   private async settle(task: Task, child: SessionInfo): Promise<boolean> {
     if (child.state !== 'running') {
       Object.assign(task, { status: 'failed', endedAt: child.exit?.at ?? Date.now() });
@@ -322,14 +338,25 @@ export class Delegations extends EventEmitter {
     }
     const idle = child.status.value === 'idle' && child.status.at > task.sentAt && !child.agents.some((a) => a.state === 'running');
     if (!idle) return false;
+    const lastReport = child.agents.reduce((latest, a) => (a.parentId === null && a.endedAt !== null && a.endedAt > task.sentAt ? Math.max(latest, a.endedAt) : latest), 0);
+    if (child.status.at <= lastReport && Date.now() - lastReport < REPORT_WAIT_MS) {
+      if (!this.waitingReport.has(task.id)) {
+        this.waitingReport.add(task.id);
+        setTimeout(() => {
+          this.waitingReport.delete(task.id);
+          this.check();
+        }, lastReport + REPORT_WAIT_MS - Date.now()).unref();
+      }
+      return false;
+    }
     const found = task.transcript ? await findAnswer(task.transcript, task.from).catch(() => null) : null;
-    const tries = this.retries.get(task.id) ?? 0;
-    if (!found && tries < ANSWER_RETRIES) {
-      this.retries.set(task.id, tries + 1);
+    const since = this.looking.get(task.id) ?? Date.now();
+    if (!found && Date.now() - since < ANSWER_WAIT_MS) {
+      this.looking.set(task.id, since);
       setTimeout(() => this.check(), RETRY_MS).unref();
       return false;
     }
-    this.retries.delete(task.id);
+    this.looking.delete(task.id);
     task.status = child.status.error ? 'failed' : child.status.reason === 'interrupted' ? 'interrupted' : 'done';
     task.endedAt = child.status.at;
     if (found) {

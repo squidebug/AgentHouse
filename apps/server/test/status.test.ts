@@ -62,6 +62,11 @@ describe('status from hook events', () => {
     assert.deepEqual([failed.value, failed.error, failed.reason], ['idle', true, 'rate_limit']);
   });
 
+  test('compacting on its own mid-turn leaves the turn working', () => {
+    const compacted = run([{ hook_event_name: 'UserPromptSubmit' }, { hook_event_name: 'PreToolUse', tool_name: 'Read' }, { hook_event_name: 'SessionStart', source: 'compact' }]);
+    assert.deepEqual([compacted.value, compacted.tool], ['working', 'Read']);
+  });
+
   test('a failed or auto-denied tool resumes the turn; an MCP elicitation waits for input', () => {
     const asking = run([{ hook_event_name: 'UserPromptSubmit' }, { hook_event_name: 'PermissionRequest', tool_name: 'Bash' }]);
     assert.equal(applyHook(asking, { hook_event_name: 'PostToolUseFailure', tool_name: 'Bash' }).value, 'working');

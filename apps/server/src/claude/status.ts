@@ -69,7 +69,8 @@ const resumed: Handler = (_current, _event, at) => status('working', at);
 // Every event states where the turn is, not how far it moved, so the async
 // hooks arriving slightly out of order cannot leave a wrong state behind for long.
 const HANDLERS: Record<StatusEvent, Handler> = {
-  SessionStart: (_current, event, at) => status('idle', at, { reason: event.source === 'clear' ? 'cleared' : null }),
+  // After compacting (on its own, mid-turn) the turn goes on: only a new conversation is idle.
+  SessionStart: (current, event, at) => (event.source === 'compact' ? current : status('idle', at, { reason: event.source === 'clear' ? 'cleared' : null })),
   UserPromptSubmit: (_current, _event, at) => status('working', at),
   PreToolUse: (_current, event, at) => {
     const tool = text(event.tool_name);
@@ -131,6 +132,8 @@ export class Dialogs {
     const key = tool ? `${tool}:${createHash('sha1').update(stableJson(event.tool_input ?? null)).digest('base64url')}` : null;
     switch (event.hook_event_name) {
       case 'SessionStart':
+        // Compacting happens within a turn; a new conversation (startup, /clear, /resume) has nothing open.
+        return event.source === 'compact' ? false : this.clear();
       case 'UserPromptSubmit':
       case 'Stop':
       case 'StopFailure':

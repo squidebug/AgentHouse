@@ -169,3 +169,61 @@ describe('delegation, with the host stood in for', () => {
     }
   });
 });
+
+describe('when delegated work is done', () => {
+  test('a delegate working through a background agent is done after the report turn, not when the agent ends', async () => {
+    const dir = path.join(config, 'projects', 'C--report');
+    mkdirSync(dir, { recursive: true });
+    const transcript = path.join(dir, 'child.jsonl');
+    writeFileSync(transcript, '');
+    const answer = (text: string) => appendFileSync(transcript, `${JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } })}\n`);
+    const sessions = new Map<string, SessionInfo>();
+    const put = (id: string, value: StatusValue, at: number, agents: object[] = []) =>
+      sessions.set(id, {
+        id,
+        vendor: 'claude',
+        state: 'running',
+        status: { value, reason: null, tool: null, error: false, at },
+        agents,
+        transcripts: id === 'child' ? [{ vendorSessionId: 'c', path: transcript, since: 0 }] : [],
+        exit: null,
+      } as unknown as SessionInfo);
+    const agent = (state: 'running' | 'stopped', endedAt: number | null) => ({ id: 'a1', parentId: null, state, asking: false, startedAt: 0, endedAt });
+    const now = Date.now();
+    put('parent', 'idle', now);
+    put('child', 'working', now);
+    const manager = Object.assign(new EventEmitter(), {
+      get: (id: string) => sessions.get(id),
+      links: () => [{ childId: 'child', parentId: 'parent', kind: 'delegate' }],
+      compose: async (): Promise<ComposeOutcome> => ({ sent: true, submitted: true }),
+    });
+    const state = mkdtempSync(path.join(os.tmpdir(), 'agenthouse-delegations-'));
+    const delegations = new Delegations(manager as unknown as SessionManager, delegationsFile(state));
+    const settled = async (expected: string) => {
+      manager.emit('change');
+      return waitFor(() => delegations.list()[0]?.status === expected, 1500);
+    };
+    try {
+      await assert.rejects(delegations.delegate('parent', 'child', 'busy'), /작업 중/, 'a delegate in the middle of a turn takes no work');
+      put('child', 'idle', now);
+      const task = await delegations.delegate('parent', 'child', 'look around with an agent');
+
+      // The turn starts the agent and ends; the agent works on in the background.
+      answer('An agent is looking; I will tell you once it reports.');
+      put('child', 'idle', task.sentAt + 100, [agent('running', null)]);
+      assert.equal(await settled('done'), false, 'an agent still runs');
+      // The agent ends: idle, nothing running, yet its report has not been taken in.
+      put('child', 'idle', task.sentAt + 100, [agent('stopped', task.sentAt + 200)]);
+      assert.equal(await settled('done'), false, 'the report turn is still to come');
+      // The report starts a turn, and its answer ends it.
+      put('child', 'working', task.sentAt + 300, [agent('stopped', task.sentAt + 200)]);
+      answer('final: three folders');
+      put('child', 'idle', task.sentAt + 400, [agent('stopped', task.sentAt + 200)]);
+      assert.equal(await settled('done'), true);
+      assert.equal(delegations.list()[0]?.summary, 'final: three folders');
+    } finally {
+      delegations.close();
+      rmSync(state, { recursive: true, force: true });
+    }
+  });
+});

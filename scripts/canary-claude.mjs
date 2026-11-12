@@ -257,6 +257,22 @@ async function runDelegation(parentId) {
     check(task()?.delivery === 'sent', 'delegation: handed back to the first session', task()?.delivery);
     const answered = await waitFor(parentId, (s) => s.status.at !== before && s.status.value === 'idle' && Date.now() - s.status.at > 2000, 90_000);
     check(answered?.status.value === 'idle', 'delegation: the first session took it as a turn', describe(answered));
+
+    // Review 2, M4-6: a delegate working through a background sub-agent. Between the agent's
+    // SubagentStop and the turn its report starts, the delegate is idle with no agent running for a
+    // moment; the result must be the answer after the report, not the one that started the agent.
+    const withAgent = await api('POST', `/api/sessions/${parentId}/delegations`, {
+      childId,
+      text: 'Use the Agent tool once (subagent_type general-purpose, model haiku) to start one agent that replies with exactly the word delta, using no tools. When it has reported back, reply with exactly: final delta',
+    });
+    if (check(withAgent.status === 201, 'delegation with a sub-agent: the work is sent', `HTTP ${withAgent.status}`)) {
+      const second = () => delegations.find((d) => d.id === withAgent.json.id);
+      await until(() => second()?.status !== undefined && second().status !== 'running', 180_000);
+      // The answer before the report may well say "final delta" too ("I'll reply final delta once…"): only the reply itself counts.
+      check(second()?.status === 'done' && /^\W*final delta\W*$/i.test(second()?.summary ?? ''), 'delegation with a sub-agent: done after its report, with the last answer', `${second()?.status} · ${second()?.summary}`);
+      const child = await sessionNow(childId);
+      console.log(`INFO  the delegate after the work: ${describe(child)}, agents ${child?.agents.map((a) => a.state).join(',') || 'none'}`);
+    }
   } finally {
     await api('DELETE', `/api/sessions/${childId}`);
   }
