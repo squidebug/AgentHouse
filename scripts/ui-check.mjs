@@ -286,6 +286,16 @@ try {
   await settle();
   await page.screenshot({ path: path.join(out, 'delegate-light.png') });
 
+  // An answer nested too deep for the markdown parser shows as plain text, and the rest of the app stays.
+  await box.fill(`deep\n${'- '.repeat(5000)}end`);
+  await box.press('Control+Enter');
+  const deep = lead.locator('.ah-answer', { hasText: 'fake answer: deep' });
+  // 10 KB through the terminal and back through the transcript: it takes a while.
+  await deep.waitFor({ timeout: 40_000 });
+  const nested = await deep.locator('ul ul ul').count();
+  check(nested === 0 && (await deep.innerText()).includes('- - - '), 'an answer nested too deep to draw shows as plain text', `nested lists: ${nested}`);
+  check(await tree.isVisible(), 'and the rest of the app stays');
+
   check(errors.length === 0, 'no errors in the browser console', errors.join(' | '));
   console.log(`INFO  screenshots: ${out}`);
 } catch (error) {

@@ -5,10 +5,13 @@ import { fileURLToPath } from 'node:url';
 import { findOnPath } from './web/cli/resolve';
 import { HostClient, stopHosts } from './web/host-client';
 import { defaultStateDir } from './shared/state';
-import { createAgentHouseServer, type AgentHouseServer } from './web/http/server';
+import { createAgentHouseServer } from './web/http/server';
+import { forgetWebServer, recordWebServer, runningWebServer, stopWebServer } from './web/instance';
 import { systemTool } from './shared/system';
 
 const DEFAULT_PORT = 7357;
+// When the default port is taken. 7358 is left to `pnpm dev`.
+const FALLBACK_PORTS = [7359, 7360, 7361, 7362, 7363, 7364, 7365, 7366, 0];
 
 interface Args {
   port: number | null;
@@ -42,22 +45,11 @@ function openBrowser(url: string): void {
   if (opener) execFile(opener, [url], { windowsHide: true }, () => {});
 }
 
-async function listen(args: Args, options: Omit<Parameters<typeof createAgentHouseServer>[0], 'port'>): Promise<AgentHouseServer> {
-  if (args.port !== null) return createAgentHouseServer({ ...options, port: args.port });
-  // The default port keeps bookmarks working; fall back to the next ones if it is taken.
-  for (let port = DEFAULT_PORT; port < DEFAULT_PORT + 10; port += 1) {
-    try {
-      return await createAgentHouseServer({ ...options, port });
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EADDRINUSE') throw error;
-    }
-  }
-  return createAgentHouseServer({ ...options, port: 0 });
-}
-
-/** `--stop`: ends every session and the session host, and hosts of older protocol versions too. */
+/** `--stop`: ends the web server, every session and the session host, and hosts of older protocol versions too. */
 async function stopHost(): Promise<void> {
-  const { hosts, sessions } = await stopHosts(defaultStateDir());
+  const stateDir = defaultStateDir();
+  if (await stopWebServer(stateDir)) process.stdout.write('웹 서버를 끝냈습니다.\n');
+  const { hosts, sessions } = await stopHosts(stateDir);
   if (!hosts) {
     process.stdout.write('실행 중인 세션 호스트가 없습니다.\n');
     return;
@@ -83,9 +75,26 @@ async function main(): Promise<void> {
   const fakeAgentPath = path.resolve(here, '../test/fixtures/fake-agent.mjs');
   // The dev runner passes one token for the whole session so `tsx watch` restarts keep the browser logged in.
   const devToken = process.env.AGENTHOUSE_TOKEN;
+  const stateDir = defaultStateDir();
 
-  const host = await HostClient.connect({ stateDir: defaultStateDir(), spawn: true, ...(devToken ? { webToken: devToken } : {}) });
-  const app = await listen(args, {
+  // One web server per state folder: a second start opens the first one. The dev runner restarts its own server.
+  const already = devToken ? null : await runningWebServer(stateDir);
+  if (already) {
+    if (args.json) process.stdout.write(`${JSON.stringify({ url: already.url, port: already.port, token: already.token })}\n`);
+    else process.stdout.write(`AgentHouse  ${already.url}\n이미 실행 중입니다.\n`);
+    if (args.open) openBrowser(already.url);
+    return;
+  }
+
+  // A failed request or socket must not take every tab down; the sessions live on in the host either way.
+  process.on('uncaughtException', (error) => console.error(`uncaught: ${error.stack ?? error}`));
+  process.on('unhandledRejection', (error) => console.error(`unhandled: ${(error as Error)?.stack ?? error}`));
+
+  const host = await HostClient.connect({ stateDir, spawn: true, ...(devToken ? { webToken: devToken } : {}) });
+  const app = await createAgentHouseServer({
+    // The default port keeps bookmarks working; the next ones if it is taken.
+    port: args.port ?? DEFAULT_PORT,
+    ...(args.port === null ? { fallbackPorts: FALLBACK_PORTS } : {}),
     host,
     ...(devToken ? { token: devToken } : {}),
     devOrigins: args.devOrigins,
@@ -95,6 +104,7 @@ async function main(): Promise<void> {
     ...(existsSync(path.join(webDist, 'index.html')) && !args.devOrigins.length ? { webDist } : {}),
     ...(args.allowFake ? { fakeAgentPath } : {}),
   });
+  if (!devToken) recordWebServer(stateDir, { port: app.port, url: app.url, token: app.token });
 
   if (args.json) process.stdout.write(`${JSON.stringify({ url: app.url, port: app.port, token: app.token })}\n`);
   else {
@@ -108,6 +118,7 @@ async function main(): Promise<void> {
     if (closing) return;
     closing = true;
     const left = running(host);
+    forgetWebServer(stateDir);
     await app.close();
     host.close();
     if (signal === 'SIGINT' && left && !args.json) process.stdout.write(`세션 ${left}개는 계속 실행됩니다. 모두 끝내려면: pnpm stop\n`);

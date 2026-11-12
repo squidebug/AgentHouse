@@ -18,6 +18,8 @@ export const t = {
   endSession: '세션 종료',
   removeSession: '목록에서 제거',
   noScreen: '터미널 화면 없음',
+  cannotShow: '표시할 수 없음',
+  reload: '새로고침',
   running: '실행 중',
   exited: '종료',
   lightMode: '라이트 모드',

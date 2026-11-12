@@ -16,6 +16,8 @@ import { serveStatic } from './static';
 
 export interface ServerOptions {
   port: number;
+  /** Tried in order when `port` is taken; 0 lets the system choose. */
+  fallbackPorts?: number[];
   /** The session host that runs the CLIs; the web server only prepares and relays. */
   host: HostClient;
   /** Extra origins allowed to call the API, e.g. the Vite dev server. */
@@ -56,6 +58,11 @@ const RELAY_HIGH_WATER = 1024 * 1024;
 const RELAY_LOW_WATER = 256 * 1024;
 
 function send(res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}): void {
+  // A reply already under way (it failed halfway) can only be cut off; writing headers again would throw.
+  if (res.headersSent) {
+    res.destroy();
+    return;
+  }
   const isText = typeof body === 'string';
   res.writeHead(status, {
     'content-type': isText ? 'text/plain; charset=utf-8' : 'application/json; charset=utf-8',
@@ -94,6 +101,27 @@ function parse<T>(schema: { safeParse(v: unknown): { success: true; data: T } | 
   const result = schema.safeParse(value);
   if (!result.success) throw new HttpError(400, '요청 값이 올바르지 않습니다.', 'INVALID_REQUEST');
   return result.data;
+}
+
+/** Listens on the first of these ports that is free; any other error, or none free, fails. */
+async function listenOn(server: http.Server, ports: number[]): Promise<number> {
+  let taken: unknown = new Error('no port to listen on');
+  for (const candidate of ports) {
+    try {
+      return await new Promise<number>((resolve, reject) => {
+        server.once('error', reject);
+        server.listen(candidate, '127.0.0.1', () => {
+          server.off('error', reject);
+          const address = server.address();
+          resolve(typeof address === 'object' && address ? address.port : candidate);
+        });
+      });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EADDRINUSE') throw error;
+      taken = error;
+    }
+  }
+  throw taken;
 }
 
 /** Relays one browser terminal socket to the session's terminal on the host. */
@@ -294,8 +322,13 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
   });
 
   const wss = new WebSocketServer({ noServer: true, maxPayload: 2 * 1024 * 1024 });
+  // A socket's error (a frame over maxPayload, a peer gone mid-frame) closes that socket only: ws closes
+  // it by itself (1009 for a frame too big). Without a listener it would be thrown, and the web server
+  // with every tab would go.
+  const accept = (ws: WebSocket) => ws.on('error', () => {});
 
   server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
+    socket.on('error', () => socket.destroy());
     const reject = (status: number) => {
       socket.write(`HTTP/1.1 ${status} ${http.STATUS_CODES[status]}\r\nConnection: close\r\n\r\n`);
       socket.destroy();
@@ -309,6 +342,7 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
       const agent = agentParam(url);
       if (agent === undefined || !conversations.available(id, agent)) return reject(404);
       wss.handleUpgrade(req, socket, head, (ws) => {
+        accept(ws);
         // turns=only: the turns without the entries, for a view that only shows when the session worked.
         const turnsOnly = url.searchParams.get('turns') === 'only';
         const unsubscribe = conversations.subscribe(
@@ -332,6 +366,7 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
     }
     if (url.pathname === '/ws/events') {
       wss.handleUpgrade(req, socket, head, (ws) => {
+        accept(ws);
         eventClients.add(ws);
         ws.on('close', () => eventClients.delete(ws));
         const sessions: EventServerMessage = { type: 'sessions', sessions: manager.list() };
@@ -349,20 +384,23 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
     // Only the session host has terminals; an ended session from an earlier host has none.
     if (!sessionId || !manager.get(sessionId)?.screen) return reject(404);
     wss.handleUpgrade(req, socket, head, (ws) => {
+      accept(ws);
       terminals.add(ws);
       ws.on('close', () => terminals.delete(ws));
       relayTerminal(ws, options.host.openTerminal(sessionId));
     });
   });
 
-  const port = await new Promise<number>((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(options.port, '127.0.0.1', () => {
-      server.off('error', reject);
-      const address = server.address();
-      resolve(typeof address === 'object' && address ? address.port : options.port);
-    });
-  });
+  let port: number;
+  try {
+    port = await listenOn(server, [options.port, ...(options.fallbackPorts ?? [])]);
+  } catch (error) {
+    // Nothing of this server may stay behind, still taking host events and writing its files.
+    delegations.close();
+    manager.close();
+    conversations.close();
+    throw error;
+  }
   access.bind(port);
   env.report().catch(() => {}); // warm the CLI probe so the launcher opens instantly
 

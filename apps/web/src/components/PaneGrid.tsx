@@ -8,6 +8,7 @@ import type { Dnd } from '../workspace/dnd';
 import type { FlowRow } from '../workspace/flow';
 import { MAX_PANES, paneModes, shownMode, type Action, type Pane, type PaneMode, type WorkspaceState } from '../workspace/state';
 import { ConversationView, type DelegationView } from './ConversationView';
+import { Boundary } from './Boundary';
 import { AgentSubtitle, agentDetails, agentTitle, Details, SessionSubtitle, sessionDetails } from './Details';
 import { FlowView } from './FlowView';
 import { BackIcon, ChatIcon, ChevronIcon, CloseIcon, DelegateIcon, FlowIcon, Grip, PlusIcon, TerminalIcon } from './icons';
@@ -353,6 +354,7 @@ function PaneView({ pane, session, state, dispatch, dnd, theme, windowsBuild, se
         onPointerDown={mode !== 'terminal' ? focus : undefined}
         sx={{ flex: 1, minHeight: 0, m: '0 12px 12px', p: mode !== 'terminal' ? '4px 4px 4px 14px' : '8px 4px 4px 10px', borderRadius: '10px', bgcolor: v.termBg, overflow: 'hidden' }}
       >
+        <Boundary resetKey={`${pane.sessionId}/${agentId}/${mode}`} fallback={<Typography sx={{ p: 1, color: v.termDim }}>{t.cannotShow}</Typography>}>
         {mode === 'flow' ? (
           <FlowView session={session} placed={placed} links={links} focusAgent={state.flowFocus?.paneId === pane.id ? state.flowFocus.agentId : null} onOpen={openRow} />
         ) : mode === 'conversation' && hasConversation ? (
@@ -372,6 +374,7 @@ function PaneView({ pane, session, state, dispatch, dnd, theme, windowsBuild, se
         ) : (
           <Typography sx={{ p: 1, color: v.termDim }}>{t.noScreen}</Typography>
         )}
+        </Boundary>
       </Box>
       {dnd.isOver(target) && (
         <Box

@@ -1,8 +1,10 @@
 import { Box } from '@mui/material';
+import { memo } from 'react';
 import Markdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { FONT_MONO } from '../theme/theme';
 import { v } from '../theme/tokens';
+import { Boundary } from './Boundary';
 
 // HTML in the text stays text, and link targets are sanitised (react-markdown's
 // defaults). Links open outside the app, without a referrer.
@@ -16,8 +18,12 @@ const components: Components = {
 
 const plugins = [remarkGfm];
 
-/** An agent's reply. Headings stay at body sizes: the type scale is 12, 13, 14 and 18 only. */
-export function MarkdownText({ text }: { text: string }) {
+/**
+ * An agent's reply. Headings stay at body sizes: the type scale is 12, 13, 14
+ * and 18 only. Parsed again only when its text changes, not on every session
+ * update. A reply the parser cannot take (nested too deep) shows as plain text.
+ */
+export const MarkdownText = memo(function MarkdownText({ text }: { text: string }) {
   return (
     <Box
       sx={{
@@ -41,9 +47,11 @@ export function MarkdownText({ text }: { text: string }) {
         '& hr': { border: 0, borderTop: `1px solid ${v.outline}`, my: '10px' },
       }}
     >
-      <Markdown remarkPlugins={plugins} components={components}>
-        {text}
-      </Markdown>
+      <Boundary resetKey={text} fallback={<Box sx={{ whiteSpace: 'pre-wrap' }}>{text}</Box>}>
+        <Markdown remarkPlugins={plugins} components={components}>
+          {text}
+        </Markdown>
+      </Boundary>
     </Box>
   );
-}
+});

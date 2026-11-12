@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict';
+import { existsSync, writeFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { after, before, describe, test } from 'node:test';
-import type { AgentHouseServer } from '../src/web/http/server';
+import { createAgentHouseServer } from '../src/web/http/server';
+import { HostClient } from '../src/web/host-client';
 import { isAlive } from '../src/shared/kill-tree';
-import { login, openSocket, plain, request, screenText, sleep, startServer, waitFor } from './helpers';
+import { forgetWebServer, recordWebServer, runningWebServer, webServerFile } from '../src/web/instance';
+import { login, openSocket, plain, request, screenText, sleep, startServer, tempStateDir, waitFor, type TestServer } from './helpers';
 
-let app: AgentHouseServer;
+let app: TestServer;
 let cookie: string;
 let origin: string;
 
@@ -106,5 +110,48 @@ describe('a session', () => {
     });
     assert.equal(res.status, 400);
     assert.equal((res.json as { code: string }).code, 'CWD_NOT_FOUND');
+  });
+});
+
+describe('staying up', () => {
+  test('a frame over the limit closes that socket only; the web server keeps serving', async () => {
+    const events = await openSocket(app.port, '/ws/events', { cookie, origin });
+    const closed = new Promise<number>((resolve) => events.ws?.on('close', (code) => resolve(code)));
+    events.ws?.send('x'.repeat(3 * 1024 * 1024));
+    assert.equal(await closed, 1009, 'too big');
+    assert.equal((await request(app.port, 'GET', '/api/sessions', { headers: { cookie } })).status, 200, 'still serving');
+  });
+
+  test('a taken port falls back to the next; with none left, nothing of the server stays behind', async () => {
+    const client = await HostClient.connect({ stateDir: app.stateDir, spawn: false });
+    try {
+      const other = await createAgentHouseServer({ port: app.port, fallbackPorts: [0], host: client });
+      assert.notEqual(other.port, app.port);
+      await other.close();
+      await assert.rejects(createAgentHouseServer({ port: app.port, host: client }), { code: 'EADDRINUSE' });
+    } finally {
+      client.close();
+    }
+  });
+
+  test('a second start finds the web server already serving the state folder; a record one left behind is ignored', async () => {
+    const dir = await tempStateDir();
+    const write = (record: object) => writeFileSync(webServerFile(dir), JSON.stringify(record));
+    try {
+      assert.equal(await runningWebServer(dir), null, 'none yet');
+      // Another live process that answers the login: the one to open.
+      write({ pid: process.ppid, port: app.port, url: 'http://127.0.0.1/auth', token: app.token });
+      assert.equal((await runningWebServer(dir))?.port, app.port);
+      write({ pid: process.ppid, port: app.port, url: 'http://127.0.0.1/auth', token: 'not-its-token' });
+      assert.equal(await runningWebServer(dir), null, 'something else on that port');
+      write({ pid: 2 ** 22 + 7, port: app.port, url: 'http://127.0.0.1/auth', token: app.token });
+      assert.equal(await runningWebServer(dir), null, 'its process has ended');
+      recordWebServer(dir, { port: app.port, url: 'http://127.0.0.1/auth', token: app.token });
+      assert.equal(await runningWebServer(dir), null, 'never itself');
+      forgetWebServer(dir);
+      assert.equal(existsSync(webServerFile(dir)), false);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

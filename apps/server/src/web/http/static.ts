@@ -53,12 +53,14 @@ export async function serveStatic(root: string, pathname: string, res: ServerRes
     if (!(await isFile(file))) return false;
   }
   const hashed = /[.-][A-Za-z0-9_-]{8,}\.(js|css|woff2?)$/.test(file);
+  // Read before any header goes out: a file a rebuild just replaced fails here, while the reply can still be an error.
+  const body = await readFile(file);
   res.writeHead(200, {
     'content-type': TYPES[path.extname(file).toLowerCase()] ?? 'application/octet-stream',
     'cache-control': hashed ? 'public, max-age=31536000, immutable' : 'no-cache',
     'x-content-type-options': 'nosniff',
     ...SECURITY_HEADERS,
   });
-  res.end(await readFile(file));
+  res.end(body);
   return true;
 }

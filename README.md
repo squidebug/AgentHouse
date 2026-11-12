@@ -17,8 +17,8 @@ AgentHouse is an independent project. It is not affiliated with or endorsed by A
 ```sh
 pnpm install
 pnpm build
-pnpm start        # prints http://127.0.0.1:7357/auth?token=… and opens it
-pnpm stop         # ends every session and the session host
+pnpm start        # prints http://127.0.0.1:7357/auth?token=… and opens it; if it already runs, opens that one
+pnpm stop         # ends the server, every session and the session host
 ```
 
 Sessions run in a separate session host, so they keep running when the server stops or restarts, and an open page reconnects by itself. State lives in `~/.agenthouse`: the host's address, a log, per-session files, the session list and the last plan usage. Sessions from before a host restart (or a reboot) stay listed as ended until you remove them.

@@ -253,13 +253,16 @@ process.stdin.on('data', (chunk) => {
   });
   if (!rest) return;
   out(`IN ${JSON.stringify(rest)}\r\n`);
-  // A paste arrives in one piece (its line breaks included); the composer's Enter comes alone.
-  if (rest === '\r') {
-    // A pasted line break arrives as Enter (\r); Claude Code keeps it as \n.
-    const prompt = typed.replace(/\x1b\[20[01]~/g, '').replace(/\r/g, '\n').trim();
+  // Enter is a \r outside a paste: a pasted line break arrives as \r too. A long paste may reach us
+  // in pieces, its end marker split between two reads, and the Enter after it in the same read.
+  typed += rest;
+  const pasting = typed.lastIndexOf('\x1b[200~') > typed.lastIndexOf('\x1b[201~');
+  if (!pasting && typed.endsWith('\r')) {
+    // Claude Code keeps a pasted line break as \n.
+    const prompt = typed.slice(0, -1).replace(/\x1b\[20[01]~/g, '').replace(/\r/g, '\n').trim();
     typed = '';
     if (prompt) submit(prompt);
-  } else typed += rest;
+  }
   // A burst far larger than any viewer may fall behind by.
   if (rest.includes('flood')) {
     const line = `${'x'.repeat(150)}\r\n`;

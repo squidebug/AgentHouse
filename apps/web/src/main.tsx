@@ -4,11 +4,13 @@ import '@fontsource/ibm-plex-sans-kr/600.css';
 import '@fontsource/jetbrains-mono/400.css';
 import '@fontsource/jetbrains-mono/500.css';
 import '@fontsource/nanum-gothic-coding/400.css';
-import { CssBaseline, GlobalStyles } from '@mui/material';
+import { Box, Button, CssBaseline, GlobalStyles, Typography } from '@mui/material';
 import { ThemeProvider } from '@mui/material/styles';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
+import { Boundary } from './components/Boundary';
+import { t } from './strings';
 import { theme } from './theme/theme';
 import { cssVars, TOKENS } from './theme/tokens';
 
@@ -33,12 +35,27 @@ const globalStyles = {
 const root = document.getElementById('root');
 if (!root) throw new Error('missing #root');
 
-createRoot(root).render(
+// The last resort, if a failure escaped every boundary nearer to it: the sessions run on in the host.
+const failed = (
+  <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2 }}>
+    <Typography>{t.cannotShow}</Typography>
+    <Button variant="outlined" onClick={() => window.location.reload()}>
+      {t.reload}
+    </Button>
+  </Box>
+);
+
+createRoot(root, {
+  // Caught and shown as plain text or a notice in its place: worth a warning, not an error.
+  onCaughtError: (error) => console.warn('render failed:', error),
+}).render(
   <StrictMode>
     <ThemeProvider theme={theme} defaultMode="system">
       <CssBaseline enableColorScheme />
       <GlobalStyles styles={globalStyles} />
-      <App />
+      <Boundary fallback={failed}>
+        <App />
+      </Boundary>
     </ThemeProvider>
   </StrictMode>,
 );
