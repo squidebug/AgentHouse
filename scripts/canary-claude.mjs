@@ -5,9 +5,10 @@
 // touches running sessions. Without --turn or --scenario no prompt is sent.
 //   pnpm build && pnpm canary:claude              start, observe, end
 //   pnpm canary:claude -- --turn                  also one short prompt (haiku, low effort)
-//   pnpm canary:claude -- --scenario              four short prompts (haiku, low effort): a reply,
-//       a permission approved, a permission denied with Esc, a turn cut short with Esc, then
-//       /clear; the status after each, and the conversation view read from the real transcript.
+//   pnpm canary:claude -- --scenario              five short prompts (haiku, low effort): a reply,
+//       a permission approved, a permission denied with Esc, a turn cut short with Esc, three
+//       sub-agents (two in parallel, one nested), then /clear; the status and agent tree after
+//       each, and the conversation views read from the real transcripts.
 //       Runs in a folder of its own in the temp folder; the first run tells Claude to trust it.
 import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync } from 'node:fs';
@@ -122,12 +123,12 @@ async function untilScreen(term, predicate, ms) {
   return text;
 }
 
-/** The conversation view as a browser builds it from /ws/conversation. */
-function conversation(id) {
+/** The conversation view as a browser builds it from /ws/conversation: a session's, or a sub-agent's. */
+function conversation(id, agentId = null) {
   const turns = new Map();
   const entries = new Map();
   let ready = false;
-  const { close } = socket(`/ws/conversation?id=${id}`, (message) => {
+  const { close } = socket(`/ws/conversation?id=${id}${agentId ? `&agent=${agentId}` : ''}`, (message) => {
     if (message.type === 'reset') {
       turns.clear();
       entries.clear();
@@ -213,8 +214,47 @@ async function runScenario(id, term) {
     else await press(id, term, '\x1b', 'Esc during a reply: idle, interrupted', (s) => idle(s) && s.status.reason === 'interrupted', 10_000);
   }
 
+  const agents = await runAgents(id);
+
   const before = (await sessionNow(id))?.vendorSessionId;
   await turn(id, '/clear: a new conversation in a new transcript', '/clear', (s) => s.transcripts.length === 2 && s.vendorSessionId !== before && idle(s), 20_000);
+  return agents ?? [];
+}
+
+/**
+ * Two sub-agents in parallel, the second starting a third (haiku). Claude runs
+ * them in the background: the main turn ends at once, and each report starts
+ * a turn of its own.
+ */
+async function runAgents(id) {
+  const ask = [
+    'Use the Agent tool twice in a single message so the two run in parallel, both with subagent_type general-purpose and model haiku.',
+    'First agent: reply with exactly the word alpha, using no tools.',
+    'Second agent: use the Agent tool yourself (subagent_type general-purpose, model haiku) to start one agent that replies with exactly the word beta; then reply with exactly what it said, using no other tools.',
+    'When both have reported back, reply with the two words and nothing else.',
+  ].join(' ');
+  const before = (await sessionNow(id))?.status.at;
+  const sent = await compose(id, ask);
+  if (!check(sent.json?.submitted === true, 'sub-agents: the prompt is sent', JSON.stringify(sent.json))) return;
+  // While they work, the main conversation may already be idle: their tool calls must not make it look busy.
+  let quiet = false;
+  const done = await waitFor(
+    id,
+    (s) => {
+      if (s.status.value === 'idle' && s.agents.some((a) => a.state === 'running')) quiet = true;
+      // Each report starts a turn: settled once idle for a few seconds with every agent stopped.
+      return s.status.at !== before && s.status.value === 'idle' && Date.now() - s.status.at > 4000 && s.agents.length >= 3 && s.agents.every((a) => a.state === 'stopped');
+    },
+    180_000,
+  );
+  const agents = done?.agents ?? [];
+  const top = agents.filter((a) => a.parentId === null);
+  const nested = agents.filter((a) => a.parentId !== null && top.some((p) => p.id === a.parentId));
+  check(agents.length === 3 && top.length === 2 && nested.length === 1, 'sub-agents: two in parallel, one nested under the second', agents.map((a) => `${a.agentType}:${a.parentId ? 'nested' : 'top'}:${a.state}`).join(' '));
+  check(done?.status.value === 'idle', 'sub-agents: idle once all have reported', describe(done));
+  check(agents.every((a) => a.transcriptPath && a.model), 'sub-agents: each has its transcript and model', agents.map((a) => `${a.model ?? '-'}/${a.tokens ?? '-'}`).join(' '));
+  console.log(quiet ? 'INFO  the main conversation stayed idle while an agent worked' : 'INFO  no moment seen where the main conversation was idle while an agent worked');
+  return agents;
 }
 
 let session = null;
@@ -227,8 +267,9 @@ try {
     vendor: 'claude',
     title: 'canary',
     theme: 'dark',
-    ...(withTurn ? { model: 'haiku', effort: 'low' } : {}),
-    ...(scenario ? { cwd: work, permissionMode: 'manual' } : {}),
+    // manual, not the user's default mode: in plan mode Claude answers with a larger model than haiku.
+    ...(withTurn ? { model: 'haiku', effort: 'low', permissionMode: 'manual' } : {}),
+    ...(scenario ? { cwd: work } : {}),
   };
   const created = await api('POST', '/api/sessions', options);
   if (!check(created.status === 201, 'session starts', `HTTP ${created.status}`)) throw new Error(created.json?.error ?? 'not created');
@@ -252,7 +293,7 @@ try {
     const named = await waitFor(id, (s) => s.transcripts.length > 0, 5000);
     if (!check(named?.transcripts.length > 0, 'SessionStart names the transcript')) throw new Error('no transcript to view');
     const view = conversation(id);
-    await runScenario(id, term);
+    const agents = await runScenario(id, term);
     await sleep(2000);
     check(view.ready(), 'conversation: the view receives a copy');
     const entries = view.entries();
@@ -264,6 +305,17 @@ try {
     check(notices('cleared') === 1 && entries.some((e) => e.kind === 'command' && e.name === '/clear'), 'conversation: /clear starts the next part');
     const turns = view.turns();
     check(turns.some((t) => /haiku/.test(t.model ?? '') && t.usage.calls > 0 && t.usage.output > 0), 'conversation: turns have model and tokens', turns.map((t) => `${t.usage.calls}/${t.usage.output}`).join(' '));
+    const blocks = entries.filter((e) => e.kind === 'agent');
+    const reports = entries.filter((e) => e.kind === 'task');
+    check(blocks.length === 2 && blocks.every((e) => e.state === 'done') && reports.length >= 2, 'conversation: agent blocks done, their reports start turns', `${blocks.map((e) => e.state).join(',')} / ${reports.length} reports`);
+    const parent = agents.find((a) => agents.some((c) => c.parentId === a.id));
+    if (parent) {
+      const own = conversation(id, parent.id);
+      await sleep(2000);
+      const mine = own.entries();
+      check(mine.some((e) => e.kind === 'agent' && e.state === 'done') && mine.some((e) => e.kind === 'text' && /beta/i.test(e.text)), "conversation: a sub-agent's own, with the agent it started", mine.map((e) => e.kind).join(','));
+      own.close();
+    }
     const kinds = {};
     for (const e of entries) {
       const kind = e.kind === 'notice' ? `notice:${e.notice}` : e.kind;
