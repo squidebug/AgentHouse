@@ -6,12 +6,30 @@ export const MAX_PANES = 4;
 export interface Pane {
   id: string;
   sessionId: string;
+  /** One of the session's sub-agents: the pane shows that agent's conversation. */
+  agentId?: string;
 }
+
+/** What a pane shows: a session, or one of its sub-agents. */
+export interface Target {
+  sessionId: string;
+  agentId?: string | undefined;
+}
+
+const shows = (pane: Pane, target: Target) => pane.sessionId === target.sessionId && (pane.agentId ?? null) === (target.agentId ?? null);
+const paneOf = (id: string, target: Target): Pane => ({ id, sessionId: target.sessionId, ...(target.agentId ? { agentId: target.agentId } : {}) });
 
 /** What a pane shows of its session: the live terminal, or the conversation read from the transcript. */
 export type PaneMode = 'terminal' | 'conversation';
 
-export type Drag = { kind: 'session'; id: string } | { kind: 'pane'; id: string };
+export type Drag = { kind: 'session'; id: string } | { kind: 'agent'; id: string; sessionId: string } | { kind: 'pane'; id: string };
+
+/** The session or sub-agent a drag carries, if it carries one. */
+function dragTarget(drag: Drag): Target | null {
+  if (drag.kind === 'session') return { sessionId: drag.id };
+  if (drag.kind === 'agent') return { sessionId: drag.sessionId, agentId: drag.id };
+  return null;
+}
 export type DropTarget = { type: 'pane'; id: string } | { type: 'slot' } | { type: 'composer' };
 
 export interface WorkspaceState {
@@ -46,7 +64,10 @@ export function loadWorkspace(storage: Pick<Storage, 'getItem'> | undefined = gl
   try {
     const saved = JSON.parse(storage?.getItem(LAYOUT_KEY) ?? 'null') as Partial<WorkspaceState> | null;
     if (!saved || !Array.isArray(saved.panes)) return initialWorkspace;
-    const panes = saved.panes.filter((p): p is Pane => typeof p?.id === 'string' && typeof p?.sessionId === 'string').slice(0, MAX_PANES);
+    const panes = saved.panes
+      .filter((p): p is Pane => typeof p?.id === 'string' && typeof p?.sessionId === 'string' && (p.agentId === undefined || typeof p.agentId === 'string'))
+      .map((p) => paneOf(p.id, p))
+      .slice(0, MAX_PANES);
     const active = panes.some((p) => p.id === saved.active) ? (saved.active as string) : (panes[0]?.id ?? null);
     const nextPane = Math.max(Number(saved.nextPane) || 1, ...panes.map((p) => Number(p.id.slice(1)) + 1 || 1));
     const paneMode = Object.fromEntries(panes.filter((p) => saved.paneMode?.[p.id] === 'conversation').map((p) => [p.id, 'conversation' as const]));
@@ -66,8 +87,8 @@ export function saveWorkspace(state: WorkspaceState, storage: Pick<Storage, 'set
 }
 
 export type Action =
-  | { type: 'open'; sessionId: string }
-  | { type: 'openNew'; sessionId: string }
+  | { type: 'open'; sessionId: string; agentId?: string }
+  | { type: 'openNew'; sessionId: string; agentId?: string }
   | { type: 'focus'; paneId: string }
   | { type: 'closePane'; paneId: string }
   | { type: 'dragStart'; drag: Drag }
@@ -93,31 +114,32 @@ function sameTarget(a: DropTarget | null, b: DropTarget): boolean {
 export function accepts(state: WorkspaceState, target: DropTarget, ctx: DropContext): boolean {
   const drag = state.drag;
   if (!drag) return false;
-  if (target.type === 'pane') return drag.kind === 'session' || drag.id !== target.id;
-  if (drag.kind !== 'session') return false;
+  if (target.type === 'pane') return drag.kind !== 'pane' || drag.id !== target.id;
+  if (drag.kind === 'pane') return false;
   if (target.type === 'slot') return state.panes.length < MAX_PANES;
-  return ctx.runningIds.includes(drag.id) && !state.targets.includes(drag.id);
+  // Only a session takes input; a sub-agent is reached through its session.
+  return drag.kind === 'session' && ctx.runningIds.includes(drag.id) && !state.targets.includes(drag.id);
 }
 
-function addPane(state: WorkspaceState, sessionId: string): WorkspaceState {
+function addPane(state: WorkspaceState, target: Target): WorkspaceState {
   const id = `p${state.nextPane}`;
-  return { ...state, panes: [...state.panes, { id, sessionId }], nextPane: state.nextPane + 1, active: id };
+  return { ...state, panes: [...state.panes, paneOf(id, target)], nextPane: state.nextPane + 1, active: id };
 }
 
-/** Shows a session: focuses the pane already showing it, else replaces the active pane, else adds one. */
-function open(state: WorkspaceState, sessionId: string): WorkspaceState {
-  const shown = state.panes.find((p) => p.sessionId === sessionId);
+/** Shows a session or sub-agent: focuses the pane already showing it, else replaces the active pane, else adds one. */
+function open(state: WorkspaceState, target: Target): WorkspaceState {
+  const shown = state.panes.find((p) => shows(p, target));
   if (shown) return { ...state, active: shown.id };
   const active = state.panes.find((p) => p.id === state.active);
-  if (!active) return addPane(state, sessionId);
-  return { ...state, panes: state.panes.map((p) => (p.id === active.id ? { ...p, sessionId } : p)) };
+  if (!active) return addPane(state, target);
+  return { ...state, panes: state.panes.map((p) => (p.id === active.id ? paneOf(p.id, target) : p)) };
 }
 
-/** Shows a session in a new pane when there is room, else like `open`. */
-function openNew(state: WorkspaceState, sessionId: string): WorkspaceState {
-  const shown = state.panes.find((p) => p.sessionId === sessionId);
+/** Shows a session or sub-agent in a new pane when there is room, else like `open`. */
+function openNew(state: WorkspaceState, target: Target): WorkspaceState {
+  const shown = state.panes.find((p) => shows(p, target));
   if (shown) return { ...state, active: shown.id };
-  return state.panes.length < MAX_PANES ? addPane(state, sessionId) : open(state, sessionId);
+  return state.panes.length < MAX_PANES ? addPane(state, target) : open(state, target);
 }
 
 function swap(state: WorkspaceState, fromId: string, toId: string): WorkspaceState {
@@ -132,11 +154,10 @@ function swap(state: WorkspaceState, fromId: string, toId: string): WorkspaceSta
 function drop(state: WorkspaceState, target: DropTarget): WorkspaceState {
   const drag = state.drag;
   if (!drag) return state;
-  if (target.type === 'pane') {
-    if (drag.kind === 'pane') return swap(state, drag.id, target.id);
-    return { ...state, panes: state.panes.map((p) => (p.id === target.id ? { ...p, sessionId: drag.id } : p)), active: target.id };
-  }
-  if (target.type === 'slot') return addPane(state, drag.id);
+  if (drag.kind === 'pane') return target.type === 'pane' ? swap(state, drag.id, target.id) : state;
+  const shown = dragTarget(drag)!;
+  if (target.type === 'pane') return { ...state, panes: state.panes.map((p) => (p.id === target.id ? paneOf(p.id, shown) : p)), active: target.id };
+  if (target.type === 'slot') return addPane(state, shown);
   return { ...state, targets: [...state.targets, drag.id] };
 }
 
@@ -147,9 +168,9 @@ function toggle(map: Record<string, boolean>, id: string): Record<string, boolea
 export function reducer(state: WorkspaceState, action: Action, ctx: DropContext = { runningIds: [] }): WorkspaceState {
   switch (action.type) {
     case 'open':
-      return open(state, action.sessionId);
+      return open(state, action);
     case 'openNew':
-      return openNew(state, action.sessionId);
+      return openNew(state, action);
     case 'focus':
       return state.panes.some((p) => p.id === action.paneId) ? { ...state, active: action.paneId } : state;
     case 'closePane': {

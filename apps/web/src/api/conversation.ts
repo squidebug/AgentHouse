@@ -12,8 +12,8 @@ export interface Conversation {
 
 const EMPTY: Conversation = { turns: [], entries: [], ready: false };
 
-/** A session's conversation from /ws/conversation: a full copy first, then changes; reconnects with backoff. */
-export function useConversation(sessionId: string): Conversation {
+/** A session's conversation (or a sub-agent's) from /ws/conversation: a full copy first, then changes; reconnects with backoff. */
+export function useConversation(sessionId: string, agentId: string | null = null): Conversation {
   const [conversation, setConversation] = useState<Conversation>(EMPTY);
 
   useEffect(() => {
@@ -27,7 +27,7 @@ export function useConversation(sessionId: string): Conversation {
     setConversation(EMPTY);
 
     const connect = () => {
-      ws = new WebSocket(socketUrl(`/ws/conversation?id=${encodeURIComponent(sessionId)}`));
+      ws = new WebSocket(socketUrl(`/ws/conversation?id=${encodeURIComponent(sessionId)}${agentId ? `&agent=${encodeURIComponent(agentId)}` : ''}`));
       ws.onopen = () => {
         delay = 500;
       };
@@ -57,7 +57,7 @@ export function useConversation(sessionId: string): Conversation {
       clearTimeout(retry);
       ws?.close();
     };
-  }, [sessionId]);
+  }, [sessionId, agentId]);
 
   return conversation;
 }

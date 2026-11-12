@@ -2,7 +2,7 @@
 
 A local web console for running AI coding-agent CLIs — Claude Code and Codex — side by side in real browser terminals, and for seeing what each agent is doing.
 
-> **Status: pre-alpha.** Working today: real CLI terminals in the browser, several sessions at once, drag-and-drop layout, a Korean-safe composer, light/dark themes and an environment check. Sessions keep running while the server restarts, and Claude Code sessions show live status (working, waiting for approval, idle), plan usage, and a read-only conversation view with tokens per turn. Next: sub-agent trees, grouping and delegation. Codex runs in the terminal; its status view comes later and has not been tried with a real Codex install yet. The UI is in Korean for now; English is planned.
+> **Status: pre-alpha.** Working today: real CLI terminals in the browser, several sessions at once, drag-and-drop layout, a Korean-safe composer, light/dark themes and an environment check. Sessions keep running while the server restarts, and Claude Code sessions show live status (working, waiting for approval, idle), plan usage, their sub-agents as they work, and a read-only conversation view with tokens per turn. Next: grouping and delegation. Codex runs in the terminal; its status view comes later and has not been tried with a real Codex install yet. The UI is in Korean for now; English is planned.
 
 - Runs only on your machine (`127.0.0.1`), behind a login token, a Host allowlist and an Origin check.
 - Drives the CLIs exactly as installed, signed in with your own account. No reinstall, no PATH changes: Node 18 or newer and whatever Claude Code / Codex you already use.
@@ -40,6 +40,7 @@ pnpm dev:stop     # ends the dev sessions and the dev session host
 - **Send to several sessions**: drag sessions onto the message box, type, `Ctrl+Enter`. With none added, the message goes to the focused pane. Sessions waiting for an approval or an answer are skipped, so a message never answers a dialog.
 - **Status**: working, waiting for approval (amber) and idle show on each session. The tab title counts sessions waiting for you, and a browser notification appears while the tab is in the background. The chip at the top shows Claude plan usage; open it for the 5-hour and weekly windows and their reset times.
 - **Conversation**: the switch in a pane header shows a Claude Code session's conversation instead of its terminal: prompts, replies, tool calls folded into one row (open one for its input and output), sub-agents, and model, effort and tokens per turn. Read-only. A session from before a host restart has only this left.
+- **Sub-agents**: the agents a Claude Code session starts show under it in the tree, each under the agent that started it, with its kind and model; open one for its tokens and run time. Click one, or a chip in the pane header, for its own conversation; drag it to a pane or the `+` strip. Many finished ones fold behind "완료 N". Claude runs them in the background, so a session can be idle while its agents work.
 - **Details**: the chevron on a row or pane shows CLI version, model, effort, context use, folder and PID.
 
 ## Checks

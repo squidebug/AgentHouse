@@ -124,6 +124,37 @@ try {
   await settle();
   await page.screenshot({ path: path.join(out, 'ended-dark.png') });
 
+  // Sub-agents in the background: nested rows in the tree, each with a conversation of its own.
+  const agents = await fetch(`${origin}/api/sessions`, {
+    method: 'POST',
+    headers: { cookie: `ah_token=${token}`, origin, 'content-type': 'application/json' },
+    body: JSON.stringify({ vendor: 'fake', title: 'ui-agents', cwd: work, theme: 'dark' }),
+  });
+  check(agents.status === 201, 'a session for sub-agents starts', `HTTP ${agents.status}`);
+  await page.getByRole('button', { name: 'ui-agents 열기' }).click();
+  await terminalShown();
+  await box.fill('start agents please');
+  await box.press('Control+Enter');
+  const nestedRow = page.getByRole('button', { name: 'Check the tests 열기' });
+  await nestedRow.waitFor({ timeout: 10_000 });
+  const indent = async (name) => page.getByRole('button', { name }).evaluate((el) => el.parentElement.getBoundingClientRect().left + parseFloat(getComputedStyle(el.parentElement).paddingLeft));
+  check((await indent('Check the tests 열기')) > (await indent('Plan the change 열기')), 'the agent a sub-agent started is nested under it');
+  const rowDone = (name) => page.locator('.ah-row', { has: page.getByRole('button', { name: `${name} 열기` }) }).getByRole('img', { name: '완료' });
+  for (const name of ['Look around', 'Check the tests', 'Plan the change']) await rowDone(name).waitFor({ timeout: 10_000 });
+  check(true, 'all three are done once they report');
+  await page.getByRole('button', { name: 'Plan the change 열기' }).click();
+  const agentPane = page.getByRole('region', { name: 'Plan the change' });
+  await agentPane.getByText('plan ready', { exact: true }).waitFor({ timeout: 10_000 });
+  check(true, 'a sub-agent opens in a pane with its own conversation');
+  const chip = agentPane.getByRole('group', { name: '서브에이전트' }).getByRole('button', { name: 'Check the tests 대화 열기' });
+  check(await chip.isVisible(), 'its own sub-agent is a chip in its header');
+  check(await agentPane.getByText('보고', { exact: true }).first().isVisible(), "the nested agent's report is in its conversation");
+  await settle();
+  await page.screenshot({ path: path.join(out, 'agents-dark.png') });
+  await page.getByRole('button', { name: '라이트 모드' }).click();
+  await settle();
+  await page.screenshot({ path: path.join(out, 'agents-light.png') });
+
   check(errors.length === 0, 'no errors in the browser console', errors.join(' | '));
   console.log(`INFO  screenshots: ${out}`);
 } catch (error) {

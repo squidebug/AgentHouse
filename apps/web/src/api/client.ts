@@ -32,7 +32,9 @@ export const api = {
   launch: (opts: LaunchOptions) => call<SessionInfo>('POST', '/api/sessions', opts),
   remove: (id: string) => call<unknown>('DELETE', `/api/sessions/${encodeURIComponent(id)}`),
   compose: (id: string, req: ComposeRequest) => call<ComposeResult>('POST', `/api/sessions/${encodeURIComponent(id)}/compose`, req),
-  entry: (id: string, entryId: string) => call<EntryDetail>('GET', `/api/sessions/${encodeURIComponent(id)}/conversation/${encodeURIComponent(entryId)}`),
+  /** An entry of a session's conversation, or of one of its sub-agents'. */
+  entry: (id: string, entryId: string, agentId: string | null = null) =>
+    call<EntryDetail>('GET', `/api/sessions/${encodeURIComponent(id)}/conversation/${encodeURIComponent(entryId)}${agentId ? `?agent=${encodeURIComponent(agentId)}` : ''}`),
 };
 
 export function socketUrl(path: string): string {

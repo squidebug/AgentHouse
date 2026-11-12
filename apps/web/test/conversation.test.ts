@@ -20,7 +20,7 @@ const textEntry = (id: string, t: number): ConversationEntry => ({ ...base(id, t
 const tool = (id: string, t: number, state: 'running' | 'done' | 'error' = 'done'): WorkEntry => ({ ...base(id, t), kind: 'tool', name: 'Bash', summary: id, state });
 const thought = (id: string, t: number): WorkEntry => ({ ...base(id, t), kind: 'thinking', chars: 10 });
 
-test('runs of tool calls and thinking fold into one row; text, prompts and sub-agents stand alone', () => {
+test('runs of tool calls and thinking fold into one row; text, prompts, sub-agents and their reports stand alone', () => {
   const entries: ConversationEntry[] = [
     promptEntry('p1', 0),
     thought('k1', 0),
@@ -30,6 +30,8 @@ test('runs of tool calls and thinking fold into one row; text, prompts and sub-a
     tool('t3', 0),
     { ...base('a1', 0), kind: 'agent', agentType: 'Explore', description: 'look', state: 'running', agentId: null },
     tool('t4', 0),
+    { ...base('r1', 0), kind: 'task', agentId: 'a1', description: 'look', state: 'done', tokens: 10, durationMs: 5 },
+    tool('t6', 0),
     promptEntry('p2', 1),
     tool('t5', 9),
   ];
@@ -40,7 +42,7 @@ test('runs of tool calls and thinking fold into one row; text, prompts and sub-a
   );
   assert.deepEqual(
     views[0]?.blocks.map((b) => (b.kind === 'work' ? b.entries.map((e) => e.id).join('+') : b.entry.id)),
-    ['p1', 'k1+t1+t2', 'x1', 't3', 'a1', 't4'],
+    ['p1', 'k1+t1+t2', 'x1', 't3', 'a1', 't4', 'r1', 't6'],
   );
   assert.deepEqual(
     views[1]?.blocks.map((b) => (b.kind === 'entry' ? b.entry.id : 'work')),

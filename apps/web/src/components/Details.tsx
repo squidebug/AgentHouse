@@ -1,7 +1,9 @@
 import { Box, Typography } from '@mui/material';
-import { isAsking, type SessionInfo, type SessionStatus } from '@agenthouse/protocol';
+import { isAsking, type AgentInfo, type SessionInfo, type SessionStatus } from '@agenthouse/protocol';
 import { t } from '../strings';
 import { v } from '../theme/tokens';
+import { elapsedMs } from '../workspace/agents';
+import { compactCount, duration, modelName } from '../workspace/conversation';
 
 export interface Detail {
   k: string;
@@ -48,6 +50,43 @@ export function SessionSubtitle({ session }: { session: SessionInfo }) {
       )}
     </Typography>
   );
+}
+
+/** "작업 중 · Read", "승인 대기 · Write", "완료". */
+export function agentStatusText(agent: AgentInfo): string {
+  const base = t.agentState[agent.asking ? 'asking' : agent.state] ?? agent.state;
+  return agent.tool && (agent.asking || agent.state === 'running') ? `${base} · ${agent.tool}` : base;
+}
+
+/** A sub-agent's row title: what it was asked to do, else its kind. */
+export const agentTitle = (agent: AgentInfo) => agent.description ?? agent.agentType;
+
+/** The second line of a sub-agent's row or pane: its kind and model, plus what it does when worth a glance. */
+export function AgentSubtitle({ agent }: { agent: AgentInfo }) {
+  const now = agent.asking ? { text: agentStatusText(agent), color: v.warn } : agent.state === 'running' && agent.tool ? { text: agent.tool, color: v.primary } : null;
+  return (
+    <Typography noWrap sx={{ maxWidth: '100%', fontSize: 12, lineHeight: '16px', color: v.on2 }}>
+      {[agent.agentType, agent.model && modelName(agent.model)].filter(Boolean).join(' · ')}
+      {now && (
+        <Box component="span" sx={{ color: now.color, fontWeight: 500 }}>
+          {` · ${now.text}`}
+        </Box>
+      )}
+    </Typography>
+  );
+}
+
+export function agentDetails(agent: AgentInfo, agents: AgentInfo[], session: SessionInfo, now = Date.now()): Detail[] {
+  const parent = agent.parentId ? agents.find((a) => a.id === agent.parentId) : undefined;
+  const list: Detail[] = [
+    { k: t.statusLabel, v: agentStatusText(agent) },
+    { k: t.agentType, v: agent.agentType },
+  ];
+  if (agent.model) list.push({ k: t.model, v: modelName(agent.model) });
+  if (agent.tokens !== null) list.push({ k: t.tokens, v: compactCount(agent.tokens) });
+  list.push({ k: t.elapsed, v: duration(elapsedMs(agent, now)) });
+  list.push({ k: parent ? t.parentAgent : t.session, v: parent ? agentTitle(parent) : session.title });
+  return list;
 }
 
 const compact = (n: number) => (n >= 1_000_000 ? `${n / 1_000_000}M` : n >= 1000 ? `${Math.round(n / 1000)}K` : String(n));

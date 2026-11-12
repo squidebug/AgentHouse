@@ -1,4 +1,4 @@
-import { Box, Button, ButtonBase, CircularProgress, Typography } from '@mui/material';
+import { Box, Button, ButtonBase, CircularProgress, IconButton, Tooltip, Typography } from '@mui/material';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ConversationEntry, ConversationTurn, EntryDetail, ToolState } from '@agenthouse/protocol';
 import { api } from '../api/client';
@@ -7,7 +7,7 @@ import { t } from '../strings';
 import { FONT_MONO } from '../theme/theme';
 import { v } from '../theme/tokens';
 import { arrange, compactCount, duration, modelName, summarize, type TurnView, type WorkEntry } from '../workspace/conversation';
-import { BranchIcon, ChevronIcon } from './icons';
+import { BranchIcon, ChatIcon, ChevronIcon } from './icons';
 import { MarkdownText } from './Markdown';
 
 // The newest turns first; older ones a page at a time.
@@ -31,21 +31,30 @@ const preSx = {
   overflowWrap: 'anywhere',
 } as const;
 
+/** Whose conversation it is: a session's, or one of its sub-agents'. */
+export interface ConversationSource {
+  sessionId: string;
+  agentId: string | null;
+  /** Opens a sub-agent's own conversation, from its block. */
+  onOpenAgent?: ((agentId: string) => void) | undefined;
+}
+
 /** The full content of an entry, loaded the first time it is opened (again if its state changed). */
-function useDetail(sessionId: string, entry: ConversationEntry, open: boolean): { detail: EntryDetail | null; failed: boolean } {
+function useDetail(source: ConversationSource, entry: ConversationEntry, open: boolean): { detail: EntryDetail | null; failed: boolean } {
+  const { sessionId, agentId } = source;
   const [loaded, setLoaded] = useState<{ key: string; detail: EntryDetail | null; failed: boolean } | null>(null);
   const key = `${entry.id}:${'state' in entry ? entry.state : ''}`;
   useEffect(() => {
     if (!open || loaded?.key === key) return;
     let current = true;
     api
-      .entry(sessionId, entry.id)
+      .entry(sessionId, entry.id, agentId)
       .then((detail) => current && setLoaded({ key, detail, failed: false }))
       .catch(() => current && setLoaded({ key, detail: null, failed: true }));
     return () => {
       current = false;
     };
-  }, [open, key, sessionId, entry.id, loaded?.key]);
+  }, [open, key, sessionId, agentId, entry.id, loaded?.key]);
   return loaded?.key === key ? loaded : { detail: null, failed: false };
 }
 
@@ -118,9 +127,9 @@ function StateDot({ state }: { state: ToolState }) {
 }
 
 /** One tool call or one thought in an opened work row. */
-function WorkItem({ entry, sessionId }: { entry: WorkEntry; sessionId: string }) {
+function WorkItem({ entry, source }: { entry: WorkEntry; source: ConversationSource }) {
   const [open, setOpen] = useState(false);
-  const { detail, failed } = useDetail(sessionId, entry, open);
+  const { detail, failed } = useDetail(source, entry, open);
   const label = entry.kind === 'tool' ? entry.name : t.thinking;
   const summary = entry.kind === 'tool' ? entry.summary : entry.chars ? t.chars(compactCount(entry.chars)) : '';
   return (
@@ -163,7 +172,7 @@ function WorkItem({ entry, sessionId }: { entry: WorkEntry; sessionId: string })
 }
 
 /** A run of tool calls and thinking: one quiet row until opened. */
-function WorkRow({ entries, sessionId }: { entries: WorkEntry[]; sessionId: string }) {
+function WorkRow({ entries, source }: { entries: WorkEntry[]; source: ConversationSource }) {
   const [open, setOpen] = useState(false);
   const summary = summarize(entries);
   const lastTool = [...entries].reverse().find((e): e is Extract<WorkEntry, { kind: 'tool' }> => e.kind === 'tool');
@@ -195,7 +204,7 @@ function WorkRow({ entries, sessionId }: { entries: WorkEntry[]; sessionId: stri
       {open && (
         <Box sx={{ pl: '14px' }}>
           {entries.map((entry) => (
-            <WorkItem key={entry.id} entry={entry} sessionId={sessionId} />
+            <WorkItem key={entry.id} entry={entry} source={source} />
           ))}
         </Box>
       )}
@@ -203,9 +212,9 @@ function WorkRow({ entries, sessionId }: { entries: WorkEntry[]; sessionId: stri
   );
 }
 
-function Prompt({ entry, sessionId }: { entry: Extract<ConversationEntry, { kind: 'prompt' }>; sessionId: string }) {
+function Prompt({ entry, source }: { entry: Extract<ConversationEntry, { kind: 'prompt' }>; source: ConversationSource }) {
   const [full, setFull] = useState(false);
-  const { detail } = useDetail(sessionId, entry, full);
+  const { detail } = useDetail(source, entry, full);
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start' }}>
       {entry.from && (
@@ -243,9 +252,9 @@ function Prompt({ entry, sessionId }: { entry: Extract<ConversationEntry, { kind
   );
 }
 
-function Notice({ entry, sessionId }: { entry: Extract<ConversationEntry, { kind: 'notice' }>; sessionId: string }) {
+function Notice({ entry, source }: { entry: Extract<ConversationEntry, { kind: 'notice' }>; source: ConversationSource }) {
   const [open, setOpen] = useState(false);
-  const { detail } = useDetail(sessionId, entry, open);
+  const { detail } = useDetail(source, entry, open);
   const error = entry.notice === 'api_error';
   const label = error && entry.text ? `${t.notice.api_error} · ${entry.text}` : t.notice[entry.notice];
   const line = <Box component="span" sx={{ flex: 1, height: '1px', bgcolor: v.outline }} />;
@@ -280,17 +289,29 @@ function Command({ entry }: { entry: Extract<ConversationEntry, { kind: 'command
   );
 }
 
-/** A sub-agent the model started. Its own steps come with the sub-agent tree (M6); for now, its final report. */
-function Agent({ entry, sessionId }: { entry: Extract<ConversationEntry, { kind: 'agent' }>; sessionId: string }) {
+/** A sub-agent the model started: opened, what it reported; its own conversation is a click away. */
+function Agent({ entry, source }: { entry: Extract<ConversationEntry, { kind: 'agent' }>; source: ConversationSource }) {
   const [open, setOpen] = useState(false);
-  const { detail, failed } = useDetail(sessionId, entry, open);
+  const { detail, failed } = useDetail(source, entry, open);
+  const { onOpenAgent } = source;
   return (
-    <Box sx={{ border: `1px solid ${v.outline}`, borderRadius: '12px', overflow: 'hidden' }}>
+    <Box sx={{ position: 'relative', border: `1px solid ${v.outline}`, borderRadius: '12px', overflow: 'hidden' }}>
+      {entry.agentId && onOpenAgent && (
+        <Tooltip title={t.openConversation}>
+          <IconButton
+            aria-label={`${entry.description} ${t.openConversation}`}
+            onClick={() => onOpenAgent(entry.agentId!)}
+            sx={{ position: 'absolute', top: 2, right: 34, width: 32, height: 32, color: v.on2 }}
+          >
+            <ChatIcon size={15} />
+          </IconButton>
+        </Tooltip>
+      )}
       <ButtonBase
         disableRipple
         onClick={() => setOpen(!open)}
         aria-expanded={open}
-        sx={{ width: '100%', justifyContent: 'flex-start', gap: '8px', p: '8px 12px', textAlign: 'left', '&:hover': { bgcolor: v.surface2 } }}
+        sx={{ width: '100%', justifyContent: 'flex-start', gap: '8px', p: '8px 12px', pr: entry.agentId && onOpenAgent ? '72px' : '36px', textAlign: 'left', '&:hover': { bgcolor: v.surface2 } }}
       >
         <StateDot state={entry.state} />
         <BranchIcon size={15} style={{ flex: 'none', color: v.on2 }} />
@@ -305,7 +326,7 @@ function Agent({ entry, sessionId }: { entry: Extract<ConversationEntry, { kind:
             {t.toolState[entry.state]}
           </Box>
         )}
-        <Box component="span" sx={{ flex: 'none', display: 'inline-flex', color: v.on2 }}>
+        <Box component="span" sx={{ position: 'absolute', right: 12, top: 10, display: 'inline-flex', color: v.on2 }}>
           <ChevronIcon open={open} size={14} />
         </Box>
       </ButtonBase>
@@ -314,10 +335,38 @@ function Agent({ entry, sessionId }: { entry: Extract<ConversationEntry, { kind:
   );
 }
 
-function EntryView({ entry, sessionId }: { entry: ConversationEntry; sessionId: string }) {
+/** A background agent reported back; its report opens below. */
+function Task({ entry, source }: { entry: Extract<ConversationEntry, { kind: 'task' }>; source: ConversationSource }) {
+  const [open, setOpen] = useState(false);
+  const { detail, failed } = useDetail(source, entry, open);
+  const facts = [entry.tokens ? `${t.tokens} ${compactCount(entry.tokens)}` : null, entry.durationMs ? duration(entry.durationMs) : null].filter(Boolean).join(' · ');
+  return (
+    <Box>
+      <ButtonBase
+        disableRipple
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        sx={{ width: '100%', justifyContent: 'flex-start', gap: '8px', minHeight: 28, px: '4px', borderRadius: '8px', textAlign: 'left', color: v.on2, '&:hover': { bgcolor: v.surface2 } }}
+      >
+        <StateDot state={entry.state} />
+        <BranchIcon size={14} style={{ flex: 'none' }} />
+        <Box component="span" sx={{ flex: 'none', fontSize: 12, fontWeight: 600, color: entry.state === 'done' ? v.on : STATE_COLOR[entry.state] }}>
+          {t.report[entry.state] ?? t.report.done}
+        </Box>
+        <Box component="span" sx={{ minWidth: 0, flex: 1, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {[entry.description, facts].filter(Boolean).join(' · ')}
+        </Box>
+        <ChevronIcon open={open} size={14} />
+      </ButtonBase>
+      {open && <Box sx={{ p: '2px 4px 6px 26px' }}>{detail ? detail.text ? <MarkdownText text={detail.text} /> : null : failed ? null : <Loading />}</Box>}
+    </Box>
+  );
+}
+
+function EntryView({ entry, source }: { entry: ConversationEntry; source: ConversationSource }) {
   switch (entry.kind) {
     case 'prompt':
-      return <Prompt entry={entry} sessionId={sessionId} />;
+      return <Prompt entry={entry} source={source} />;
     case 'text':
       return (
         <Box>
@@ -326,11 +375,13 @@ function EntryView({ entry, sessionId }: { entry: ConversationEntry; sessionId: 
         </Box>
       );
     case 'notice':
-      return <Notice entry={entry} sessionId={sessionId} />;
+      return <Notice entry={entry} source={source} />;
     case 'command':
       return <Command entry={entry} />;
     case 'agent':
-      return <Agent entry={entry} sessionId={sessionId} />;
+      return <Agent entry={entry} source={source} />;
+    case 'task':
+      return <Task entry={entry} source={source} />;
     default:
       return null;
   }
@@ -356,11 +407,11 @@ function TurnFooter({ turn }: { turn: ConversationTurn }) {
   );
 }
 
-function Turn({ view, sessionId }: { view: TurnView; sessionId: string }) {
+function Turn({ view, source }: { view: TurnView; source: ConversationSource }) {
   return (
     <Box component="article" aria-label={t.turn(view.turn.index + 1)} sx={{ display: 'flex', flexDirection: 'column', gap: '8px', py: '12px', '& + &': { borderTop: `1px solid ${v.outline}` } }}>
       {view.blocks.map((block) =>
-        block.kind === 'work' ? <WorkRow key={block.id} entries={block.entries} sessionId={sessionId} /> : <EntryView key={block.entry.id} entry={block.entry} sessionId={sessionId} />,
+        block.kind === 'work' ? <WorkRow key={block.id} entries={block.entries} source={source} /> : <EntryView key={block.entry.id} entry={block.entry} source={source} />,
       )}
       <TurnFooter turn={view.turn} />
     </Box>
@@ -368,8 +419,9 @@ function Turn({ view, sessionId }: { view: TurnView; sessionId: string }) {
 }
 
 /** A session's conversation, read-only, from its transcript: the newest turns, following as they happen. */
-export function ConversationView({ sessionId }: { sessionId: string }) {
-  const conversation = useConversation(sessionId);
+export function ConversationView({ sessionId, agentId = null, onOpenAgent }: { sessionId: string; agentId?: string | null; onOpenAgent?: (agentId: string) => void }) {
+  const conversation = useConversation(sessionId, agentId);
+  const source = useMemo<ConversationSource>(() => ({ sessionId, agentId, onOpenAgent }), [sessionId, agentId, onOpenAgent]);
   const turns = useMemo(() => arrange(conversation.turns, conversation.entries), [conversation]);
   const [shown, setShown] = useState(PAGE);
   const scroller = useRef<HTMLDivElement>(null);
@@ -380,7 +432,7 @@ export function ConversationView({ sessionId }: { sessionId: string }) {
   useEffect(() => {
     setShown(PAGE);
     stick.current = true;
-  }, [sessionId]);
+  }, [sessionId, agentId]);
 
   useLayoutEffect(() => {
     const element = scroller.current;
@@ -417,7 +469,7 @@ export function ConversationView({ sessionId }: { sessionId: string }) {
         </Button>
       )}
       {turns.slice(hidden).map((view) => (
-        <Turn key={view.turn.index} view={view} sessionId={sessionId} />
+        <Turn key={view.turn.index} view={view} source={source} />
       ))}
     </Box>
   );
