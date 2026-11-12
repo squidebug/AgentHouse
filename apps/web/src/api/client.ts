@@ -1,4 +1,4 @@
-import type { ApiError, ComposeRequest, ComposeResult, EntryDetail, EnvReport, LaunchOptions, SessionInfo } from '@agenthouse/protocol';
+import type { ApiError, ComposeRequest, ComposeResult, EntryDetail, EnvReport, LaunchOptions, SessionInfo, SessionLink } from '@agenthouse/protocol';
 
 export class RequestError extends Error {
   constructor(
@@ -32,6 +32,8 @@ export const api = {
   launch: (opts: LaunchOptions) => call<SessionInfo>('POST', '/api/sessions', opts),
   remove: (id: string) => call<unknown>('DELETE', `/api/sessions/${encodeURIComponent(id)}`),
   compose: (id: string, req: ComposeRequest) => call<ComposeResult>('POST', `/api/sessions/${encodeURIComponent(id)}/compose`, req),
+  /** Places a session under another one (grouping), or back at the top with null. */
+  link: (id: string, parentId: string | null) => call<{ links: SessionLink[] }>('PUT', `/api/sessions/${encodeURIComponent(id)}/link`, { parentId }),
   /** An entry of a session's conversation, or of one of its sub-agents'. */
   entry: (id: string, entryId: string, agentId: string | null = null) =>
     call<EntryDetail>('GET', `/api/sessions/${encodeURIComponent(id)}/conversation/${encodeURIComponent(entryId)}${agentId ? `?agent=${encodeURIComponent(agentId)}` : ''}`),

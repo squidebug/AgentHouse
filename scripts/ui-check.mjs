@@ -155,6 +155,32 @@ try {
   await settle();
   await page.screenshot({ path: path.join(out, 'agents-light.png') });
 
+  // Grouping: a session dragged onto another one at the top goes under it, and stays there.
+  const row = (title) => page.locator('.ah-row', { has: page.getByRole('button', { name: `${title} 열기`, exact: true }) });
+  const left = (title) => row(title).evaluate((el) => el.getBoundingClientRect().left + parseFloat(getComputedStyle(el).paddingLeft));
+  await row('ui-agents').dragTo(row('ui-check'));
+  await page.getByRole('group', { name: 'ui-agents → ui-check' }).getByRole('button', { name: '묶기' }).click();
+  await row('ui-agents').getByRole('img', { name: '묶음' }).waitFor({ timeout: 5000 });
+  check((await left('ui-agents')) > (await left('ui-check')), 'a session dropped on another goes under it, marked as grouped');
+  await page.reload();
+  await row('ui-agents').getByRole('img', { name: '묶음' }).waitFor({ timeout: 10_000 });
+  check(true, 'the group outlives a reload');
+  await settle();
+  await page.screenshot({ path: path.join(out, 'group-light.png') });
+  await page.getByRole('button', { name: '다크 모드' }).click();
+  await settle();
+  await page.screenshot({ path: path.join(out, 'group-dark.png') });
+  await page.getByRole('button', { name: 'ui-agents 세부 정보' }).click();
+  await page.getByRole('button', { name: '최상위로' }).click();
+  await row('ui-agents').getByRole('img', { name: '묶음' }).waitFor({ state: 'detached', timeout: 5000 });
+  check((await left('ui-agents')) === (await left('ui-check')), 'and back at the top from its details');
+  await page.getByRole('button', { name: '묶기', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'ui-check' }).click();
+  await row('ui-agents').getByRole('img', { name: '묶음' }).waitFor({ timeout: 5000 });
+  check(true, 'grouped without dragging, from the menu');
+  await page.getByRole('button', { name: '최상위로' }).click();
+  await row('ui-agents').getByRole('img', { name: '묶음' }).waitFor({ state: 'detached', timeout: 5000 });
+
   check(errors.length === 0, 'no errors in the browser console', errors.join(' | '));
   console.log(`INFO  screenshots: ${out}`);
 } catch (error) {

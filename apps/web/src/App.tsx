@@ -14,13 +14,14 @@ import { TopBar } from './components/TopBar';
 import { t } from './strings';
 import { v } from './theme/tokens';
 import { makeDnd } from './workspace/dnd';
+import { parentsOf } from './workspace/tree';
 import { loadWorkspace, reducer, saveWorkspace, type Action, type DropContext, type WorkspaceState } from './workspace/state';
 
 export function App() {
   const { mode, systemMode, setMode } = useColorScheme();
   const resolved: ThemeMode = (mode === 'system' ? systemMode : mode) === 'dark' ? 'dark' : 'light';
   const { env, loading: envLoading, refresh: refreshEnv } = useEnv();
-  const { sessions, limits, connected, loaded } = useSessions();
+  const { sessions, limits, links, connected, loaded } = useSessions();
 
   // Sessions launched from this tab, until the live list includes them.
   const [launched, setLaunched] = useState<Record<string, SessionInfo>>({});
@@ -40,7 +41,7 @@ export function App() {
   }, [sessions, launched]);
   const sessionById = useCallback((id: string) => byId.get(id), [byId]);
   const runningIds = [...byId.values()].filter((s) => s.state === 'running').map((s) => s.id);
-  ctxRef.current = { runningIds };
+  ctxRef.current = { runningIds, parents: parentsOf([...byId.values()], links) };
 
   useEffect(() => {
     const listed = new Set(sessions.map((s) => s.id));
@@ -105,6 +106,8 @@ export function App() {
       <Box sx={{ flex: 1, display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', gap: '12px 20px', p: '12px 16px 16px' }}>
         <SessionTree
           sessions={[...byId.values()]}
+          links={links}
+          onLink={(childId, parentId) => api.link(childId, parentId).catch(() => {})}
           state={state}
           dispatch={dispatch}
           dnd={dnd}

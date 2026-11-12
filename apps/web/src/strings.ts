@@ -93,5 +93,8 @@ export const t = {
   elapsed: '경과',
   parentAgent: '상위',
   session: '세션',
+  group: '묶음',
+  groupAction: '묶기',
+  toTop: '최상위로',
   notice: { interrupted: '중단됨', cleared: '새 대화', compacted: '대화 요약', api_error: 'API 오류' } as Record<string, string>,
 } as const;

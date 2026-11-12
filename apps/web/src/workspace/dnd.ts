@@ -15,7 +15,7 @@ export function makeDnd(state: WorkspaceState, dispatch: (action: Action) => voi
   const isOver = (target: DropTarget) => {
     const over = state.over;
     if (!over || over.type !== target.type) return false;
-    return over.type !== 'pane' || target.type !== 'pane' || over.id === target.id;
+    return !('id' in over) || !('id' in target) || over.id === target.id;
   };
   return {
     dragging: state.drag,

@@ -1,16 +1,31 @@
-import { Box, Button, ButtonBase, IconButton, Tooltip, Typography } from '@mui/material';
-import type { AgentInfo, SessionInfo } from '@agenthouse/protocol';
+import { Box, Button, ButtonBase, IconButton, Menu, MenuItem, Tooltip, Typography } from '@mui/material';
+import { useState } from 'react';
+import type { AgentInfo, SessionInfo, SessionLink } from '@agenthouse/protocol';
 import { t } from '../strings';
 import { v } from '../theme/tokens';
 import { agentRows, SHOWN_FINISHED } from '../workspace/agents';
 import type { Dnd } from '../workspace/dnd';
 import type { Action, WorkspaceState } from '../workspace/state';
+import { sessionTree, type SessionNode } from '../workspace/tree';
 import { AgentSubtitle, agentDetails, agentTitle, Details, SessionSubtitle, sessionDetails } from './Details';
-import { ChevronIcon, Grip, PlusIcon } from './icons';
+import { ChevronIcon, Grip, LinkIcon, PlusIcon } from './icons';
 import { AgentStatusIcon, StatusIcon } from './StatusIcon';
 
 // Each level of nesting moves a row this far in.
 const INDENT = 18;
+
+const smallButton = { minHeight: 28, px: 1.5, fontSize: 12 } as const;
+
+/** The corner line in front of a nested row. */
+function Connector() {
+  return (
+    <Box
+      component="span"
+      aria-hidden
+      sx={{ flex: 'none', width: 8, height: 16, mt: '-10px', borderLeft: `1.5px solid ${v.outline}`, borderBottom: `1.5px solid ${v.outline}`, borderBottomLeftRadius: '5px' }}
+    />
+  );
+}
 
 interface AgentRowProps {
   session: SessionInfo;
@@ -47,6 +62,7 @@ function AgentRow({ session, agent, depth, shown, state, dispatch, dnd }: AgentR
         }}
       >
         <Grip className="ah-grip" />
+        <Connector />
         <AgentStatusIcon agent={agent} />
         <ButtonBase
           onClick={() => dispatch({ type: 'open', sessionId: session.id, agentId: agent.id })}
@@ -67,8 +83,8 @@ function AgentRow({ session, agent, depth, shown, state, dispatch, dnd }: AgentR
   );
 }
 
-/** A session's sub-agents as nested rows; finished ones fold away when there are many. */
-function AgentRows({ session, state, dispatch, dnd }: Omit<AgentRowProps, 'agent' | 'depth' | 'shown'>) {
+/** A session's sub-agents as nested rows below it; finished ones fold away when there are many. */
+function AgentRows({ session, base, state, dispatch, dnd }: Omit<AgentRowProps, 'agent' | 'depth' | 'shown'> & { base: number }) {
   const allKey = `${session.id}#agents`;
   const all = Boolean(state.rowOpen[allKey]);
   const { rows, folded } = agentRows(session.agents, all);
@@ -77,13 +93,13 @@ function AgentRows({ session, state, dispatch, dnd }: Omit<AgentRowProps, 'agent
   return (
     <Box role="group" aria-label={`${session.title} ${t.subagent}`}>
       {rows.map(({ agent, depth }) => (
-        <AgentRow key={agent.id} session={session} agent={agent} depth={depth} shown={shown.has(agent.id)} state={state} dispatch={dispatch} dnd={dnd} />
+        <AgentRow key={agent.id} session={session} agent={agent} depth={base + depth} shown={shown.has(agent.id)} state={state} dispatch={dispatch} dnd={dnd} />
       ))}
       {(folded > 0 || (all && finished > SHOWN_FINISHED)) && (
         <ButtonBase
           onClick={() => dispatch({ type: 'toggleRow', id: allKey })}
           aria-expanded={all}
-          sx={{ minHeight: 28, ml: `${30 + INDENT}px`, px: '6px', borderRadius: '6px', fontSize: 12, color: v.on2, '&:hover': { bgcolor: v.surface2 } }}
+          sx={{ minHeight: 28, ml: `${30 + (base + 1) * INDENT}px`, px: '6px', borderRadius: '6px', fontSize: 12, color: v.on2, '&:hover': { bgcolor: v.surface2 } }}
         >
           {folded > 0 ? t.finishedAgents(folded) : t.foldAgents}
         </ButtonBase>
@@ -92,29 +108,166 @@ function AgentRows({ session, state, dispatch, dnd }: Omit<AgentRowProps, 'agent
   );
 }
 
+/** "묶기" without dragging: the sessions at the top this one can go under. */
+function GroupMenu({ session, candidates, onLink }: { session: SessionInfo; candidates: SessionInfo[]; onLink: Props['onLink'] }) {
+  const [anchor, setAnchor] = useState<HTMLElement | null>(null);
+  return (
+    <>
+      <Button size="small" color="inherit" aria-haspopup="menu" onClick={(event) => setAnchor(event.currentTarget)} sx={smallButton}>
+        {t.groupAction}
+      </Button>
+      <Menu anchorEl={anchor} open={Boolean(anchor)} onClose={() => setAnchor(null)}>
+        {candidates.map((parent) => (
+          <MenuItem
+            key={parent.id}
+            onClick={() => {
+              setAnchor(null);
+              onLink(session.id, parent.id);
+            }}
+            sx={{ fontSize: 13 }}
+          >
+            {parent.title}
+          </MenuItem>
+        ))}
+      </Menu>
+    </>
+  );
+}
+
+interface BranchProps {
+  node: SessionNode;
+  depth: number;
+  /** Sessions at the top: where a session can be placed. */
+  tops: SessionInfo[];
+  shown: Set<string>;
+  byId: Map<string, SessionInfo>;
+  state: WorkspaceState;
+  dispatch: (action: Action) => void;
+  dnd: Dnd;
+  onEnd: (id: string) => void;
+  onRemove: (id: string) => void;
+  onLink: Props['onLink'];
+}
+
+/** A session row, what is under it (its sub-agents, the sessions placed under it), and the choice when one is dropped on it. */
+function SessionBranch(props: BranchProps) {
+  const { node, depth, tops, shown, byId, state, dispatch, dnd, onEnd, onRemove, onLink } = props;
+  const { session, link } = node;
+  const open = Boolean(state.rowOpen[session.id]);
+  const dragged = dnd.dragging?.kind === 'session' && dnd.dragging.id === session.id;
+  const nest = { type: 'nest' as const, id: session.id };
+  const over = dnd.isOver(nest);
+  const parent = link ? byId.get(link.parentId) : undefined;
+  const pending = state.pending?.parentId === session.id ? state.pending : null;
+  const placing = pending ? byId.get(pending.childId) : undefined;
+  const candidates = tops.filter((s) => s.id !== session.id);
+  const details = sessionDetails(session);
+  if (parent) details.splice(1, 0, { k: t.group, v: parent.title });
+  return (
+    <Box>
+      <Box
+        className="ah-row"
+        draggable
+        onDragStart={dnd.start({ kind: 'session', id: session.id })}
+        onDragOver={dnd.over(nest)}
+        onDrop={dnd.drop(nest)}
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 1,
+          minHeight: 44,
+          p: `2px 4px 2px ${4 + depth * INDENT}px`,
+          borderRadius: '10px',
+          bgcolor: over ? v.dropBg : shown.has(session.id) ? v.surface : 'transparent',
+          boxShadow: over ? `inset 0 0 0 2px ${v.primary}` : 'none',
+          opacity: dragged ? 0.45 : 1,
+          cursor: 'grab',
+        }}
+      >
+        <Grip className="ah-grip" />
+        {depth > 0 && <Connector />}
+        <StatusIcon status={session.status} />
+        <ButtonBase
+          onClick={() => dispatch({ type: 'open', sessionId: session.id })}
+          aria-label={`${session.title} 열기`}
+          sx={{ flex: 1, minWidth: 0, flexDirection: 'column', alignItems: 'flex-start', textAlign: 'left', py: '3px', borderRadius: '6px' }}
+        >
+          <Typography noWrap sx={{ maxWidth: '100%', fontWeight: 500, color: session.state === 'exited' ? v.on2 : v.on }}>
+            {session.title}
+          </Typography>
+          <SessionSubtitle session={session} />
+        </ButtonBase>
+        {link && <LinkIcon role="img" aria-label={t.group} size={14} style={{ flex: 'none', color: v.on2 }} />}
+        <IconButton aria-label={`${session.title} ${t.details}`} aria-expanded={open} onClick={() => dispatch({ type: 'toggleRow', id: session.id })} sx={{ width: 36, height: 36, color: v.on2 }}>
+          <ChevronIcon open={open} size={16} />
+        </IconButton>
+      </Box>
+      {open && (
+        <Details items={details} inset={22 + depth * INDENT}>
+          {link ? (
+            <Button size="small" color="inherit" onClick={() => onLink(session.id, null)} sx={smallButton}>
+              {t.toTop}
+            </Button>
+          ) : (
+            !node.children.length && candidates.length > 0 && <GroupMenu session={session} candidates={candidates} onLink={onLink} />
+          )}
+          {session.state === 'running' ? (
+            <Button size="small" color="inherit" onClick={() => onEnd(session.id)} sx={{ ...smallButton, color: v.error }}>
+              {t.endSession}
+            </Button>
+          ) : (
+            <Button size="small" color="inherit" onClick={() => onRemove(session.id)} sx={smallButton}>
+              {t.removeSession}
+            </Button>
+          )}
+        </Details>
+      )}
+      {pending && placing && (
+        <Box role="group" aria-label={`${placing.title} → ${session.title}`} sx={{ display: 'flex', alignItems: 'center', gap: '6px', m: `0 4px 6px ${22 + depth * INDENT}px` }}>
+          <Button
+            size="small"
+            onClick={() => {
+              onLink(pending.childId, session.id);
+              dispatch({ type: 'settleLink' });
+            }}
+            sx={{ ...smallButton, minHeight: 32, px: 1.75, bgcolor: v.surface2, color: v.on, fontWeight: 500, '&:hover': { bgcolor: v.surface3 } }}
+          >
+            {t.groupAction}
+          </Button>
+          <Button size="small" color="inherit" onClick={() => dispatch({ type: 'settleLink' })} sx={{ ...smallButton, minHeight: 32, color: v.on2 }}>
+            {t.cancel}
+          </Button>
+        </Box>
+      )}
+      {session.agents.length > 0 && <AgentRows session={session} base={depth} state={state} dispatch={dispatch} dnd={dnd} />}
+      {node.children.map((child) => (
+        <SessionBranch key={child.session.id} {...props} node={child} depth={depth + 1} />
+      ))}
+    </Box>
+  );
+}
+
 interface Props {
   sessions: SessionInfo[];
+  links: SessionLink[];
   state: WorkspaceState;
   dispatch: (action: Action) => void;
   dnd: Dnd;
   onNew: () => void;
   onEnd: (id: string) => void;
   onRemove: (id: string) => void;
+  /** Places a session under another one, or back at the top (null). */
+  onLink: (childId: string, parentId: string | null) => void;
 }
 
-function folderName(cwd: string): string {
-  return cwd.split(/[\\/]/).filter(Boolean).pop() ?? cwd;
-}
-
-/** Sessions grouped by working folder, in the order they were started. */
-function groupByFolder(sessions: SessionInfo[]): Array<{ cwd: string; label: string; sessions: SessionInfo[] }> {
-  const groups = new Map<string, SessionInfo[]>();
-  for (const session of sessions) groups.set(session.cwd, [...(groups.get(session.cwd) ?? []), session]);
-  return [...groups].map(([cwd, list]) => ({ cwd, label: folderName(cwd), sessions: list }));
-}
-
-export function SessionTree({ sessions, state, dispatch, dnd, onNew, onEnd, onRemove }: Props) {
+export function SessionTree({ sessions, links, state, dispatch, dnd, onNew, onEnd, onRemove, onLink }: Props) {
+  const groups = sessionTree(sessions, links);
   const shown = new Set(state.panes.filter((p) => !p.agentId).map((p) => p.sessionId));
+  const byId = new Map(sessions.map((s) => [s.id, s]));
+  const tops = groups.flatMap((g) => g.nodes.map((n) => n.session));
+  const root = { type: 'root' as const };
+  const toTop = dnd.canDrop(root);
+  const branch = { tops, shown, byId, state, dispatch, dnd, onEnd, onRemove, onLink };
 
   return (
     <Box component="aside" aria-label={t.sessions} sx={{ flex: '1 1 272px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: '2px' }}>
@@ -131,72 +284,42 @@ export function SessionTree({ sessions, state, dispatch, dnd, onNew, onEnd, onRe
         </Tooltip>
       </Box>
 
-      {groupByFolder(sessions).map((group) => (
+      {groups.map((group) => (
         <Box key={group.cwd} role="group" aria-label={group.label}>
           <Tooltip title={group.cwd} placement="right">
             <Typography sx={{ p: '10px 6px 4px', fontSize: 12, lineHeight: '16px', color: v.on2 }}>{group.label}</Typography>
           </Tooltip>
-          {group.sessions.map((session) => {
-            const open = Boolean(state.rowOpen[session.id]);
-            const dragged = dnd.dragging?.kind === 'session' && dnd.dragging.id === session.id;
-            return (
-              <Box key={session.id}>
-                <Box
-                  className="ah-row"
-                  draggable
-                  onDragStart={dnd.start({ kind: 'session', id: session.id })}
-                  sx={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 1,
-                    minHeight: 44,
-                    p: '2px 4px',
-                    borderRadius: '10px',
-                    bgcolor: shown.has(session.id) ? v.surface : 'transparent',
-                    opacity: dragged ? 0.45 : 1,
-                    cursor: 'grab',
-                  }}
-                >
-                  <Grip className="ah-grip" />
-                  <StatusIcon status={session.status} />
-                  <ButtonBase
-                    onClick={() => dispatch({ type: 'open', sessionId: session.id })}
-                    aria-label={`${session.title} 열기`}
-                    sx={{ flex: 1, minWidth: 0, flexDirection: 'column', alignItems: 'flex-start', textAlign: 'left', py: '3px', borderRadius: '6px' }}
-                  >
-                    <Typography noWrap sx={{ maxWidth: '100%', fontWeight: 500, color: session.state === 'exited' ? v.on2 : v.on }}>
-                      {session.title}
-                    </Typography>
-                    <SessionSubtitle session={session} />
-                  </ButtonBase>
-                  <IconButton
-                    aria-label={`${session.title} ${t.details}`}
-                    aria-expanded={open}
-                    onClick={() => dispatch({ type: 'toggleRow', id: session.id })}
-                    sx={{ width: 36, height: 36, color: v.on2 }}
-                  >
-                    <ChevronIcon open={open} size={16} />
-                  </IconButton>
-                </Box>
-                {open && (
-                  <Details items={sessionDetails(session)} inset={22}>
-                    {session.state === 'running' ? (
-                      <Button size="small" color="inherit" onClick={() => onEnd(session.id)} sx={{ minHeight: 28, px: 1.5, fontSize: 12, color: v.error }}>
-                        {t.endSession}
-                      </Button>
-                    ) : (
-                      <Button size="small" color="inherit" onClick={() => onRemove(session.id)} sx={{ minHeight: 28, px: 1.5, fontSize: 12 }}>
-                        {t.removeSession}
-                      </Button>
-                    )}
-                  </Details>
-                )}
-                {session.agents.length > 0 && <AgentRows session={session} state={state} dispatch={dispatch} dnd={dnd} />}
-              </Box>
-            );
-          })}
+          {group.nodes.map((node) => (
+            <SessionBranch key={node.session.id} node={node} depth={0} {...branch} />
+          ))}
         </Box>
       ))}
+
+      {toTop && (
+        // While a placed session is dragged: drop it here to bring it back to the top.
+        <Box
+          onDragOver={dnd.over(root)}
+          onDrop={(event) => {
+            const moving = dnd.dragging;
+            dnd.drop(root)(event);
+            if (moving?.kind === 'session') onLink(moving.id, null);
+          }}
+          sx={{
+            mt: '6px',
+            minHeight: 44,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderRadius: '10px',
+            border: '1.5px dashed',
+            borderColor: dnd.isOver(root) ? v.primary : v.outline,
+            bgcolor: dnd.isOver(root) ? v.dropBg : 'transparent',
+            color: v.on2,
+          }}
+        >
+          {t.toTop}
+        </Box>
+      )}
     </Box>
   );
 }
