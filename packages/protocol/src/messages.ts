@@ -1,4 +1,4 @@
-import type { AccountLimits, SessionInfo, ThemeMode } from './session';
+import type { AccountLimits, SessionInfo, SessionLink, ThemeMode } from './session';
 
 /** Browser → server on /ws/session */
 export type TerminalClientMessage =
@@ -16,7 +16,10 @@ export type TerminalServerMessage =
   | { type: 'exit'; code: number; signal: number | null };
 
 /** Server → browser on /ws/events */
-export type EventServerMessage = { type: 'sessions'; sessions: SessionInfo[] } | { type: 'limits'; limits: AccountLimits[] };
+export type EventServerMessage =
+  | { type: 'sessions'; sessions: SessionInfo[] }
+  | { type: 'limits'; limits: AccountLimits[] }
+  | { type: 'links'; links: SessionLink[] };
 
 export interface ComposeRequest {
   text: string;

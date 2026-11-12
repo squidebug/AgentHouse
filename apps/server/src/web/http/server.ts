@@ -7,9 +7,10 @@ import { EnvService } from '../doctor';
 import { HostUnavailableError, type HostClient } from '../host-client';
 import { HostRequestError } from '../../shared/host-protocol';
 import { Conversations } from '../conversations';
+import { LinkError } from '../links';
 import { SessionManager } from '../manager';
 import { AccessControl } from './access';
-import { ComposeBody, LaunchBody, TerminalClient } from './schemas';
+import { ComposeBody, LaunchBody, LinkBody, TerminalClient } from './schemas';
 import { serveStatic } from './static';
 
 export interface ServerOptions {
@@ -165,8 +166,10 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
   };
   const broadcastSessions = () => broadcast({ type: 'sessions', sessions: manager.list() });
   const broadcastLimits = () => broadcast({ type: 'limits', limits: manager.limits() });
+  const broadcastLinks = () => broadcast({ type: 'links', links: manager.links() });
   manager.on('change', broadcastSessions);
   manager.on('limits', broadcastLimits);
+  manager.on('links', broadcastLinks);
 
   async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
     if (req.method !== 'GET' && !access.originAllowed(req)) throw new HttpError(403, '허용되지 않은 출처입니다.');
@@ -197,6 +200,17 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
         const detail = agent === undefined ? null : await conversations.detail(session.id, parts[4], agent);
         if (!detail) throw new HttpError(404, '찾을 수 없습니다.');
         send(res, 200, detail);
+        return;
+      }
+      // Places the session under another one (grouping), or back at the top.
+      if (parts[3] === 'link' && parts.length === 4 && req.method === 'PUT') {
+        const body = parse(LinkBody, await readJson(req));
+        try {
+          send(res, 200, { links: manager.link(session.id, body.parentId, body.kind ?? 'group') });
+        } catch (error) {
+          if (error instanceof LinkError) throw new HttpError(error.code === 'NOT_FOUND' ? 404 : 400, error.message, error.code);
+          throw error;
+        }
         return;
       }
       if (parts[3] === 'compose' && req.method === 'POST') {
@@ -291,8 +305,10 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
         ws.on('close', () => eventClients.delete(ws));
         const sessions: EventServerMessage = { type: 'sessions', sessions: manager.list() };
         const limits: EventServerMessage = { type: 'limits', limits: manager.limits() };
+        const links: EventServerMessage = { type: 'links', links: manager.links() };
         ws.send(JSON.stringify(sessions));
         ws.send(JSON.stringify(limits));
+        ws.send(JSON.stringify(links));
       });
       return;
     }
@@ -325,6 +341,7 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
     async close() {
       manager.off('change', broadcastSessions);
       manager.off('limits', broadcastLimits);
+      manager.off('links', broadcastLinks);
       manager.close();
       conversations.close();
       for (const ws of conversationSockets) ws.terminate();

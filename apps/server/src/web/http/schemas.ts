@@ -20,6 +20,11 @@ export const ComposeBody = z.object({
   submit: z.boolean().optional(),
 });
 
+export const LinkBody = z.object({
+  parentId: z.string().min(1).max(64).nullable(),
+  kind: z.enum(['group']).optional(),
+});
+
 export const TerminalClient = z.discriminatedUnion('type', [
   z.object({ type: z.literal('input'), data: z.string().max(1_000_000), binary: z.boolean().optional() }),
   z.object({ type: z.literal('resize'), cols: z.number().int().min(1).max(1000), rows: z.number().int().min(1).max(500) }),

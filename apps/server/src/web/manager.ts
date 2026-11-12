@@ -2,13 +2,14 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { stat } from 'node:fs/promises';
 import path from 'node:path';
-import type { AccountLimits, ComposeRequest, LaunchOptions, SessionInfo, Vendor } from '@agenthouse/protocol';
+import type { AccountLimits, ComposeRequest, LaunchOptions, LinkKind, SessionInfo, SessionLink, Vendor } from '@agenthouse/protocol';
 import { buildLaunch, LaunchError } from './cli/launch';
 import { EnvService, INSTALL_COMMAND } from './doctor';
 import type { HostClient } from './host-client';
 import { HostRequestError, type CloseResult, type ComposeOutcome } from '../shared/host-protocol';
 import { removeTree } from '../shared/state';
 import { childEnv } from '../shared/child-env';
+import { LinkStore, linksFile } from './links';
 import { registryFile, SessionRegistry } from './registry';
 import { LimitsLog, stillValid } from './usage-log';
 
@@ -56,11 +57,13 @@ async function resolveCwd(requested: string | undefined, fallback: string): Prom
 /**
  * The web server's side of the sessions: it prepares each launch (folder, CLI,
  * flags, environment) and hands it to the session host, which runs it. It also
- * keeps the session registry and the usage log, so the list and the last plan
- * usage outlive a host restart.
+ * keeps the session registry, the usage log and the links between sessions,
+ * so the list, the tree and the last plan usage outlive a host restart.
+ * 'links' fires when the links change.
  */
 export class SessionManager extends EventEmitter {
   private readonly registry: SessionRegistry;
+  private readonly linkStore: LinkStore;
   private readonly usage: LimitsLog;
   /** Plan usage from the log, until sessions report again. */
   private readonly logged: AccountLimits[];
@@ -74,9 +77,12 @@ export class SessionManager extends EventEmitter {
     this.usage = new LimitsLog(path.join(host.stateDir, 'usage'));
     this.logged = this.usage.last();
     this.registry.record(host.sessions());
+    this.linkStore = new LinkStore(linksFile(host.stateDir));
+    this.linkStore.prune(this.known);
     this.onChange = () => {
       this.registry.record(host.sessions());
       this.emit('change');
+      if (this.linkStore.prune(this.known)) this.emit('links');
     };
     this.onLimits = () => {
       this.usage.append(host.limits());
@@ -145,6 +151,19 @@ export class SessionManager extends EventEmitter {
     }
   }
 
+  private readonly known = (id: string) => Boolean(this.get(id));
+
+  /** Which session the user placed under which. */
+  links(): SessionLink[] {
+    return this.linkStore.list();
+  }
+
+  /** Places a session under another, or back at the top with null. Throws LinkError for what the tree cannot show. */
+  link(childId: string, parentId: string | null, kind: LinkKind = 'group'): SessionLink[] {
+    if (this.linkStore.set(childId, parentId, kind, this.known)) this.emit('links');
+    return this.links();
+  }
+
   get(id: string): SessionInfo | undefined {
     return this.options.host.get(id) ?? this.registry.get(id);
   }
@@ -160,6 +179,8 @@ export class SessionManager extends EventEmitter {
     const result = this.options.host.get(id) ? await this.options.host.closeSession(id) : { exited: true, stillAlive: false };
     this.registry.remove(id);
     this.emit('change');
+    // Sessions under it go back to the top.
+    if (this.linkStore.prune(this.known)) this.emit('links');
     return result;
   }
 

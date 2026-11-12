@@ -120,6 +120,19 @@ export interface AgentInfo {
   transcriptPath: string | null;
 }
 
+/**
+ * A session placed under another in the tree. `group` only shows it there;
+ * `delegate` (later) also lets the parent hand it work. One level: a parent
+ * is never under another session itself.
+ */
+export type LinkKind = 'group' | 'delegate';
+
+export interface SessionLink {
+  childId: string;
+  parentId: string;
+  kind: LinkKind;
+}
+
 export interface SessionInfo {
   id: string;
   vendor: SessionVendor;
