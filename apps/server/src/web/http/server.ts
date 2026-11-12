@@ -309,10 +309,15 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
       const agent = agentParam(url);
       if (agent === undefined || !conversations.available(id, agent)) return reject(404);
       wss.handleUpgrade(req, socket, head, (ws) => {
+        // turns=only: the turns without the entries, for a view that only shows when the session worked.
+        const turnsOnly = url.searchParams.get('turns') === 'only';
         const unsubscribe = conversations.subscribe(
           id,
           (message) => {
-            if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(message));
+            if (ws.readyState !== ws.OPEN) return;
+            if (!turnsOnly) return ws.send(JSON.stringify(message));
+            if (message.type === 'update' && !message.turns.length) return;
+            ws.send(JSON.stringify({ ...message, entries: [] }));
           },
           agent,
         );

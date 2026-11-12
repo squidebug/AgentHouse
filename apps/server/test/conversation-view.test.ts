@@ -71,6 +71,13 @@ describe('conversation view', () => {
       [['fake-model', 2, 50, 120]],
     );
 
+    // turns=only: when the session worked, without the conversation itself (the flow view).
+    const light = await openSocket(app.port, `/ws/conversation?id=${session.id}&turns=only`, headers);
+    assert.ok(await waitFor(() => light.messages.some((m) => m.type === 'reset'), 3000));
+    const copy = light.messages.find((m) => m.type === 'reset')!;
+    assert.deepEqual([(copy.entries as unknown[]).length, (copy.turns as unknown[]).length], [0, 1], 'the turns, no entries');
+    light.ws?.close();
+
     const detail = await request(app.port, 'GET', `/api/sessions/${session.id}/conversation/${encodeURIComponent(tool!.id)}`, { headers });
     assert.equal(detail.status, 200);
     assert.deepEqual([(detail.json as EntryDetail).text, ((detail.json as EntryDetail).input as { command?: string }).command], ['fake-tool-output', 'echo fake-tool-output']);
