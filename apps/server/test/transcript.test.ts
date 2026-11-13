@@ -78,6 +78,40 @@ describe('conversation from a Claude Code transcript', () => {
     assert.equal(error?.kind === 'notice' && error.text, 'Login expired · Please run /login');
   });
 
+  test('a prompt that only mentions a command tag is a prompt', () => {
+    const records = [
+      prompt('Why does <command-name>/clear</command-name> start a new file?'),
+      assistant('msg_1', text('Because it starts a new conversation.')),
+      prompt('And what prints <local-command-stdout>ok</local-command-stdout>?'),
+      prompt('<command-message>model</command-message>\n<command-name>/model</command-name>\n<command-args></command-args>', { origin: undefined }),
+    ];
+    const { entries, turns } = build(records).snapshot();
+    assert.deepEqual(kinds(entries), ['prompt', 'text', 'prompt', 'command']);
+    assert.equal(entries[0]?.kind === 'prompt' && entries[0].text, 'Why does <command-name>/clear</command-name> start a new file?');
+    assert.equal(turns.length, 2, 'each prompt starts its turn');
+  });
+
+  test('a long diff, a long list and a deep value are cut, and say so', () => {
+    const builder = build([prompt('Rewrite it'), assistant('msg_1', toolUse('toolu_1', 'Edit', { file_path: 'a.ts', old_string: 'a', new_string: 'b' }))]);
+    const tool = builder.snapshot().entries.find((e) => e.kind === 'tool')!;
+    const use = assistant('msg_1', toolUse('toolu_1', 'Edit', { file_path: 'a.ts', old_string: 'a', new_string: 'b' }));
+    const lines = (count: number) => Array.from({ length: count }, (_, i) => `+line ${i}`);
+    const patched = (hunks: Array<{ lines: string[] }>) => toolResult('toolu_1', 'updated', { toolUseResult: { structuredPatch: hunks.map((hunk, i) => ({ oldStart: i, newStart: i, ...hunk })) } });
+    const short = entryDetail(tool, [use, patched([{ lines: lines(10) }])]);
+    assert.deepEqual([short.patch?.[0]?.lines.length, short.truncated], [10, false]);
+    const long = entryDetail(tool, [use, patched([{ lines: lines(1500) }, { lines: lines(1500) }, { lines: lines(5) }])]);
+    assert.deepEqual(long.patch?.map((hunk) => hunk.lines.length), [1500, 500], 'two thousand lines in all; the hunk past them is left out');
+    assert.equal(long.truncated, true);
+
+    let deep: unknown = 'bottom';
+    for (let i = 0; i < 20; i += 1) deep = { deeper: deep };
+    const nested = entryDetail(tool, [assistant('msg_1', toolUse('toolu_1', 'Edit', { list: Array.from({ length: 600 }, (_, i) => i), deep })), null]);
+    const input = nested.input as { list: number[]; deep: unknown };
+    assert.equal(input.list.length, 500);
+    assert.ok(!JSON.stringify(input.deep).includes('bottom'), 'the deep end is not sent');
+    assert.equal(nested.truncated, true);
+  });
+
   test('a sub-agent call becomes its own block with its type and id', () => {
     const records = [
       prompt('Look around'),

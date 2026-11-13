@@ -25,6 +25,10 @@ const TEXT_CHARS = 100_000;
 const SUMMARY_CHARS = 300;
 const NOTICE_CHARS = 500;
 const DETAIL_CHARS = 200_000;
+const DETAIL_ITEMS = 500;
+const DETAIL_DEPTH = 6;
+// Each line of a diff is an element on the page: 20,000 of them held it up for two seconds.
+const PATCH_LINES = 2000;
 
 /** Byte range of one JSONL line in its transcript file. */
 export type LineRange = [start: number, end: number];
@@ -276,14 +280,21 @@ export class ConversationBuilder {
     this.put({ kind: 'notice', id: this.key(`interrupt-${(this.serial += 1)}`), turn: this.turnIndex(), at, notice: 'interrupted', text: '' });
   }
 
+  /**
+   * A slash command or its output: a record that is nothing but Claude's own
+   * tags, so it begins with one. A prompt that only mentions such a tag (asking
+   * about a transcript, say) is a prompt.
+   */
   private command(text: string, at: number | null, line: LineRange): boolean {
-    const name = tag(text, 'command-name');
+    const start = text.trimStart();
+    const name = start.startsWith('<command-name>') || start.startsWith('<command-message>') ? tag(text, 'command-name') : null;
     if (name !== null) {
       const id = this.key(`command-${(this.serial += 1)}`);
       this.put({ kind: 'command', id, turn: this.turnIndex(), at, name: name.trim(), args: (tag(text, 'command-args') ?? '').trim(), output: '' }, this.source(line));
       this.lastCommand = id;
       return true;
     }
+    if (!start.startsWith('<local-command-stdout>') && !start.startsWith('<local-command-stderr>')) return false;
     const output = tag(text, 'local-command-stdout') ?? tag(text, 'local-command-stderr');
     if (output === null) return false;
     const command = this.lastCommand ? this.entries.get(this.lastCommand) : undefined;
@@ -452,14 +463,22 @@ export class ConversationBuilder {
   }
 }
 
+/** A value to show, cut where it is too long, too many or too deep; `state.truncated` says that something was left out. */
 function clip(value: unknown, state: { truncated: boolean }, depth = 0): unknown {
   if (typeof value === 'string') {
     if (value.length <= DETAIL_CHARS) return value;
     state.truncated = true;
     return value.slice(0, DETAIL_CHARS);
   }
-  if (depth > 6 || !value || typeof value !== 'object') return value;
-  if (Array.isArray(value)) return value.slice(0, 500).map((item) => clip(item, state, depth + 1));
+  if (!value || typeof value !== 'object') return value;
+  if (depth > DETAIL_DEPTH) {
+    state.truncated = true;
+    return '…';
+  }
+  if (Array.isArray(value)) {
+    if (value.length > DETAIL_ITEMS) state.truncated = true;
+    return value.slice(0, DETAIL_ITEMS).map((item) => clip(item, state, depth + 1));
+  }
   return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, clip(item, state, depth + 1)]));
 }
 
@@ -481,12 +500,19 @@ export function entryDetail(entry: ConversationEntry, records: unknown[]): Entry
       const report = records.map(obj).map(reportIn).find(Boolean);
       const launched = structured?.status === 'async_launched' || structured?.isAsync === true;
       const output = report?.result ?? (result && !launched ? resultText(result.content) : null);
+      let room = PATCH_LINES;
       const patch = Array.isArray(structured?.structuredPatch)
-        ? (structured.structuredPatch as unknown[]).map(obj).filter(Boolean).map((hunk) => ({
-            oldStart: num(hunk!.oldStart),
-            newStart: num(hunk!.newStart),
-            lines: Array.isArray(hunk!.lines) ? (hunk!.lines as unknown[]).filter((l): l is string => typeof l === 'string').map(text) : [],
-          }))
+        ? (structured.structuredPatch as unknown[])
+            .map(obj)
+            .filter(Boolean)
+            .flatMap((hunk) => {
+              const all = Array.isArray(hunk!.lines) ? (hunk!.lines as unknown[]).filter((l): l is string => typeof l === 'string') : [];
+              const lines = all.slice(0, room).map(text);
+              if (lines.length < all.length) state.truncated = true;
+              room -= lines.length;
+              // A hunk with no room left for any of its lines is left out whole.
+              return lines.length || !all.length ? [{ oldStart: num(hunk!.oldStart), newStart: num(hunk!.newStart), lines }] : [];
+            })
         : undefined;
       return {
         input: clip(use?.input ?? null, state),
