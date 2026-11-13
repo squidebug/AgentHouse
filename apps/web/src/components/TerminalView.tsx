@@ -76,9 +76,13 @@ export function TerminalView({ sessionId, mode, windowsBuild, onFocus, autoFocus
       term.unicode.activeVersion = '11';
       term.open(element);
       try {
-        term.loadAddon(new WebglAddon());
+        const webgl = new WebglAddon();
+        // The GPU can take the context away (the PC slept, a driver restarted) and the canvas then
+        // stays blank. Without the addon xterm draws with its DOM renderer, from the same buffer.
+        webgl.onContextLoss(() => webgl.dispose());
+        term.loadAddon(webgl);
       } catch {
-        // DOM renderer fallback (e.g. no WebGL or the context limit is reached)
+        // DOM renderer fallback (no WebGL)
       }
       termRef.current = term;
 
