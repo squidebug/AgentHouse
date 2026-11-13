@@ -11,6 +11,7 @@ import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { Boundary } from './components/Boundary';
 import { LoginGate } from './components/LoginGate';
+import { StartupCheck } from './components/StartupCheck';
 import { t } from './strings';
 import { theme } from './theme/theme';
 import { cssVars, TOKENS } from './theme/tokens';
@@ -56,7 +57,9 @@ createRoot(root, {
       <GlobalStyles styles={globalStyles} />
       <Boundary fallback={failed}>
         <LoginGate>
-          <App />
+          <StartupCheck>
+            <App />
+          </StartupCheck>
         </LoginGate>
       </Boundary>
     </ThemeProvider>

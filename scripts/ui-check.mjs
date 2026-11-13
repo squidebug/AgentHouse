@@ -67,6 +67,17 @@ try {
   const provoked = (message) => message.location().url.includes('/api/cli/') && /status of 400/.test(message.text());
   page.on('console', (message) => message.type() === 'error' && !provoked(message) && errors.push(message.text()));
   page.on('pageerror', (error) => errors.push(error.message));
+  const workspace = page.getByRole('heading', { name: 'AgentHouse' });
+  // Past the start screen: straight on when the environment is fine, else through 계속 (this machine may lack a CLI).
+  const enter = async (shot) => {
+    const proceed = page.getByRole('button', { name: '계속' });
+    await workspace.or(proceed).first().waitFor({ timeout: 20_000 });
+    if (await proceed.isVisible()) {
+      if (shot) await page.screenshot({ path: path.join(out, `${shot}.png`) });
+      await proceed.click();
+    }
+    await workspace.waitFor();
+  };
   // Out of the way of hover styles and tooltips, after animations settle.
   const settle = async () => {
     await page.mouse.move(1, 899);
@@ -74,7 +85,7 @@ try {
     await page.waitForTimeout(700);
   };
   await page.goto(url);
-  await page.getByRole('heading', { name: 'AgentHouse' }).waitFor();
+  await enter('startup-first-dark');
   check(!new URL(page.url()).searchParams.has('code'), 'the login code is spent and leaves the address');
 
   // A browser without a token gets the login page and the command for a new address; a spent address says so.
@@ -95,10 +106,24 @@ try {
     await stranger.close();
   }
 
+  // The start screen: a loading bar while the environment is checked (held back here so it can be seen).
+  await page.route('**/api/env*', async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    // Let go by the unroute below if it came first.
+    await route.continue().catch(() => {});
+  });
+  await page.reload();
+  await page.getByText('환경 점검 중').waitFor();
+  check(await page.getByRole('progressbar').isVisible(), 'the page opens on a loading bar while the environment is checked');
+  await page.screenshot({ path: path.join(out, 'startup-loading-dark.png') });
+  await page.unroute('**/api/env*');
+  await enter();
+
   // The executable a CLI runs, chosen in the environment check: checked by running it, then saved.
   const fakeClaude = installFakeClaude(path.join(scratch, 'fake-claude'), '2.1.400');
+  const openEnvironment = () => page.getByRole('button', { name: '환경 점검' }).click();
   const chooseDialog = page.getByRole('dialog', { name: 'Claude Code 실행 파일' });
-  await page.getByRole('button', { name: '환경 점검' }).click();
+  await openEnvironment();
   await page.getByRole('button', { name: 'Claude Code 실행 파일 변경' }).click();
   await chooseDialog.getByRole('radio', { name: '직접 지정' }).check();
   await chooseDialog.getByRole('textbox', { name: '전체 경로' }).fill(process.execPath);
@@ -112,14 +137,25 @@ try {
   await chooseDialog.waitFor({ state: 'detached' });
   await page.getByText('2.1.400 · 지정함').waitFor();
   check(await page.getByText(fakeClaude).isVisible(), 'the chosen file is the one the environment check shows');
-  // And back to the one the shell runs.
+  await page.keyboard.press('Escape');
+
+  // Gone since: the next start stops, says so, and takes the fix there.
+  rmSync(path.join(scratch, 'fake-claude'), { recursive: true, force: true });
+  await fetch(`${origin}/api/env?refresh=1`, { headers: { authorization: `Bearer ${key}` } });
+  await page.reload();
+  await page.getByText('Claude Code 실행 파일을 쓸 수 없음').waitFor();
+  check(await page.getByRole('button', { name: '계속' }).isVisible(), 'the start screen stops at a chosen file that is gone');
+  await settle();
+  await page.screenshot({ path: path.join(out, 'startup-issues-dark.png') });
+  await page.emulateMedia({ colorScheme: 'light' });
+  await settle();
+  await page.screenshot({ path: path.join(out, 'startup-issues-light.png') });
+  await page.emulateMedia({ colorScheme: 'dark' });
   await page.getByRole('button', { name: 'Claude Code 실행 파일 변경' }).click();
   await chooseDialog.getByRole('radio', { name: /^셸 기본/ }).check();
   await chooseDialog.getByRole('button', { name: '저장' }).click();
-  await chooseDialog.waitFor({ state: 'detached' });
-  await page.getByText('2.1.400 · 지정함').waitFor({ state: 'detached' });
-  check(true, 'back to the shell\'s own');
-  await page.keyboard.press('Escape');
+  await enter();
+  check(true, 'back to the shell\'s own, the start screen lets the workspace in');
 
   const created = await fetch(`${origin}/api/sessions`, {
     method: 'POST',
@@ -216,6 +252,7 @@ try {
   await page.keyboard.press('Control+Backquote');
   await terminalShown();
   await page.reload();
+  await enter();
   await terminalShown();
   await settle();
   await page.screenshot({ path: path.join(out, 'terminal-light.png') });
@@ -298,6 +335,7 @@ try {
   await row('ui-agents').getByRole('img', { name: '묶음' }).waitFor({ timeout: 5000 });
   check((await left('ui-agents')) > (await left('ui-check')), 'a session dropped on another goes under it, marked as grouped');
   await page.reload();
+  await enter();
   await row('ui-agents').getByRole('img', { name: '묶음' }).waitFor({ timeout: 10_000 });
   check(true, 'the group outlives a reload');
   await settle();
