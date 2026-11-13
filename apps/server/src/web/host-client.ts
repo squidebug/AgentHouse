@@ -117,6 +117,16 @@ export async function probeHost(state: HostState): Promise<boolean> {
   return Boolean(link);
 }
 
+/** This protocol's host in the state folder, if one answers: the code it started with and how many sessions it runs. */
+export async function hostSummary(stateDir: string): Promise<{ build: string; running: number } | null> {
+  const state = readState(stateDir);
+  if (!state || !isAlive(state.pid)) return null;
+  const link = await openControl(state, 1500);
+  if (!link) return null;
+  link.ws.close();
+  return { build: link.hello.build, running: link.hello.sessions.filter((s) => s.state === 'running').length };
+}
+
 /** Hosts of other protocol versions that still run (their sessions are not shown). */
 export async function olderHosts(stateDir: string): Promise<number> {
   const others = readAllStates(stateDir).filter((state) => state.protocol !== HOST_PROTOCOL && isAlive(state.pid));

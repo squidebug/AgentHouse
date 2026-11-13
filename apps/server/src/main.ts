@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { findOnPath } from './web/cli/resolve';
+import { doctor } from './web/doctor-command';
 import { HostClient, stopHosts } from './web/host-client';
 import { defaultStateDir } from './shared/state';
 import { createAgentHouseServer } from './web/http/server';
@@ -22,10 +23,12 @@ interface Args {
   allowFake: boolean;
   cwd: string | null;
   stop: boolean;
+  /** `doctor`: check the environment and exit. */
+  doctor: boolean;
 }
 
 function parseArgs(argv: string[]): Args {
-  const args: Args = { port: null, open: false, json: false, devOrigins: [], allowFake: false, cwd: null, stop: false };
+  const args: Args = { port: null, open: false, json: false, devOrigins: [], allowFake: false, cwd: null, stop: false, doctor: false };
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i];
     if (flag === '--port') args.port = Number(argv[++i]);
@@ -35,6 +38,7 @@ function parseArgs(argv: string[]): Args {
     else if (flag === '--allow-fake') args.allowFake = true;
     else if (flag === '--cwd') args.cwd = String(argv[++i]);
     else if (flag === '--stop') args.stop = true;
+    else if (flag === 'doctor') args.doctor = true;
   }
   return args;
 }
@@ -69,6 +73,10 @@ async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   if (args.stop) {
     await stopHost();
+    return;
+  }
+  if (args.doctor) {
+    process.exitCode = await doctor({ stateDir: defaultStateDir(), port: DEFAULT_PORT, stopCommand: 'pnpm stop', installCommand: 'pnpm install', json: args.json });
     return;
   }
   const here = path.dirname(fileURLToPath(import.meta.url));

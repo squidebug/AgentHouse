@@ -19,6 +19,7 @@ pnpm install
 pnpm build
 pnpm start        # prints a login address (http://127.0.0.1:7357/?code=…, good once, for 5 minutes) and opens it; if it already runs, opens a new one for that
 pnpm stop         # ends the server, every session and the session host
+pnpm run doctor   # checks Node, node-pty, the CLIs it would run and their login, hooks, the state folder and the port, without starting anything (`pnpm doctor` is pnpm's own)
 ```
 
 Sessions run in a separate session host, so they keep running when the server stops or restarts, and an open page reconnects by itself. State lives in `~/.agenthouse`: the host's address, a log, per-session files, the session list and the last plan usage. Sessions from before a host restart (or a reboot), and sessions you end, stay listed as ended with their conversation until you remove them (the 50 newest ended ones are kept).

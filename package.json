@@ -14,6 +14,7 @@
     "build": "pnpm --filter @agenthouse/web build && pnpm --filter @agenthouse/server build",
     "start": "node apps/server/dist/main.js --open",
     "stop": "pnpm --filter @agenthouse/server exec tsx src/main.ts --stop",
+    "doctor": "pnpm --filter @agenthouse/server exec tsx src/main.ts doctor",
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm -r --if-present test",
     "licenses:check": "node scripts/check-licenses.mjs",

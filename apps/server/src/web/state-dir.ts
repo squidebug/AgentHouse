@@ -3,7 +3,7 @@
 // permissions of its folder, and a folder outside the user's profile (C:\Temp,
 // a shared drive) may let other accounts in.
 import { execFile } from 'node:child_process';
-import { chmodSync, mkdirSync, statSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -45,14 +45,17 @@ export function windowsOthers(dir: string): Promise<string[] | null> {
  * when it is, else what is wrong. POSIX: it must be the user's, and loses group and
  * other access. Windows: a folder in the user's profile is as private as the
  * profile; one elsewhere must let in no one but the user, SYSTEM and Administrators.
- * A check that cannot run does not stop AgentHouse.
+ * A check that cannot run does not stop AgentHouse. Without `fix` (the doctor) it
+ * changes nothing: a folder not made yet passes, and on POSIX group and other
+ * access is left for the start to drop.
  */
-export async function stateDirProblem(dir: string): Promise<string | null> {
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
+export async function stateDirProblem(dir: string, fix = true): Promise<string | null> {
+  if (fix) mkdirSync(dir, { recursive: true, mode: 0o700 });
+  else if (!existsSync(dir)) return null;
   if (process.platform !== 'win32') {
     const stat = statSync(dir);
     if (typeof process.getuid === 'function' && stat.uid !== process.getuid()) return '다른 계정의 폴더입니다.';
-    if (stat.mode & 0o077) chmodSync(dir, 0o700);
+    if (fix && stat.mode & 0o077) chmodSync(dir, 0o700);
     return null;
   }
   const inside = path.relative(os.homedir(), path.resolve(dir));

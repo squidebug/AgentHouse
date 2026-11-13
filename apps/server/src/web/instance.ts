@@ -60,6 +60,20 @@ export async function runningWebServer(stateDir: string): Promise<(WebServerReco
   return loginUrl ? { ...record, loginUrl } : null;
 }
 
+/** The web server serving this state folder, if one runs and takes its key; unlike runningWebServer, it asks for nothing. */
+export function webServerAnswering(stateDir: string): Promise<WebServerRecord | null> {
+  const record = read(stateDir);
+  if (!record || record.pid === process.pid || !isAlive(record.pid)) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const req = http.get({ host: '127.0.0.1', port: record.port, path: '/api/auth', headers: { authorization: `Bearer ${record.key}` }, timeout: 2000 }, (res) => {
+      res.resume();
+      resolve(res.statusCode === 200 ? record : null);
+    });
+    req.on('timeout', () => req.destroy());
+    req.on('error', () => resolve(null));
+  });
+}
+
 /** Notes this web server for a later start to find; replaced atomically, readable by the user only. */
 export function recordWebServer(stateDir: string, record: Omit<WebServerRecord, 'pid'>): void {
   try {

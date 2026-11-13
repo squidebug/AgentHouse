@@ -27,10 +27,10 @@ export interface ManagerOptions {
 }
 
 // `claude agents --json` (lists sessions as idle, busy or waiting) arrived in 2.1.145.
-const AGENTS_JSON_SINCE = [2, 1, 145];
+export const AGENTS_JSON_SINCE = [2, 1, 145];
 // The sub-agent status line (each sub-agent's model and tokens), first checked on
 // 2.1.322; older versions may have it too, but an unknown settings key is not risked.
-const SUBAGENT_STATUS_LINE_SINCE = [2, 1, 322];
+export const SUBAGENT_STATUS_LINE_SINCE = [2, 1, 322];
 
 /** Compares the first x.y.z in a CLI's version text; an unknown version counts as recent enough. */
 export function versionAtLeast(version: string | null, minimum: number[]): boolean {

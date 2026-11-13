@@ -15,7 +15,7 @@ export const INSTALL_COMMAND: Record<Vendor, string> = {
   codex: 'npm i -g @openai/codex',
 };
 
-const LOGIN_COMMAND: Record<Vendor, string> = {
+export const LOGIN_COMMAND: Record<Vendor, string> = {
   claude: 'claude auth login',
   codex: 'codex login',
 };
