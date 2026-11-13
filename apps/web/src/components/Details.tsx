@@ -34,6 +34,8 @@ export function activity(session: SessionInfo): { text: string; color: string } 
   if (isAsking(status.value)) return { text: statusText(status), color: v.warn };
   if (status.error && status.value !== 'exited') return { text: statusText(status), color: v.error };
   if (status.value === 'working') return { text: statusText(status), color: v.primary };
+  // Nothing reports what it does: said in words, so the quiet icon is not taken for "idle".
+  if (status.value === 'unobserved') return { text: statusText(status), color: v.on2 };
   return null;
 }
 

@@ -72,7 +72,7 @@ export const t = {
   pastedFor: (n: number) => `${n}개 입력란에 남음`,
   status: {
     starting: '시작 중',
-    unobserved: '실행 중',
+    unobserved: '관측 없음',
     idle: '대기',
     working: '작업 중',
     awaiting_permission: '승인 대기',
