@@ -115,7 +115,7 @@ export function PaneGrid({ state, dispatch, dnd, sessionById, mode, windowsBuild
             bgcolor: slotOver ? v.dropBg : 'transparent',
           }}
         >
-          <Tooltip title={t.newPane} placement="left">
+          <Tooltip title={t.newSession} placement="left">
             <IconButton aria-label={t.newSession} onClick={onNew} sx={{ width: 44, height: 44, color: draggingSession ? v.primary : v.on2 }}>
               <PlusIcon size={20} />
             </IconButton>

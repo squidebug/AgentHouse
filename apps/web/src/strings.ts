@@ -5,7 +5,6 @@ export const t = {
   appName: 'AgentHouse',
   sessions: '세션',
   newSession: '새 세션',
-  newPane: '새 칸',
   dropHere: '여기에 놓기',
   openHere: '여기서 열기',
   swap: '자리 바꾸기',
