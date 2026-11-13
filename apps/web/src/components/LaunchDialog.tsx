@@ -31,6 +31,8 @@ import { CopyCommand } from './CopyCommand';
 interface Props {
   open: boolean;
   env: EnvReport | null;
+  /** Folders to offer: those of the sessions listed, the latest first. */
+  folders: string[];
   mode: ThemeMode;
   onClose: () => void;
   onLaunched: (session: SessionInfo) => void;
@@ -50,7 +52,7 @@ function installed(env: EnvReport | null, vendor: Vendor): boolean {
   return Boolean(env && env.clis[vendor].selected !== null);
 }
 
-export function LaunchDialog({ open, env, mode, onClose, onLaunched }: Props) {
+export function LaunchDialog({ open, env, folders, mode, onClose, onLaunched }: Props) {
   const [vendor, setVendor] = useState<Vendor>('claude');
   const [title, setTitle] = useState('');
   const [cwd, setCwd] = useState('');
@@ -105,6 +107,15 @@ export function LaunchDialog({ open, env, mode, onClose, onLaunched }: Props) {
       <DialogTitle id="launch-title" sx={{ fontSize: 18, fontWeight: 600, pb: 1 }}>
         {t.launchTitle}
       </DialogTitle>
+      {/* A form, so Enter in a field starts the session; it adds no box of its own to the dialog's layout. */}
+      <Box
+        component="form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          submit().catch(() => {});
+        }}
+        sx={{ display: 'contents' }}
+      >
       <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: '8px !important' }}>
         <ToggleButtonGroup
           exclusive
@@ -133,7 +144,14 @@ export function LaunchDialog({ open, env, mode, onClose, onLaunched }: Props) {
         {missing && missingCommand && <CopyCommand command={missingCommand} />}
 
         <TextField label={t.title} value={title} onChange={(e) => setTitle(e.target.value)} placeholder={cwd.split(/[\\/]/).filter(Boolean).pop() ?? ''} size="small" />
-        <TextField label={t.folder} value={cwd} onChange={(e) => setCwd(e.target.value)} size="small" required />
+        <Autocomplete
+          freeSolo
+          options={folders}
+          inputValue={cwd}
+          onInputChange={(_event, value) => setCwd(value)}
+          renderInput={(params) => <TextField {...params} label={t.folder} size="small" required />}
+          slotProps={{ listbox: { sx: { fontSize: 13, overflowWrap: 'anywhere' } } }}
+        />
         <Autocomplete
           freeSolo
           options={vendor === 'claude' ? [...CLAUDE_MODEL_ALIASES] : []}
@@ -169,13 +187,14 @@ export function LaunchDialog({ open, env, mode, onClose, onLaunched }: Props) {
         )}
       </DialogContent>
       <DialogActions sx={{ px: 3, pb: 2 }}>
-        <Button onClick={onClose} color="inherit">
+        <Button type="button" onClick={onClose} color="inherit">
           {t.cancel}
         </Button>
-        <Button variant="contained" onClick={() => submit().catch(() => {})} disabled={busy || missing || !cwd.trim()}>
+        <Button type="submit" variant="contained" disabled={busy || missing || !cwd.trim()}>
           {t.start}
         </Button>
       </DialogActions>
+      </Box>
     </Dialog>
   );
 }

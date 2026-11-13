@@ -40,6 +40,8 @@ export function App() {
     return map;
   }, [sessions, launched]);
   const sessionById = useCallback((id: string) => byId.get(id), [byId]);
+  // Where sessions ran before, the latest first: what the launcher offers for a new one.
+  const folders = useMemo(() => [...new Set([...byId.values()].sort((a, b) => b.startedAt - a.startedAt).map((s) => s.cwd))], [byId]);
   const runningIds = [...byId.values()].filter((s) => s.state === 'running').map((s) => s.id);
   ctxRef.current = { runningIds, parents: parentsOf([...byId.values()], links), delegates: delegatesOf([...byId.values()], links) };
 
@@ -165,6 +167,7 @@ export function App() {
       <LaunchDialog
         open={launchOpen}
         env={env}
+        folders={folders}
         mode={resolved}
         onClose={() => setLaunchOpen(false)}
         onLaunched={(session) => {
