@@ -7,7 +7,7 @@ A local web console for running AI coding-agent CLIs â€” Claude Code and Codex â
 - Runs only on your machine (`127.0.0.1`), behind a login, a Host allowlist and an Origin check. The address it opens carries a one-time code; the page trades it for a token of its own, which no other port of `127.0.0.1` can read.
 - Drives the CLIs exactly as installed, signed in with your own account. No reinstall, no PATH changes: Node 18 or newer and whatever Claude Code / Codex you already use.
 - AgentHouse never reads credential files or proxies model traffic.
-- Claude Code sessions are observed through hooks and a status line passed to that session with `--settings`. Your settings files are not changed, and your own status line keeps showing.
+- Claude Code sessions are observed through hooks and a status line passed to that session with `--settings`. Your settings files are not changed, and your own status line keeps showing. The same `--settings` keep that session's file tools out of AgentHouse's state folder, next to your own permission rules.
 - Windows 11 first; macOS and Linux are kept working.
 
 AgentHouse is an independent project. It is not affiliated with or endorsed by Anthropic or OpenAI. "Claude Code" and "Codex" are used only to describe compatibility.

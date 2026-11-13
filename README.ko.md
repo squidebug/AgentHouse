@@ -7,7 +7,7 @@ Claude Code와 Codex 같은 AI 코딩 에이전트 CLI를 브라우저의 실제
 - 내 컴퓨터(`127.0.0.1`)에서만 실행되며, 접속 토큰을 쓰고 Host·Origin을 검사합니다.
 - 설치된 CLI를 그대로, 본인 계정으로 실행합니다. 재설치나 PATH 변경이 필요 없습니다(Node 18 이상).
 - 자격 증명 파일을 읽거나 모델 요청을 중계하지 않습니다.
-- Claude Code 세션은 그 세션에만 `--settings`로 넘긴 hook과 status line으로 관측합니다. 설정 파일은 바꾸지 않으며, 사용하던 status line도 그대로 보입니다.
+- Claude Code 세션은 그 세션에만 `--settings`로 넘긴 hook과 status line으로 관측합니다. 설정 파일은 바꾸지 않으며, 사용하던 status line도 그대로 보입니다. 같은 `--settings`로 그 세션의 파일 도구가 AgentHouse 상태 폴더를 읽거나 고치지 못하게 하며, 쓰던 권한 규칙은 그대로 함께 적용됩니다.
 - Windows 11을 우선 지원하고 macOS·Linux 호환을 유지합니다.
 
 AgentHouse는 독립 프로젝트이며 Anthropic, OpenAI와 제휴하거나 승인받지 않았습니다. "Claude Code", "Codex"는 호환 대상을 설명하기 위해서만 씁니다.

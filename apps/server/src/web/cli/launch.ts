@@ -102,6 +102,21 @@ async function observeSettings(dir: string, target: ObserveTarget, cwd: string):
 }
 
 /**
+ * Permission rules that keep a session's own file tools out of AgentHouse's
+ * state folder. The tokens there start programs and type into every session,
+ * outside Claude's permission checks; reading a file needs no approval, so an
+ * agent talked into it could otherwise read them. Rules from --settings add
+ * to the user's own (checked with 2.1.323). A folder outside the home folder
+ * gets none: Claude writes such paths differently per platform.
+ */
+export function stateFolderRules(stateDir: string, home = os.homedir()): string[] {
+  const inside = path.relative(home, path.resolve(stateDir));
+  if (!inside || inside.startsWith('..') || path.isAbsolute(inside)) return [];
+  const pattern = `~/${inside.replace(/\\/g, '/')}/**`;
+  return [`Read(${pattern})`, `Edit(${pattern})`];
+}
+
+/**
  * A session's title: the one given, else its folder's name. A second session
  * named after the same folder gets a number (`taken`: the titles listed now),
  * so the two can be told apart in the tree, the composer and the menus.
@@ -124,7 +139,19 @@ export async function buildLaunch(
   opts: LaunchOptions,
   install: Pick<CliInstall, 'file' | 'args'>,
   cwd: string,
-  { observe, tempRoot = os.tmpdir(), titles = [] }: { observe?: ObserveTarget; tempRoot?: string; /** The titles of the sessions listed now. */ titles?: readonly string[] } = {},
+  {
+    observe,
+    tempRoot = os.tmpdir(),
+    titles = [],
+    guard,
+  }: {
+    observe?: ObserveTarget;
+    tempRoot?: string;
+    /** The titles of the sessions listed now. */
+    titles?: readonly string[];
+    /** AgentHouse's state folder, which the session's file tools are kept out of. */
+    guard?: string;
+  } = {},
 ): Promise<LaunchSpec> {
   const title = sessionTitle(opts.title, cwd, titles);
   const args = [...install.args];
@@ -145,7 +172,8 @@ export async function buildLaunch(
     if (mode) args.push('--permission-mode', mode);
 
     const tempPaths: string[] = [];
-    if (opts.theme || observe) {
+    const deny = guard ? stateFolderRules(guard) : [];
+    if (opts.theme || observe || deny.length) {
       await mkdir(tempRoot, { recursive: true, mode: 0o700 });
       const dir = await mkdtemp(path.join(tempRoot, 'agenthouse-'));
       tempPaths.push(dir);
@@ -154,6 +182,7 @@ export async function buildLaunch(
       // theme detection cannot see the app theme; tell it directly instead.
       if (opts.theme) settings.theme = opts.theme;
       if (observe) Object.assign(settings, await observeSettings(dir, observe, cwd));
+      if (deny.length) settings.permissions = { deny };
       const settingsPath = path.join(dir, 'settings.json');
       await writeFile(settingsPath, JSON.stringify(settings));
       args.push('--settings', settingsPath);

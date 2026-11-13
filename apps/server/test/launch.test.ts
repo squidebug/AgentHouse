@@ -4,7 +4,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { buildLaunch, HOOK_EVENTS, LaunchError, sessionTitle } from '../src/web/cli/launch';
+import { buildLaunch, HOOK_EVENTS, LaunchError, sessionTitle, stateFolderRules } from '../src/web/cli/launch';
 import { STATUS_EVENTS } from '../src/claude/status';
 import { versionAtLeast } from '../src/web/manager';
 
@@ -74,6 +74,22 @@ test('an observed claude session gets relay hooks and keeps the user status line
     if (previous === undefined) delete process.env.CLAUDE_CONFIG_DIR;
     else process.env.CLAUDE_CONFIG_DIR = previous;
     await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("a claude session's file tools are kept out of AgentHouse's state folder", async () => {
+  const stateDir = path.join(os.homedir(), '.agenthouse-test', 'state');
+  assert.deepEqual(stateFolderRules(stateDir), ['Read(~/.agenthouse-test/state/**)', 'Edit(~/.agenthouse-test/state/**)']);
+  // Outside the home folder Claude writes the path another way on each platform: no rule rather than a wrong one.
+  assert.deepEqual(stateFolderRules(path.join(path.parse(os.homedir()).root, 'elsewhere', 'state')), []);
+  assert.deepEqual(stateFolderRules(os.homedir()), [], 'never the home folder itself');
+
+  const spec = await buildLaunch({ vendor: 'claude' }, install, cwd, { guard: stateDir });
+  try {
+    const settings = JSON.parse(readFileSync(spec.args[spec.args.indexOf('--settings') + 1] ?? '', 'utf8'));
+    assert.deepEqual(settings, { permissions: { deny: stateFolderRules(stateDir) } }, 'a rule of its own, next to whatever the user allows or denies');
+  } finally {
+    for (const dir of spec.tempPaths) await rm(dir, { recursive: true, force: true });
   }
 });
 

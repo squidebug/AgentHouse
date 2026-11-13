@@ -45,6 +45,7 @@ AgentHouse is three programs plus a browser app. Know which one a file runs in b
 - Users keep their setup: never require reinstalling or upgrading Node (18+) or the CLIs, or changing PATH. Detect what is there, use the install the user's shell runs, and gate features by CLI version.
 - Never read credential files (`~/.claude/.credentials.json`, `~/.codex/auth.json`); never proxy model traffic.
 - Change a CLI's behaviour only per session (Claude: `--settings`); never edit the user's settings files.
+- A Claude session's `--settings` deny its file tools the state folder (`stateFolderRules` in `web/cli/launch.ts`): the tokens there start programs and type into every session. They add to the user's permission rules.
 - The relay prints nothing as a hook, always exits 0, stays fast and has no dependencies.
 - Never type into a dialog: the host takes text only from a CLI that has started (Claude's folder trust question comes before any hook) and shows no dialog; dialogs are tracked apart from the status (`Dialogs` in `claude/status.ts`), and automatic sends (delegation) wait while someone types in that terminal, then ask `claude agents --json` first. Text is pasted without control characters, one at a time per session; a held-back Enter is sent again alone, never with the text.
 - node-pty only on the host's main thread.

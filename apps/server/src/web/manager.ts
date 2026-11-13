@@ -134,6 +134,7 @@ export class SessionManager extends EventEmitter {
       ...(hookToken ? { observe: { port: this.options.host.port, token: hookToken, subagents: versionAtLeast(install.version, SUBAGENT_STATUS_LINE_SINCE) } } : {}),
       tempRoot: this.options.host.runDir,
       titles: this.list().map((session) => session.title),
+      guard: this.options.host.stateDir,
     });
     try {
       return await this.options.host.spawn({
