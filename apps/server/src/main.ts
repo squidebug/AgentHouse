@@ -7,6 +7,7 @@ import { HostClient, stopHosts } from './web/host-client';
 import { defaultStateDir } from './shared/state';
 import { createAgentHouseServer } from './web/http/server';
 import { forgetWebServer, recordWebServer, runningWebServer, stopWebServer } from './web/instance';
+import { stateDirProblem } from './web/state-dir';
 import { systemTool } from './shared/system';
 
 const DEFAULT_PORT = 7357;
@@ -76,6 +77,12 @@ async function main(): Promise<void> {
   // Only the dev runner passes --dev-origin; its sessions run in the dev host.
   const dev = args.devOrigins.length > 0;
   const stateDir = defaultStateDir();
+  // The host's token and the web server's key go there.
+  const problem = await stateDirProblem(stateDir);
+  if (problem) {
+    console.error(`상태 폴더 ${stateDir}: ${problem}\n토큰을 두는 폴더라 시작하지 않습니다. AGENTHOUSE_HOME을 나만 쓰는 폴더로 바꾸세요.`);
+    process.exit(1);
+  }
 
   // One web server per state folder: a second start opens the first one. The dev runner restarts its own server.
   const already = dev ? null : await runningWebServer(stateDir);
