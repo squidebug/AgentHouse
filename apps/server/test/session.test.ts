@@ -97,4 +97,27 @@ describe('a session in the host', () => {
       await client.closeSession(info.id);
     }
   });
+
+  test('a CLI that ended by itself still shows its last screen to a viewer that comes later', async () => {
+    const info = await client.spawn(spec());
+    const first = watch(info);
+    try {
+      await first.opened;
+      assert.ok(await waitFor(() => plain(screenText(first.messages)).includes('fake-agent ready'), 5000));
+      first.send('exit');
+      assert.ok(await waitFor(() => client.get(info.id)?.state === 'exited', 5000), 'it quit by itself');
+      first.ws.close();
+      // Past the moment the host lets the mirror go and keeps the screen as text.
+      await sleep(2000);
+      const later = watch(info);
+      await later.opened;
+      assert.ok(await waitFor(() => later.messages.some((m) => m.type === 'snapshot'), 3000), 'a snapshot for the late viewer');
+      const screen = plain(screenText(later.messages));
+      assert.ok(screen.includes('fake-agent ready') && screen.includes('bye'), 'the whole last screen');
+      assert.equal(client.get(info.id)?.screen, true);
+      later.ws.close();
+    } finally {
+      await client.closeSession(info.id);
+    }
+  });
 });

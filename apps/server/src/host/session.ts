@@ -31,6 +31,8 @@ export interface ViewerBacklog {
 export const DEFAULT_BACKLOG: ViewerBacklog = { max: 4 * 1024 * 1024, resyncBelow: 256 * 1024 };
 // node-pty flushes the last output for up to 1 s after the process exits.
 const RELEASE_AFTER_EXIT_MS = 1500;
+// What a browser gets of the scrollback when it connects, and what is kept of an ended session.
+const SNAPSHOT_SCROLLBACK = 2000;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -123,6 +125,8 @@ export class Session extends EventEmitter {
   private readonly resyncTimer: NodeJS.Timeout;
   private readonly backlog: ViewerBacklog;
   private composing: Promise<unknown> = Promise.resolve();
+  /** The last screen of an ended CLI, as text: the mirror itself (megabytes of scrollback) is let go. */
+  private final: Extract<TerminalServerMessage, { type: 'snapshot' }> | null = null;
 
   constructor(private readonly options: SessionOptions) {
     super();
@@ -161,6 +165,7 @@ export class Session extends EventEmitter {
   }
 
   private handleOutput(data: string): void {
+    if (this.final) return;
     try {
       this.mirror.write(data);
     } catch {
@@ -177,8 +182,23 @@ export class Session extends EventEmitter {
     clearInterval(this.resyncTimer);
     this.broadcast({ type: 'exit', code, signal });
     this.options.cleanup().catch(() => {});
-    if (process.platform === 'win32') setTimeout(() => this.releasePty(), RELEASE_AFTER_EXIT_MS);
+    setTimeout(() => {
+      if (process.platform === 'win32') this.releasePty();
+      this.freeze();
+    }, RELEASE_AFTER_EXIT_MS).unref();
     this.emit('exit', this);
+  }
+
+  /**
+   * The CLI has ended and printed its last. An ended session stays listed until
+   * the user removes it, and its mirror holds several megabytes of scrollback:
+   * the screen is kept as the text a browser would be sent, and the mirror goes.
+   */
+  private freeze(): void {
+    this.mirror.write('', () => {
+      this.final = { type: 'snapshot', cols: this.mirror.cols, rows: this.mirror.rows, data: this.serializer.serialize({ scrollback: SNAPSHOT_SCROLLBACK }) };
+      this.mirror.dispose();
+    });
   }
 
   /**
@@ -217,12 +237,17 @@ export class Session extends EventEmitter {
     viewer.live = false;
     viewer.stale = false;
     viewer.pending = [];
+    if (this.final) {
+      viewer.send(this.final);
+      viewer.live = true;
+      return;
+    }
     this.mirror.write('', () => {
       viewer.send({
         type: 'snapshot',
         cols: this.mirror.cols,
         rows: this.mirror.rows,
-        data: this.serializer.serialize({ scrollback: 2000 }),
+        data: this.serializer.serialize({ scrollback: SNAPSHOT_SCROLLBACK }),
       });
       for (const chunk of viewer.pending) viewer.send({ type: 'output', data: chunk });
       viewer.pending = [];
