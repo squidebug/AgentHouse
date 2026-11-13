@@ -1,5 +1,5 @@
-import { Box, IconButton, InputBase, Typography } from '@mui/material';
-import { useState } from 'react';
+import { Box, IconButton, InputBase, Tooltip, Typography } from '@mui/material';
+import { useEffect, useState } from 'react';
 import type { SessionInfo } from '@agenthouse/protocol';
 import { api } from '../api/client';
 import { t } from '../strings';
@@ -12,6 +12,8 @@ import { StatusIcon } from './StatusIcon';
 
 // Folding and opening: short, with Material's standard easing.
 const EASE = '.22s cubic-bezier(.2, 0, 0, 1)';
+// How long "sent" stays under the composer once nothing is left to send.
+const NOTICE_MS = 5000;
 
 /**
  * A part that slides open sideways (its width and the space next to it) and
@@ -47,6 +49,13 @@ export function Composer({ state, dispatch, dnd, sessionById, activeSession }: P
   const [sending, setSending] = useState(false);
   const [focused, setFocused] = useState(false);
 
+  // What the last send did: while text is left (held or failed for some) it explains why; otherwise it goes by itself.
+  useEffect(() => {
+    if (!notice || draft) return;
+    const timer = setTimeout(() => setNotice(''), NOTICE_MS);
+    return () => clearTimeout(timer);
+  }, [notice, draft]);
+
   const explicit = state.targets.map(sessionById).filter((s): s is SessionInfo => Boolean(s) && !got.includes(s!.id));
   const implicit = !state.targets.length && activeSession?.state === 'running' && !got.includes(activeSession.id) ? activeSession : undefined;
   const recipients = implicit ? [implicit] : explicit;
@@ -60,7 +69,7 @@ export function Composer({ state, dispatch, dnd, sessionById, activeSession }: P
     const text = draft.trim();
     if (!text || !recipients.length || sending) return;
     setSending(true);
-    const results = await Promise.allSettled(recipients.map((s) => api.compose(s.id, { text: draft })));
+    const results = await Promise.allSettled(recipients.map((s) => api.compose(s.id, { text })));
     const { sent, pasted, held, failed, delivered } = summarizeSend(
       recipients.map((s) => s.id),
       results,
@@ -152,8 +161,9 @@ export function Composer({ state, dispatch, dnd, sessionById, activeSession }: P
           value={draft}
           onChange={(event) => {
             setDraft(event.target.value);
-            // Edited, it is a new message: everyone gets it again.
+            // Edited, it is a new message: everyone gets it again, and what the last send did is history.
             if (got.length) setGot([]);
+            if (notice) setNotice('');
           }}
           onKeyDown={(event) => {
             // Enter while an IME (Korean, Japanese, …) is composing belongs to the IME.
@@ -179,15 +189,20 @@ export function Composer({ state, dispatch, dnd, sessionById, activeSession }: P
           }}
         />
         <Box component="span" className="ah-fold" aria-hidden={open ? undefined : true} sx={reveal(open, 'ml')}>
-          <IconButton
-            aria-label={t.send}
-            tabIndex={open ? 0 : -1}
-            disabled={!draft.trim() || !recipients.length || sending}
-            onClick={() => send().catch(() => {})}
-            sx={{ width: 40, height: 40, bgcolor: v.primary, color: v.onPrimary, '&:hover': { bgcolor: v.primary, opacity: 0.9 }, '&.Mui-disabled': { bgcolor: v.surface2, color: v.on2 } }}
-          >
-            <SendIcon />
-          </IconButton>
+          <Tooltip title={t.sendShortcut}>
+            {/* A disabled button takes no pointer events; the span is what the tooltip hangs on. */}
+            <Box component="span" sx={{ display: 'inline-flex' }}>
+              <IconButton
+                aria-label={t.send}
+                tabIndex={open ? 0 : -1}
+                disabled={!draft.trim() || !recipients.length || sending}
+                onClick={() => send().catch(() => {})}
+                sx={{ width: 40, height: 40, bgcolor: v.primary, color: v.onPrimary, '&:hover': { bgcolor: v.primary, opacity: 0.9 }, '&.Mui-disabled': { bgcolor: v.surface2, color: v.on2 } }}
+              >
+                <SendIcon />
+              </IconButton>
+            </Box>
+          </Tooltip>
         </Box>
       </Box>
       {notice && <Typography sx={{ mt: 0.5, px: 1, fontSize: 12, lineHeight: '16px', color: v.on2 }}>{notice}</Typography>}

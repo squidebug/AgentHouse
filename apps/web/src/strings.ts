@@ -11,6 +11,7 @@ export const t = {
   addRecipient: '받는 세션 추가',
   message: '메시지',
   send: '보내기',
+  sendShortcut: '보내기 · Ctrl+Enter',
   details: '세부 정보',
   close: '닫기',
   closePane: '칸 닫기',
