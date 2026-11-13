@@ -452,11 +452,9 @@ try {
     // the host may already be gone
   }
   if (!flag('--out')) console.log('INFO  (screenshots are removed with the temporary folder unless --out is given)');
-  setTimeout(() => {
-    rmSync(home, { recursive: true, force: true });
-    rmSync(config, { recursive: true, force: true });
-    if (!flag('--out')) rmSync(scratch, { recursive: true, force: true });
-  }, 500);
+  // The whole temporary folder: with --out the screenshots are elsewhere, and what was left of it
+  // (the work folder) piled up in the temp folder, one per run.
+  setTimeout(() => rmSync(scratch, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }), 500);
   console.log(failures ? `${failures} check(s) failed` : 'all checks passed');
   process.exitCode = failures ? 1 : 0;
 }
