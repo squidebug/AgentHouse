@@ -379,7 +379,9 @@ try {
   await answer.waitFor({ timeout: 10_000 });
   const helperChip = lead.getByRole('button', { name: 'ui-helper 위임' });
   check(await helperChip.isVisible(), "the delegate is a chip in the lead's header");
-  await answer.dragTo(helperChip);
+  // The reply's handle drags; the reply itself stays text to select.
+  await answer.hover();
+  await answer.getByRole('button', { name: '위임' }).dragTo(helperChip);
   const card = lead.getByRole('group', { name: '위임 · ui-helper' });
   await card.getByRole('button', { name: '전달' }).waitFor({ timeout: 10_000 });
   check(await card.getByText('fake answer: fake answer: please outline the plan').isVisible(), 'the delegate worked on it, and its answer shows on the card');

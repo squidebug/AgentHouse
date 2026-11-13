@@ -44,7 +44,11 @@ export interface ConversationSource {
   onDragText?: ((entryId: string, text: string) => (event: DragEvent) => void) | undefined;
 }
 
-/** An answer of the model; with sessions delegated under this one, it can be dragged to them or handed over from a menu. */
+/**
+ * An answer of the model. With sessions delegated under this one it has a
+ * handle: dragged to one of them, or clicked for a menu, it hands the answer
+ * over. Only the handle drags, so the text can still be selected and copied.
+ */
 function AnswerText({ entry, source }: { entry: Extract<ConversationEntry, { kind: 'text' }>; source: ConversationSource }) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const delegates = source.delegates ?? [];
@@ -59,9 +63,7 @@ function AnswerText({ entry, source }: { entry: Extract<ConversationEntry, { kin
   return (
     <Box
       className="ah-answer"
-      draggable={Boolean(source.onDragText)}
-      onDragStart={source.onDragText?.(entry.id, entry.text)}
-      sx={{ position: 'relative', m: '-4px -6px', p: '4px 34px 4px 6px', borderRadius: '8px', cursor: 'grab', '&:hover': { bgcolor: v.surface2 }, '&:hover .ah-hand': { opacity: 1 } }}
+      sx={{ position: 'relative', m: '-4px -6px', p: '4px 34px 4px 6px', borderRadius: '8px', '&:hover': { bgcolor: v.surface2 }, '&:hover .ah-hand': { opacity: 1 } }}
     >
       <MarkdownText text={entry.text} />
       {entry.truncated && <Partial />}
@@ -70,8 +72,10 @@ function AnswerText({ entry, source }: { entry: Extract<ConversationEntry, { kin
           className="ah-hand"
           aria-label={t.delegateAction}
           aria-haspopup="menu"
+          draggable={Boolean(source.onDragText)}
+          onDragStart={source.onDragText?.(entry.id, entry.text)}
           onClick={(event) => setAnchor(event.currentTarget)}
-          sx={{ position: 'absolute', top: 2, right: 2, width: 28, height: 28, color: v.primary, opacity: anchor ? 1 : 0, '&:focus-visible': { opacity: 1 } }}
+          sx={{ position: 'absolute', top: 2, right: 2, width: 28, height: 28, color: v.primary, cursor: 'grab', opacity: anchor ? 1 : 0, '&:focus-visible': { opacity: 1 } }}
         >
           <DelegateIcon size={15} />
         </IconButton>
