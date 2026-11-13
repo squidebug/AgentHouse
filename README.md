@@ -35,7 +35,7 @@ pnpm dev:stop     # ends the dev sessions and the dev session host
 
 ## Use
 
-- **Start**: the page opens on a loading bar while it checks the environment, then shows the workspace. When something is wrong (no CLI, a CLI not logged in, hooks blocked) it stays and says what, with the fix.
+- **Start**: the page opens on a loading bar while it checks the environment, then shows the workspace. When something is wrong (no CLI, a CLI not logged in, hooks blocked) it stays and says what, with the fix. A warning you went on past with 계속 does not stop it again, and a reload in the same tab goes straight to the workspace; the pulse icon at the top still marks what is wrong.
 - **Which CLI runs**: the environment check (the pulse icon at the top) shows the Claude Code and Codex it runs: by default the first on your PATH, the one your shell runs. 변경 picks another install or a file of your own (an alias, a folder not on PATH); AgentHouse runs it once to check it is that CLI, and uses it for new sessions.
 - **New session**: the `+` next to "세션", or the empty area. Pick the CLI, folder, and optionally model, effort and permission mode; anything left as 기본값 keeps your CLI's own setting.
 - **Open**: click a session in the tree, or drag it onto a pane. Drag it onto the `+` strip for a new pane (up to 4).

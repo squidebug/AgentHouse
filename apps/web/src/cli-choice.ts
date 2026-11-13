@@ -28,9 +28,21 @@ export function firstOnPath(status: CliStatus): number {
   return status.installs.findIndex((install) => install.onPath);
 }
 
-/** What stops the start screen: errors and warnings. Notes (no Codex, an old Node) stay in the environment check. */
+/** What the start screen lists: errors and warnings. Notes (no Codex, an old Node) stay in the environment check. */
 export function startupIssues(env: EnvReport): EnvMessage[] {
   return env.messages.filter((message) => message.level !== 'info');
+}
+
+/** What tells an issue from the ones the user went on past before: which it is and what it says. */
+export const issueKey = (message: EnvMessage) => `${message.id}\n${message.text}`;
+
+/**
+ * Whether the start screen stops. At an error, always. At a warning, only the
+ * first time: one the user went on past (`passed`, the keys kept from then) may
+ * be one they cannot or will not fix, like a CLI they do not log in to.
+ */
+export function stopsStartup(env: EnvReport, passed: readonly string[]): boolean {
+  return startupIssues(env).some((message) => message.level === 'error' || !passed.includes(issueKey(message)));
 }
 
 /**

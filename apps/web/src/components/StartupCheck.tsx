@@ -1,8 +1,8 @@
 import { Box, Button, LinearProgress, Tooltip, Typography, useMediaQuery } from '@mui/material';
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { EnvMessage, EnvReport, Vendor } from '@agenthouse/protocol';
 import { api, RequestError } from '../api/client';
-import { describeIssue, startupIssues } from '../cli-choice';
+import { describeIssue, issueKey, startupIssues, stopsStartup } from '../cli-choice';
 import { t } from '../strings';
 import { v } from '../theme/tokens';
 import { CliDialog } from './CliChoice';
@@ -14,6 +14,46 @@ const LEVEL_COLOR = { error: v.error, warn: v.warn, info: v.on2 } as const;
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
 
 type Phase = { name: 'checking' } | { name: 'issues'; env: EnvReport } | { name: 'offline' } | { name: 'ready' };
+
+// This tab has been through the start screen: a reload goes straight to the workspace.
+const STARTED_KEY = 'ah-started';
+// The issues the user went on past with 계속, so the same warning does not stop every first load.
+const PASSED_KEY = 'ah-passed-issues';
+const MAX_PASSED = 50;
+
+function started(): boolean {
+  try {
+    return sessionStorage.getItem(STARTED_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function markStarted(): void {
+  try {
+    sessionStorage.setItem(STARTED_KEY, '1');
+  } catch {
+    // storage blocked: the start screen shows on every load, as it did
+  }
+}
+
+function passedIssues(): string[] {
+  try {
+    const kept: unknown = JSON.parse(localStorage.getItem(PASSED_KEY) ?? '[]');
+    return Array.isArray(kept) ? kept.filter((key): key is string => typeof key === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function rememberPassed(messages: EnvMessage[]): void {
+  try {
+    const keys = [...new Set([...messages.map(issueKey), ...passedIssues()])].slice(0, MAX_PASSED);
+    localStorage.setItem(PASSED_KEY, JSON.stringify(keys));
+  } catch {
+    // not remembered: the warning stops the next first load again
+  }
+}
 
 /** An issue in one line, a block like a copyable command's: what is wrong, and on the right what fixes it. */
 function IssueLine({ message, onChange }: { message: EnvMessage; onChange: (vendor: Vendor) => void }) {
@@ -77,13 +117,20 @@ function QuietButton({ children, onClick, primary = false }: { children: ReactNo
 
 /**
  * What the page shows first: nothing but a loading bar while the environment is
- * checked, then the workspace. When something is wrong (an error or a warning)
- * it stays on the same blank page and says what, a line each, with the fix.
+ * checked, then the workspace. When something is wrong (an error, or a warning
+ * the user has not gone on past before) it stays on the same blank page and
+ * says what, a line each, with the fix. Once per tab: a reload goes straight to
+ * the workspace, where the environment check at the top marks what is wrong.
  */
 export function StartupCheck({ children }: { children: ReactNode }) {
-  const [phase, setPhase] = useState<Phase>({ name: 'checking' });
+  const skipped = useRef(started()).current;
+  const [phase, setPhase] = useState<Phase>(skipped ? { name: 'ready' } : { name: 'checking' });
   const [choosing, setChoosing] = useState<Vendor | null>(null);
   const still = useMediaQuery('(prefers-reduced-motion: reduce)');
+
+  useEffect(() => {
+    if (phase.name === 'ready') markStarted();
+  }, [phase.name]);
 
   const check = useCallback(async (refresh: boolean) => {
     setPhase({ name: 'checking' });
@@ -91,7 +138,7 @@ export function StartupCheck({ children }: { children: ReactNode }) {
     let next: Phase;
     try {
       const env = await api.env(refresh);
-      next = startupIssues(env).length ? { name: 'issues', env } : { name: 'ready' };
+      next = stopsStartup(env, passedIssues()) ? { name: 'issues', env } : { name: 'ready' };
     } catch (error) {
       // Not logged in: the login page takes over.
       if (error instanceof RequestError && error.status === 401) return;
@@ -102,8 +149,8 @@ export function StartupCheck({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    check(false);
-  }, [check]);
+    if (!skipped) check(false);
+  }, [check, skipped]);
 
   if (phase.name === 'ready') return children;
   return (
@@ -135,7 +182,13 @@ export function StartupCheck({ children }: { children: ReactNode }) {
             </Box>
             <Box sx={{ display: 'flex', gap: 1.5 }}>
               <QuietButton onClick={() => check(true)}>{t.recheck}</QuietButton>
-              <QuietButton primary onClick={() => setPhase({ name: 'ready' })}>
+              <QuietButton
+                primary
+                onClick={() => {
+                  rememberPassed(startupIssues(phase.env));
+                  setPhase({ name: 'ready' });
+                }}
+              >
                 {t.continue}
               </QuietButton>
             </Box>

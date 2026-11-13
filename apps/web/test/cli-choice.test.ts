@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { CliInstall, CliStatus, EnvReport } from '@agenthouse/protocol';
-import { chosenPath, CUSTOM, describeIssue, initialChoice, SHELL, startupIssues } from '../src/cli-choice';
+import { chosenPath, CUSTOM, describeIssue, initialChoice, issueKey, SHELL, startupIssues, stopsStartup } from '../src/cli-choice';
 
 const install = (shim: string, onPath: boolean): CliInstall => ({ file: shim, args: [], shim, version: '2.1.0', onPath });
 const status = (extra: Partial<CliStatus>): CliStatus => ({
@@ -36,6 +36,19 @@ test('the start screen stops for errors and warnings, not for notes', () => {
     startupIssues(env(['info', 'warn', 'error'])).map((m) => m.level),
     ['warn', 'error'],
   );
+});
+
+test('a warning stops the start screen once; an error, and a warning that says something new, every time', () => {
+  const message = (id: string, level: 'error' | 'warn' | 'info', text = id) => ({ id, level, text });
+  const env = (...messages: ReturnType<typeof message>[]) => ({ messages }) as unknown as EnvReport;
+  const loggedOut = message('ENV_CODEX_NOT_LOGGED_IN', 'warn');
+  assert.equal(stopsStartup(env(loggedOut), []), true);
+  assert.equal(stopsStartup(env(loggedOut), [issueKey(loggedOut)]), false, 'the user went on past it before');
+  assert.equal(stopsStartup(env(message('ENV_CODEX_NOT_LOGGED_IN', 'warn', 'other words')), [issueKey(loggedOut)]), true);
+  assert.equal(stopsStartup(env(loggedOut, message('ENV_HOST_OUTDATED', 'warn')), [issueKey(loggedOut)]), true, 'one of them is new');
+  const noCli = message('ENV_NO_CLI', 'error');
+  assert.equal(stopsStartup(env(noCli), [issueKey(noCli)]), true, 'nothing runs without it');
+  assert.equal(stopsStartup(env(message('ENV_NODE_EOL', 'info')), []), false);
 });
 
 test('an issue on the start screen is a short line, with 변경 when the chosen file is the problem', () => {

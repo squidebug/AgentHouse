@@ -106,7 +106,14 @@ try {
     await stranger.close();
   }
 
+  // In the same tab the next load goes straight to the workspace: the start screen is for the first one.
+  await page.reload();
+  await workspace.waitFor();
+  check(!(await page.getByText('환경 점검 중').isVisible()), 'a reload in the same tab skips the start screen');
+  const asNewTab = () => page.evaluate(() => sessionStorage.removeItem('ah-started'));
+
   // The start screen: a loading bar while the environment is checked (held back here so it can be seen).
+  await asNewTab();
   await page.route('**/api/env*', async (route) => {
     await new Promise((resolve) => setTimeout(resolve, 1500));
     // Let go by the unroute below if it came first.
@@ -142,6 +149,7 @@ try {
   // Gone since: the next start stops, says so, and takes the fix there.
   rmSync(path.join(scratch, 'fake-claude'), { recursive: true, force: true });
   await fetch(`${origin}/api/env?refresh=1`, { headers: { authorization: `Bearer ${key}` } });
+  await asNewTab();
   await page.reload();
   await page.getByText('Claude Code 실행 파일을 쓸 수 없음').waitFor();
   check(await page.getByRole('button', { name: '계속' }).isVisible(), 'the start screen stops at a chosen file that is gone');
