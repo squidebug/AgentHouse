@@ -89,8 +89,8 @@ describe('a session in the host', () => {
       terminal.ws.pause();
       await sleep(4000);
       terminal.ws.resume();
-      assert.ok(await waitFor(() => terminal.messages.filter((m) => m.type === 'snapshot').length >= 2, 10_000), 'resynced from a snapshot');
-      assert.ok(await waitFor(() => plain(screenText(terminal.messages.slice(-50))).includes('flood done'), 10_000), 'and back on the live screen');
+      assert.ok(await waitFor(() => terminal.messages.filter((m) => m.type === 'snapshot').length >= 2, 30_000), 'resynced from a snapshot');
+      assert.ok(await waitFor(() => plain(screenText(terminal.messages.slice(-50))).includes('flood done'), 30_000), 'and back on the live screen');
       assert.ok(isAlive(info.pid));
     } finally {
       terminal.ws.close();

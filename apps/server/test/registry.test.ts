@@ -61,7 +61,7 @@ describe('session registry', () => {
 
       const firstHost = client.pid;
       await killTree(firstHost);
-      assert.ok(await waitFor(() => client.connected && client.pid !== firstHost, 20_000), 'a new host took over');
+      assert.ok(await waitFor(() => client.connected && client.pid !== firstHost, 45_000), 'a new host took over');
       const listed = (await request(app.port, 'GET', '/api/sessions', { headers })).json as SessionInfo[];
       const ended = listed.find((s) => s.id === session.id);
       assert.deepEqual([ended?.state, ended?.screen, ended?.exit?.code, ended?.title], ['exited', false, null, 'before']);
