@@ -175,6 +175,20 @@ describe('a session', () => {
     assert.equal(res.status, 400);
     assert.equal((res.json as { code: string }).code, 'CWD_NOT_FOUND');
   });
+
+  test('a long text in Korean is taken up to the length the API allows, not cut off by the size of its bytes', async () => {
+    const created = await request(app.port, 'POST', '/api/sessions', { headers: { authorization, origin }, body: { vendor: 'fake', title: 'long-text' } });
+    const id = (created.json as { id: string }).id;
+    try {
+      // 150,000 characters are 450 KB in UTF-8. The work goes nowhere (no such delegate), but the text is read.
+      const taken = await request(app.port, 'POST', `/api/sessions/${id}/delegations`, { headers: { authorization, origin }, body: { childId: 'nobody', text: '가'.repeat(150_000) } });
+      assert.equal(taken.status, 404);
+      const tooLong = await request(app.port, 'POST', `/api/sessions/${id}/delegations`, { headers: { authorization, origin }, body: { childId: 'nobody', text: '가'.repeat(200_001) } });
+      assert.equal(tooLong.status, 400, 'past the length the API allows');
+    } finally {
+      await request(app.port, 'DELETE', `/api/sessions/${id}`, { headers: { authorization, origin } });
+    }
+  });
 });
 
 describe('staying up', () => {

@@ -60,6 +60,9 @@ class HttpError extends Error {
 // then grows and the host resyncs it from a snapshot. The PTY never waits.
 const RELAY_HIGH_WATER = 1024 * 1024;
 const RELAY_LOW_WATER = 256 * 1024;
+// A message or delegated work is 200,000 characters at most (schemas.ts): up to four bytes each in
+// UTF-8, more where JSON escapes them. The default limit refused Korean text from about 85,000 on.
+const TEXT_BODY_BYTES = 1024 * 1024;
 
 function send(res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}): void {
   // A reply already under way (it failed halfway) can only be cut off; writing headers again would throw.
@@ -272,7 +275,7 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
       }
       // Sends work from this session to the session delegated under it.
       if (parts[3] === 'delegations' && parts.length === 4 && req.method === 'POST') {
-        const body = parse(DelegateBody, await readJson(req));
+        const body = parse(DelegateBody, await readJson(req, TEXT_BODY_BYTES));
         send(res, 201, await delegated(() => delegations.delegate(session.id, body.childId, body.text)));
         return;
       }
@@ -287,8 +290,8 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
         }
         return;
       }
-      if (parts[3] === 'compose' && req.method === 'POST') {
-        const body = parse(ComposeBody, await readJson(req));
+      if (parts[3] === 'compose' && parts.length === 4 && req.method === 'POST') {
+        const body = parse(ComposeBody, await readJson(req, TEXT_BODY_BYTES));
         const result: ComposeResult = { sessionId: session.id, ...(await manager.compose(session.id, body)) };
         send(res, 200, result);
         return;
