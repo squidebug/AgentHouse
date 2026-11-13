@@ -190,7 +190,8 @@ try {
   const work_ = page.getByRole('button', { name: /도구 1/ });
   check(await work_.isVisible(), 'the tool call is folded into one row');
   await work_.click();
-  await page.getByRole('button', { name: /Bash/ }).click();
+  // The tool's row; the session's row may still read "작업 중 · Bash" for a moment.
+  await page.getByRole('button', { name: /Bash echo/ }).click();
   await page.getByText('fake-tool-output', { exact: true }).waitFor({ timeout: 5000 });
   check(true, 'an opened tool call shows its output');
   check(await page.getByText(/fake-model · low · 입력/).isVisible(), 'the turn shows model, effort and tokens');
