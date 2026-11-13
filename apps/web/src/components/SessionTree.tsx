@@ -252,7 +252,6 @@ function SessionBranch(props: BranchProps) {
           <Button
             size="small"
             variant="contained"
-            disableElevation
             onClick={() => {
               onLink(pending.childId, session.id, 'delegate');
               dispatch({ type: 'settleLink' });

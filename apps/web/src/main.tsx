@@ -14,14 +14,15 @@ import { LoginGate } from './components/LoginGate';
 import { StartupCheck } from './components/StartupCheck';
 import { t } from './strings';
 import { theme } from './theme/theme';
-import { cssVars, TOKENS } from './theme/tokens';
+import { cssVars, motion, MOTION_VARS, STILL_VARS, TOKENS } from './theme/tokens';
 
 const globalStyles = {
   ':root, :root.light': cssVars(TOKENS.light),
   ':root.dark': cssVars(TOKENS.dark),
+  html: MOTION_VARS,
   body: { margin: 0, background: 'var(--ah-bg)' },
   // Drag handles appear on hover only, to keep resting screens quiet.
-  '.ah-grip': { opacity: 0, transition: 'opacity .12s', color: 'var(--ah-on-2)' },
+  '.ah-grip': { opacity: 0, transition: `opacity ${motion.fast}`, color: 'var(--ah-on-2)' },
   '.ah-row:hover .ah-grip, .ah-phead:hover .ah-grip': { opacity: 0.7 },
   '.xterm .xterm-viewport': { backgroundColor: 'transparent !important' },
   '@keyframes ah-pulse': { '0%, 100%': { opacity: 1 }, '50%': { opacity: 0.35 } },
@@ -29,8 +30,9 @@ const globalStyles = {
   // Composer parts that slide open sideways when they first appear.
   '@keyframes ah-reveal': { from: { maxWidth: 0, opacity: 0, marginLeft: 0, marginRight: 0 } },
   '@media (prefers-reduced-motion: reduce)': {
+    // Every transition is timed by these.
+    html: STILL_VARS,
     '.ah-working': { animation: 'none' },
-    '.ah-fold': { animation: 'none !important', transition: 'none !important' },
   },
 } as const;
 

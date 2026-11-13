@@ -175,7 +175,6 @@ function DelegationCard({ task, title, onDeliver }: { task: DelegationInfo; titl
       {canDeliver ? (
         <Button
           variant="contained"
-          disableElevation
           onClick={() => onDeliver?.(task)}
           sx={{ flex: 'none', height: 32, px: 1.75, borderRadius: '999px', fontSize: 12, fontWeight: 500, bgcolor: v.primary, color: v.onPrimary }}
         >

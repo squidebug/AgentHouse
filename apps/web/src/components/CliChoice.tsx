@@ -116,7 +116,7 @@ export function CliDialog({ status, onClose, onSaved }: { status: CliStatus | nu
       </DialogContent>
       <DialogActions sx={{ px: 3, pb: 2 }}>
         <Button onClick={onClose}>{t.cancel}</Button>
-        <Button variant="contained" disableElevation onClick={save} disabled={busy || (value === CUSTOM && !custom.trim())}>
+        <Button variant="contained" onClick={save} disabled={busy || (value === CUSTOM && !custom.trim())}>
           {t.save}
         </Button>
       </DialogActions>

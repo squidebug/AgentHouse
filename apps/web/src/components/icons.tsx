@@ -1,4 +1,5 @@
 import type { SVGProps } from 'react';
+import { motion } from '../theme/tokens';
 
 // Thin stroke icons matching the approved design (no icon font, no emoji).
 type IconProps = SVGProps<SVGSVGElement> & { size?: number };
@@ -35,7 +36,7 @@ export const CloseIcon = (p: IconProps) => (
 );
 
 export const ChevronIcon = ({ open, ...p }: IconProps & { open?: boolean }) => (
-  <Svg {...p} style={{ transform: `rotate(${open ? 180 : 0}deg)`, transition: 'transform .15s' }}>
+  <Svg {...p} style={{ transform: `rotate(${open ? 180 : 0}deg)`, transition: `transform ${motion.fast}` }}>
     <path d="M6 9 L12 15 L18 9" />
   </Svg>
 );

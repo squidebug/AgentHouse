@@ -3,15 +3,15 @@ import { useEffect, useState } from 'react';
 import type { SessionInfo } from '@agenthouse/protocol';
 import { api } from '../api/client';
 import { t } from '../strings';
-import { v } from '../theme/tokens';
+import { motion, v } from '../theme/tokens';
 import type { Dnd } from '../workspace/dnd';
 import { composerOpen, summarizeSend } from '../workspace/compose';
 import { paneModes, shownMode, type Action, type WorkspaceState } from '../workspace/state';
 import { CloseIcon, SendIcon } from './icons';
 import { StatusIcon } from './StatusIcon';
 
-// Folding and opening: short, with Material's standard easing.
-const EASE = '.22s cubic-bezier(.2, 0, 0, 1)';
+// Folding and opening.
+const EASE = motion.base;
 // How long "sent" stays under the composer once nothing is left to send.
 const NOTICE_MS = 5000;
 
@@ -98,7 +98,6 @@ export function Composer({ state, dispatch, dnd, sessionById, activeSession }: P
           // From the message to the send button, the keyboard is still here.
           if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocused(false);
         }}
-        className="ah-fold"
         sx={{
           display: 'flex',
           flexWrap: 'wrap',
@@ -112,7 +111,7 @@ export function Composer({ state, dispatch, dnd, sessionById, activeSession }: P
         }}
       >
         {recipients.map((session) => (
-          <Box key={session.id} component="span" className="ah-fold" aria-hidden={open ? undefined : true} sx={reveal(open, 'mr')}>
+          <Box key={session.id} component="span" aria-hidden={open ? undefined : true} sx={reveal(open, 'mr')}>
             <Box
               component="span"
               sx={{
@@ -147,7 +146,7 @@ export function Composer({ state, dispatch, dnd, sessionById, activeSession }: P
             </Box>
           </Box>
         ))}
-        <Box component="span" className="ah-fold" aria-hidden={acceptsDrop ? undefined : true} sx={reveal(acceptsDrop, 'mr')}>
+        <Box component="span" aria-hidden={acceptsDrop ? undefined : true} sx={reveal(acceptsDrop, 'mr')}>
           <Box
             component="span"
             sx={{ display: 'inline-flex', alignItems: 'center', height: 32, px: '10px', borderRadius: '8px', border: `1.5px dashed ${v.primary}`, color: v.primary, fontSize: 12, fontWeight: 500, whiteSpace: 'nowrap' }}
@@ -175,7 +174,6 @@ export function Composer({ state, dispatch, dnd, sessionById, activeSession }: P
           }}
           placeholder={t.message}
           inputProps={{ 'aria-label': t.message }}
-          className="ah-fold"
           sx={{
             flex: '1 1 240px',
             minWidth: 0,
@@ -188,7 +186,7 @@ export function Composer({ state, dispatch, dnd, sessionById, activeSession }: P
             transition: `min-height ${EASE}, padding ${EASE}`,
           }}
         />
-        <Box component="span" className="ah-fold" aria-hidden={open ? undefined : true} sx={reveal(open, 'ml')}>
+        <Box component="span" aria-hidden={open ? undefined : true} sx={reveal(open, 'ml')}>
           <Tooltip title={t.sendShortcut}>
             {/* A disabled button takes no pointer events; the span is what the tooltip hangs on. */}
             <Box component="span" sx={{ display: 'inline-flex' }}>
