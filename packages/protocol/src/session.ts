@@ -135,7 +135,7 @@ export const isAgentBusy = (agent: Pick<AgentInfo, 'state' | 'asking'>): boolean
 
 /**
  * A session placed under another in the tree. `group` only shows it there;
- * `delegate` (later) also lets the parent hand it work. One level: a parent
+ * `delegate` also lets the parent hand it work. One level: a parent
  * is never under another session itself.
  */
 export type LinkKind = 'group' | 'delegate';

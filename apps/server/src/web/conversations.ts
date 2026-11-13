@@ -14,7 +14,8 @@ const POLL_MS = 1000;
 // A view switched away and back within this reuses what was read.
 const KEEP_MS = 60_000;
 
-const nextTick = () => new Promise<void>((resolve) => setImmediate(resolve));
+/** Lets whatever else waits on the event loop (terminal output, API calls) run before the next piece. */
+const yieldToOthers = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 type Listener = (message: ConversationServerMessage) => void;
 
@@ -54,7 +55,7 @@ class SegmentReader {
         }
         this.offset += start;
         this.carry = data.length - start > MAX_LINE_BYTES ? Buffer.alloc(0) : Buffer.from(data.subarray(start));
-        await nextTick();
+        await yieldToOthers();
       }
       return 'read';
     } finally {
