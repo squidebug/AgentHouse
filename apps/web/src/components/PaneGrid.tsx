@@ -2,7 +2,7 @@ import { Box, Button, ButtonBase, IconButton, Tooltip, Typography } from '@mui/m
 import { useCallback, useMemo, useRef, type DragEvent } from 'react';
 import { isAgentBusy, type AgentInfo, type DelegationInfo, type SessionInfo, type SessionLink, type ThemeMode } from '@agenthouse/protocol';
 import { t } from '../strings';
-import { v } from '../theme/tokens';
+import { motion, v } from '../theme/tokens';
 import { childAgents } from '../workspace/agents';
 import type { Dnd } from '../workspace/dnd';
 import type { FlowRow } from '../workspace/flow';
@@ -13,6 +13,7 @@ import { AgentSubtitle, agentDetails, agentTitle, Details, SessionSubtitle, sess
 import { FlowView } from './FlowView';
 import { BackIcon, ChatIcon, ChevronIcon, CloseIcon, DelegateIcon, FlowIcon, Grip, PlusIcon, TerminalIcon } from './icons';
 import { AgentStatusIcon, StatusIcon } from './StatusIcon';
+import { switchSide, switchTrack } from './switch';
 import { TerminalView } from './TerminalView';
 
 // Chips for this many sub-agents at most; the tree has them all.
@@ -135,14 +136,14 @@ const MODES = [
 /** Terminal, conversation or flow, as a switch in the pane header; only the modes the session has. */
 function ModeSwitch({ mode, modes, onChange }: { mode: PaneMode; modes: PaneMode[]; onChange: (mode: PaneMode) => void }) {
   return (
-    <Box role="group" sx={{ flex: 'none', display: 'inline-flex', p: '2px', borderRadius: '10px', bgcolor: v.surface2 }}>
+    <Box role="group" sx={{ flex: 'none', ...switchTrack }}>
       {MODES.filter((m) => modes.includes(m.mode)).map(({ mode: value, label, Icon }) => (
         <Tooltip key={value} title={value === 'flow' ? label : t.withModeShortcut(label)}>
           <IconButton
             aria-label={label}
             aria-pressed={mode === value}
             onClick={() => onChange(value)}
-            sx={{ width: 30, height: 28, borderRadius: '8px', color: mode === value ? v.on : v.on2, bgcolor: mode === value ? v.surface : 'transparent', '&:hover': { bgcolor: mode === value ? v.surface : v.surface3 } }}
+            sx={{ width: 30, height: 28, ...switchSide(mode === value) }}
           >
             <Icon size={16} />
           </IconButton>
@@ -153,7 +154,7 @@ function ModeSwitch({ mode, modes, onChange }: { mode: PaneMode; modes: PaneMode
 }
 
 /** The sub-agents a pane's session or agent started, as chips: busy ones first, then the latest finished. */
-const chipSx = { height: 28, display: 'inline-flex', alignItems: 'center', gap: '6px', px: '10px', borderRadius: '8px', bgcolor: v.surface2, fontSize: 12, fontWeight: 500, '&:hover': { bgcolor: v.surface3 } } as const;
+const chipSx = { height: 28, display: 'inline-flex', alignItems: 'center', gap: '6px', px: '10px', borderRadius: '8px', bgcolor: v.surface2, fontSize: 12, fontWeight: 500, transition: `background-color ${motion.fast}`, '&:hover': { bgcolor: v.surface3 } } as const;
 
 /** The sessions delegated under a pane's session: open one, or drop a piece of the conversation on it to hand it over. */
 function DelegateChips({ delegates, dispatch, dnd, onDropText }: { delegates: SessionInfo[]; dispatch: (action: Action) => void; dnd: Dnd; onDropText: (childId: string, text: string) => void }) {
@@ -303,7 +304,9 @@ function PaneView({ pane, wide, session, state, dispatch, dnd, theme, windowsBui
         gridColumn: wide ? '1 / -1' : 'auto',
         borderRadius: '16px',
         bgcolor: v.surface,
-        boxShadow: active ? `0 0 0 2px ${v.primary}` : 'none',
+        // A card; the one that takes the typing is a step higher, inside its outline.
+        boxShadow: active ? `0 0 0 2px ${v.primary}, ${v.shadow2}` : `0 0 0 2px transparent, ${v.shadow1}`,
+        transition: `box-shadow ${motion.base}`,
         opacity: dragged ? 0.5 : 1,
       }}
     >
@@ -358,7 +361,7 @@ function PaneView({ pane, wide, session, state, dispatch, dnd, theme, windowsBui
       <AgentChips session={session} parentId={agentId} dispatch={dispatch} dnd={dnd} />
       <Box
         onPointerDown={mode !== 'terminal' ? focus : undefined}
-        sx={{ flex: 1, minHeight: 0, m: '0 12px 12px', p: mode !== 'terminal' ? '4px 4px 4px 14px' : '8px 4px 4px 10px', borderRadius: '10px', bgcolor: v.termBg, overflow: 'hidden' }}
+        sx={{ flex: 1, minHeight: 0, m: '0 12px 12px', p: mode !== 'terminal' ? '4px 4px 4px 14px' : '8px 4px 4px 10px', borderRadius: '10px', bgcolor: v.termBg, boxShadow: v.well, overflow: 'hidden' }}
       >
         <Boundary resetKey={`${pane.sessionId}/${agentId}/${mode}`} fallback={<Typography sx={{ p: 1, color: v.termDim }}>{t.cannotShow}</Typography>}>
         {mode === 'flow' ? (
