@@ -38,6 +38,9 @@ interface Props extends DelegationProps {
 
 // App bar, paddings and the composer take roughly this much of the viewport.
 const CHROME_PX = 196;
+// Two columns at most, however wide the window: three or four panes make two rows, whose height is
+// what the rows are sized for. A main area too narrow for two columns stacks the panes.
+const COLUMNS = 'repeat(auto-fit, minmax(max(min(420px, 100%), calc((100% - 12px) / 2)), 1fr))';
 
 export function PaneGrid({ state, dispatch, dnd, sessionById, mode, windowsBuild, onNew, ...delegation }: Props) {
   const canAdd = state.panes.length < MAX_PANES;
@@ -75,13 +78,15 @@ export function PaneGrid({ state, dispatch, dnd, sessionById, mode, windowsBuild
 
   return (
     <Box sx={{ display: 'flex', alignItems: 'stretch', gap: '12px' }}>
-      <Box sx={{ flex: 1, minWidth: 0, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(420px, 100%), 1fr))', gridAutoRows: rowHeight, gap: '12px' }}>
-        {state.panes.map((pane) => {
+      <Box sx={{ flex: 1, minWidth: 0, display: 'grid', gridTemplateColumns: COLUMNS, gridAutoRows: rowHeight, gap: '12px' }}>
+        {state.panes.map((pane, index) => {
           const session = sessionById(pane.sessionId);
           return session ? (
             <PaneView
               key={pane.id}
               pane={pane}
+              // The third of three has its row to itself.
+              wide={state.panes.length === 3 && index === 2}
               session={session}
               state={state}
               dispatch={dispatch}
@@ -213,6 +218,8 @@ function AgentChips({ session, parentId, dispatch, dnd }: { session: SessionInfo
 
 interface PaneViewProps extends DelegationProps {
   pane: Pane;
+  /** Spans the whole row. */
+  wide: boolean;
   session: SessionInfo;
   state: WorkspaceState;
   dispatch: (action: Action) => void;
@@ -222,7 +229,7 @@ interface PaneViewProps extends DelegationProps {
   sessionById: (id: string) => SessionInfo | undefined;
 }
 
-function PaneView({ pane, session, state, dispatch, dnd, theme, windowsBuild, sessionById, links, delegations, onDelegate, onDeliver }: PaneViewProps) {
+function PaneView({ pane, wide, session, state, dispatch, dnd, theme, windowsBuild, sessionById, links, delegations, onDelegate, onDeliver }: PaneViewProps) {
   const active = pane.id === state.active;
   const open = Boolean(state.paneOpen[pane.id]);
   const target = { type: 'pane' as const, id: pane.id };
@@ -295,6 +302,7 @@ function PaneView({ pane, session, state, dispatch, dnd, theme, windowsBuild, se
         flexDirection: 'column',
         minWidth: 0,
         minHeight: 0,
+        gridColumn: wide ? '1 / -1' : 'auto',
         borderRadius: '16px',
         bgcolor: v.surface,
         boxShadow: active ? `0 0 0 2px ${v.primary}` : 'none',
