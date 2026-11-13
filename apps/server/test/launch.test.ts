@@ -98,6 +98,10 @@ test('CLI features are gated by version; an unknown version counts as recent', (
 
 test('titles default to the folder name and drop control characters', () => {
   assert.equal(sessionTitle(undefined, 'C:\\work\\web-app'), 'web-app');
+  // A second and third session in the same folder can be told apart; a title the user gave is theirs.
+  assert.equal(sessionTitle(undefined, 'C:\\work\\web-app', ['web-app', 'other']), 'web-app 2');
+  assert.equal(sessionTitle(undefined, 'C:\\work\\web-app', ['web-app', 'web-app 2']), 'web-app 3');
+  assert.equal(sessionTitle('web-app', 'C:\\work\\web-app', ['web-app']), 'web-app');
   assert.equal(sessionTitle('a\u0007b', cwd), 'ab');
 });
 

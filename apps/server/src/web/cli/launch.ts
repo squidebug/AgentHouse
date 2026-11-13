@@ -101,9 +101,19 @@ async function observeSettings(dir: string, target: ObserveTarget, cwd: string):
   };
 }
 
-export function sessionTitle(title: string | undefined, cwd: string): string {
+/**
+ * A session's title: the one given, else its folder's name. A second session
+ * named after the same folder gets a number (`taken`: the titles listed now),
+ * so the two can be told apart in the tree, the composer and the menus.
+ */
+export function sessionTitle(title: string | undefined, cwd: string, taken: readonly string[] = []): string {
   const clean = (title ?? '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 80);
-  return clean || path.basename(cwd) || cwd;
+  if (clean) return clean;
+  const base = path.basename(cwd) || cwd;
+  if (!taken.includes(base)) return base;
+  let n = 2;
+  while (taken.includes(`${base} ${n}`)) n += 1;
+  return `${base} ${n}`;
 }
 
 /**
@@ -114,9 +124,9 @@ export async function buildLaunch(
   opts: LaunchOptions,
   install: Pick<CliInstall, 'file' | 'args'>,
   cwd: string,
-  { observe, tempRoot = os.tmpdir() }: { observe?: ObserveTarget; tempRoot?: string } = {},
+  { observe, tempRoot = os.tmpdir(), titles = [] }: { observe?: ObserveTarget; tempRoot?: string; /** The titles of the sessions listed now. */ titles?: readonly string[] } = {},
 ): Promise<LaunchSpec> {
-  const title = sessionTitle(opts.title, cwd);
+  const title = sessionTitle(opts.title, cwd, titles);
   const args = [...install.args];
 
   // The test double takes the same flags and reports the way Claude Code does.

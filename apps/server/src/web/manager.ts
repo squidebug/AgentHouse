@@ -133,6 +133,7 @@ export class SessionManager extends EventEmitter {
     const spec = await buildLaunch(opts, install, cwd, {
       ...(hookToken ? { observe: { port: this.options.host.port, token: hookToken, subagents: versionAtLeast(install.version, SUBAGENT_STATUS_LINE_SINCE) } } : {}),
       tempRoot: this.options.host.runDir,
+      titles: this.list().map((session) => session.title),
     });
     try {
       return await this.options.host.spawn({
