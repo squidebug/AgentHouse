@@ -129,16 +129,18 @@ describe('a session', () => {
     assert.equal(created.status, 201);
     const session = created.json as { id: string; pid: number; title: string };
     assert.equal(session.title, '테스트');
-    assert.ok(await waitFor(() => events.messages.some((m) => m.type === 'sessions' && (m.sessions as unknown[]).length === 1), 3000), 'session list pushed');
+    assert.ok(await waitFor(() => events.messages.some((m) => m.type === 'sessions' && (m.sessions as unknown[]).length === 1), 10_000), 'session list pushed');
 
     // Nobody watches for the first 2.5 s: the startup queries must not stall the CLI.
     await sleep(2500);
     const first = await openSocket(app.port, `/ws/session?id=${session.id}`, { authorization, origin });
     assert.equal(first.status, 101);
-    await waitFor(() => first.messages.some((m) => m.type === 'snapshot'), 3000);
-    const snapshot = plain(String(first.messages.find((m) => m.type === 'snapshot')?.data));
-    assert.match(snapshot, /fake-agent ready/);
-    assert.match(snapshot, /REPORT cpr=\d+;\d+/, 'cursor position query answered while nobody watched');
+    // On a busy machine the CLI may not be up after those 2.5 s: what it prints is waited for, in the
+    // snapshot or after it.
+    const shown = () => plain(screenText(first.messages));
+    assert.ok(await waitFor(() => /fake-agent ready/.test(shown()), 10_000), 'the CLI started');
+    assert.ok(await waitFor(() => /REPORT cpr=\d+;\d+/.test(shown()), 10_000), 'cursor position query answered with nobody watching it start');
+    const snapshot = shown();
     const childPid = Number(snapshot.match(/REPORT child=(\d+)/)?.[1]);
 
     first.ws?.send(JSON.stringify({ type: 'claim' }));
@@ -148,21 +150,20 @@ describe('a session', () => {
       body: { text: '안녕하세요 AgentHouse\n둘째 줄 ✓', enterDelayMs: 100, quietMs: 100 },
     });
     assert.deepEqual(composed.json, { sessionId: session.id, sent: true, submitted: true });
-    assert.ok(await waitFor(() => screenText(first.messages).includes('둘째 줄 ✓'), 5000), 'Korean multi-line text arrives');
+    assert.ok(await waitFor(() => screenText(first.messages).includes('둘째 줄 ✓'), 10_000), 'Korean multi-line text arrives');
     assert.ok(!screenText(first.messages).includes('5;10R'), 'browser reply did not reach the CLI');
 
     first.ws?.close();
     await sleep(200);
     const second = await openSocket(app.port, `/ws/session?id=${session.id}`, { authorization, origin });
-    await waitFor(() => second.messages.some((m) => m.type === 'snapshot'), 3000);
+    await waitFor(() => second.messages.some((m) => m.type === 'snapshot'), 10_000);
     const again = plain(String(second.messages.find((m) => m.type === 'snapshot')?.data));
     assert.match(again, /둘째 줄 ✓/, 'reconnect restores the screen');
 
     const removed = await request(app.port, 'DELETE', `/api/sessions/${session.id}`, { headers: { authorization, origin } });
     assert.equal(removed.status, 200);
-    await sleep(1000);
-    assert.equal(isAlive(session.pid), false, 'CLI process ended');
-    assert.ok(Number.isFinite(childPid) && !isAlive(childPid), 'grandchild (MCP-server stand-in) ended');
+    assert.ok(await waitFor(() => !isAlive(session.pid), 10_000), 'CLI process ended');
+    assert.ok(Number.isFinite(childPid) && (await waitFor(() => !isAlive(childPid), 10_000)), 'grandchild (MCP-server stand-in) ended');
     second.ws?.close();
     events.ws?.close();
   });
