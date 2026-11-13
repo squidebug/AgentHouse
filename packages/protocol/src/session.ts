@@ -130,6 +130,9 @@ export interface AgentInfo {
   transcriptPath: string | null;
 }
 
+/** Working, or waiting for the user with one of its tools: not done. */
+export const isAgentBusy = (agent: Pick<AgentInfo, 'state' | 'asking'>): boolean => agent.state === 'running' || agent.asking;
+
 /**
  * A session placed under another in the tree. `group` only shows it there;
  * `delegate` (later) also lets the parent hand it work. One level: a parent

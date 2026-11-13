@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import type { SessionInfo } from '@agenthouse/protocol';
+import { isAgentBusy, type SessionInfo } from '@agenthouse/protocol';
 import { notSaved, writeFileAtomic } from '../shared/state';
 
 const FILE_VERSION = 1;
@@ -21,7 +21,7 @@ function asEnded(info: SessionInfo): SessionInfo {
     exit: info.exit ?? { code: null, signal: null, at },
     status: info.status.value === 'exited' ? info.status : { value: 'exited', reason: null, tool: null, error: false, at },
     // Whatever still ran ended with the session.
-    agents: info.agents.map((a) => (a.state === 'running' || a.asking ? { ...a, state: 'stopped', endedAt: a.endedAt ?? at, tool: null, asking: false } : a)),
+    agents: info.agents.map((a) => (isAgentBusy(a) ? { ...a, state: 'stopped', endedAt: a.endedAt ?? at, tool: null, asking: false } : a)),
   };
 }
 

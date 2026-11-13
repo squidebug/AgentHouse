@@ -1,6 +1,6 @@
 import { Box, Button, ButtonBase, IconButton, Menu, MenuItem, Tooltip, Typography } from '@mui/material';
 import { useState } from 'react';
-import type { AgentInfo, LinkKind, SessionInfo, SessionLink } from '@agenthouse/protocol';
+import { isAgentBusy, type AgentInfo, type LinkKind, type SessionInfo, type SessionLink } from '@agenthouse/protocol';
 import { t } from '../strings';
 import { v } from '../theme/tokens';
 import { agentRows, SHOWN_FINISHED } from '../workspace/agents';
@@ -69,7 +69,7 @@ function AgentRow({ session, agent, depth, shown, state, dispatch, dnd }: AgentR
           aria-label={t.open(title)}
           sx={{ flex: 1, minWidth: 0, flexDirection: 'column', alignItems: 'flex-start', textAlign: 'left', py: '2px', borderRadius: '6px' }}
         >
-          <Typography noWrap sx={{ maxWidth: '100%', fontWeight: 500, color: agent.state === 'stopped' && !agent.asking ? v.on2 : v.on }}>
+          <Typography noWrap sx={{ maxWidth: '100%', fontWeight: 500, color: isAgentBusy(agent) ? v.on : v.on2 }}>
             {title}
           </Typography>
           <AgentSubtitle agent={agent} />
@@ -88,7 +88,7 @@ function AgentRows({ session, base, state, dispatch, dnd }: Omit<AgentRowProps, 
   const allKey = `${session.id}#agents`;
   const all = Boolean(state.rowOpen[allKey]);
   const { rows, folded } = agentRows(session.agents, all);
-  const finished = session.agents.filter((a) => a.state === 'stopped' && !a.asking).length;
+  const finished = session.agents.filter((a) => !isAgentBusy(a)).length;
   const shown = new Set(state.panes.filter((p) => p.sessionId === session.id && p.agentId).map((p) => p.agentId));
   return (
     <Box role="group" aria-label={`${session.title} ${t.subagent}`}>

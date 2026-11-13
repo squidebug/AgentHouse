@@ -1,4 +1,5 @@
 import type { ConversationEntry, ConversationTurn, EntryDetail, ToolState } from '@agenthouse/protocol';
+import { AGENT_TOOLS } from './agents';
 import { isInterruptText } from './status';
 
 // Claude Code's transcript (<config>/projects/<cwd>/<session>.jsonl), as of
@@ -148,8 +149,6 @@ export function toolSummary(name: string, input: Json, cwd: string | null): stri
     }
   }
 }
-
-const AGENT_TOOLS = new Set(['Agent', 'Task']);
 
 function resultText(content: unknown): string {
   if (typeof content === 'string') return content;

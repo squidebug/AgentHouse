@@ -1,6 +1,6 @@
 import { Box, ButtonBase, Typography } from '@mui/material';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { isAsking, type SessionInfo, type SessionLink } from '@agenthouse/protocol';
+import { isAgentBusy, isAsking, type SessionInfo, type SessionLink } from '@agenthouse/protocol';
 import { useConversation } from '../api/conversation';
 import { t } from '../strings';
 import { v } from '../theme/tokens';
@@ -19,7 +19,7 @@ const BAR_SX: Record<BarKind, object> = {
 };
 
 const busyRow = (row: FlowRow) =>
-  row.kind === 'agent' ? row.agent.state === 'running' || row.agent.asking : row.session.status.value === 'working' || isAsking(row.session.status.value);
+  row.kind === 'agent' ? isAgentBusy(row.agent) : row.session.status.value === 'working' || isAsking(row.session.status.value);
 
 /** The time, moving every second while something works. */
 function useNow(ticking: boolean): number {
@@ -69,7 +69,7 @@ function Axis({ window }: { window: TimeWindow }) {
 /** One lane of the graph: its name over its first bar, then its bars. */
 function Lane({ row, bars, window, highlight, onOpen }: { row: FlowRow; bars: Bar[]; window: TimeWindow; highlight: boolean; onOpen: (row: FlowRow) => void }) {
   const title = row.kind === 'agent' ? agentTitle(row.agent) : row.session.title;
-  const quiet = row.kind === 'agent' ? row.agent.state === 'stopped' && !row.agent.asking : row.session.state === 'exited';
+  const quiet = row.kind === 'agent' ? !isAgentBusy(row.agent) : row.session.state === 'exited';
   const label = labelPlace(bars, window);
   const offset = 'left' in label ? label.left : label.right;
   const link = row.kind === 'session' ? row.link : null;

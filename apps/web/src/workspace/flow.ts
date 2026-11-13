@@ -3,7 +3,7 @@
 // under it, with the stretches of time each worked. The tree beside it shows
 // who is under whom; this shows when. Kept free of React so it can be tested
 // directly.
-import { isAsking, type AgentInfo, type ConversationTurn, type SessionInfo, type SessionLink } from '@agenthouse/protocol';
+import { isAgentBusy as agentBusy, isAsking, type AgentInfo, type ConversationTurn, type SessionInfo, type SessionLink } from '@agenthouse/protocol';
 import { t } from '../strings';
 import { agentRows } from './agents';
 
@@ -25,7 +25,6 @@ export type FlowFilter = 'all' | 'running';
 export const MAX_WINDOW_MS = 60 * 60_000;
 const MIN_WINDOW_MS = 2 * 60_000;
 
-const agentBusy = (agent: AgentInfo) => agent.state === 'running' || agent.asking;
 const sessionBusy = (session: SessionInfo) => session.status.value === 'working' || isAsking(session.status.value);
 
 /**

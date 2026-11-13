@@ -1,6 +1,6 @@
 import { Box, Button, ButtonBase, IconButton, Tooltip, Typography } from '@mui/material';
 import { useCallback, useMemo, useRef, type DragEvent } from 'react';
-import type { AgentInfo, DelegationInfo, SessionInfo, SessionLink, ThemeMode } from '@agenthouse/protocol';
+import { isAgentBusy, type AgentInfo, type DelegationInfo, type SessionInfo, type SessionLink, type ThemeMode } from '@agenthouse/protocol';
 import { t } from '../strings';
 import { v } from '../theme/tokens';
 import { childAgents } from '../workspace/agents';
@@ -192,7 +192,7 @@ function DelegateChips({ delegates, dispatch, dnd, onDropText }: { delegates: Se
 function AgentChips({ session, parentId, dispatch, dnd }: { session: SessionInfo; parentId: string | null; dispatch: (action: Action) => void; dnd: Dnd }) {
   const children = childAgents(session.agents, parentId);
   if (!children.length) return null;
-  const busy = children.filter((a) => a.state === 'running' || a.asking);
+  const busy = children.filter(isAgentBusy);
   const finished = children.filter((a) => !busy.includes(a)).reverse();
   const chips = [...busy, ...finished].slice(0, MAX_CHIPS);
   return (

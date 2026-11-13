@@ -1,4 +1,4 @@
-import { isAsking, type AgentInfo, type SessionStatus } from '@agenthouse/protocol';
+import { isAgentBusy, isAsking, type AgentInfo, type SessionStatus } from '@agenthouse/protocol';
 import { v } from '../theme/tokens';
 import { agentStatusText, statusText } from './Details';
 
@@ -33,7 +33,7 @@ export function StatusIcon({ status, size = 14 }: { status: SessionStatus; size?
 /** A sub-agent: working (pulsing), waiting for the user (amber with a halo), or done (a check). */
 export function AgentStatusIcon({ agent, size = 14 }: { agent: AgentInfo; size?: number }) {
   const label = agentStatusText(agent);
-  if (agent.state === 'stopped' && !agent.asking) {
+  if (!isAgentBusy(agent)) {
     return (
       <svg role="img" aria-label={label} width={size} height={size} viewBox="0 0 16 16" style={{ flex: 'none' }}>
         <path d="M3.6 8.4 L6.6 11.2 L12.4 4.8" style={{ fill: 'none', stroke: v.done, strokeWidth: 2.2, strokeLinecap: 'round', strokeLinejoin: 'round' }} />

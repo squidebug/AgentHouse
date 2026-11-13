@@ -1,6 +1,6 @@
 // How a session's sub-agents show in the tree and the pane header, kept free
 // of React so it can be tested directly.
-import type { AgentInfo } from '@agenthouse/protocol';
+import { isAgentBusy as busy, type AgentInfo } from '@agenthouse/protocol';
 
 /** Finished agents beyond this many are folded until the user opens them. */
 export const SHOWN_FINISHED = 3;
@@ -10,8 +10,6 @@ export interface AgentRow {
   /** 1 for an agent the main conversation started, one more per level of nesting. */
   depth: number;
 }
-
-const busy = (agent: AgentInfo) => agent.state === 'running' || agent.asking;
 
 /** The agents an agent (or, for null, the main conversation) started, oldest first. */
 export function childAgents(agents: AgentInfo[], parentId: string | null): AgentInfo[] {

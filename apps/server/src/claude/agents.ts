@@ -11,10 +11,11 @@ import { askingTool, isClaudeTranscript, type HookEvent } from './status';
 // arrive in any order. Helpers Claude starts on its own (prompt suggestions,
 // /btw) have an empty agent_type and are left out.
 
-const AGENT_TOOLS = new Set(['Agent', 'Task']);
+/** The tools that start a sub-agent (Task is the older name). */
+export const AGENT_TOOLS = new Set(['Agent', 'Task']);
 const RESUMES = new Set(['PostToolUse', 'PostToolUseFailure', 'PermissionDenied', 'ElicitationResult']);
 // Claude's agent ids are short hex strings; a path is built from them, so nothing else is taken.
-const AGENT_ID = /^[A-Za-z0-9_-]{1,64}$/;
+export const AGENT_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const MAX_AGENTS = 500;
 const TEXT_CHARS = 200;
 // An Agent call that never started an agent (refused, failed) is forgotten after this.

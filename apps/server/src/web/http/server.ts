@@ -2,6 +2,7 @@ import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { AUTH_REQUIRED, LOGIN_EXPIRED, SOCKET_PROTOCOL, type ApiError, type ComposeResult, type EventServerMessage, type LoginResult } from '@agenthouse/protocol';
+import { AGENT_ID } from '../../claude/agents';
 import { LaunchError } from '../cli/launch';
 import { CliChoiceError, EnvService } from '../doctor';
 import { HostUnavailableError, type HostClient } from '../host-client';
@@ -96,8 +97,7 @@ async function readJson(req: IncomingMessage, limit = 256 * 1024): Promise<unkno
   }
 }
 
-// A sub-agent's id as Claude writes it; anything else names no transcript.
-const AGENT_ID = /^[A-Za-z0-9_-]{1,64}$/;
+// A sub-agent's id as Claude writes it (AGENT_ID); anything else names no transcript.
 const agentParam = (url: URL): string | null | undefined => {
   const value = url.searchParams.get('agent');
   if (value === null) return null;
