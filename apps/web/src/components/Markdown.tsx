@@ -7,10 +7,11 @@ import { v } from '../theme/tokens';
 import { Boundary } from './Boundary';
 
 // HTML in the text stays text, and link targets are sanitised (react-markdown's
-// defaults). Links open outside the app, without a referrer.
+// defaults). Links open outside the app, without a referrer. An agent writes the
+// link's words, which may not be where it goes: the address itself shows on hover.
 const components: Components = {
   a: ({ href, children }) => (
-    <a href={href} target="_blank" rel="noopener noreferrer">
+    <a href={href} title={href} target="_blank" rel="noopener noreferrer">
       {children}
     </a>
   ),
