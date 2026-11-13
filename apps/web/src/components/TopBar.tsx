@@ -1,8 +1,9 @@
 import { Badge, Box, Button, IconButton, Popover, Tooltip, Typography } from '@mui/material';
 import { useState } from 'react';
-import type { AccountLimits, EnvReport, ThemeMode } from '@agenthouse/protocol';
+import type { AccountLimits, EnvReport, ThemeMode, Vendor } from '@agenthouse/protocol';
 import { t } from '../strings';
 import { v } from '../theme/tokens';
+import { CliDialog, CliRows } from './CliChoice';
 import { CopyCommand } from './CopyCommand';
 import { MoonIcon, PulseIcon, SunIcon } from './icons';
 import { LimitsChip } from './LimitsChip';
@@ -20,6 +21,7 @@ const LEVEL_COLOR = { error: v.error, warn: v.warn, info: v.on2 } as const;
 
 export function TopBar({ limits, env, envLoading, refreshEnv, mode, onToggleMode }: Props) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
+  const [choosing, setChoosing] = useState<Vendor | null>(null);
   const messages = env?.messages ?? [];
   const attention = messages.some((m) => m.level !== 'info');
 
@@ -63,17 +65,9 @@ export function TopBar({ limits, env, envLoading, refreshEnv, mode, onToggleMode
           </Box>
         ))}
         {env && (
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', fontSize: 12, color: v.on2 }}>
-            <span>Node {env.node.version}</span>
-            {(['claude', 'codex'] as const).map((vendor) => {
-              const status = env.clis[vendor];
-              const selected = status.selected === null ? undefined : status.installs[status.selected];
-              return (
-                <span key={vendor}>
-                  {t.vendorName[vendor]} {selected ? (selected.version ?? '?') : t.notInstalled}
-                </span>
-              );
-            })}
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            <Typography sx={{ fontSize: 12, color: v.on2 }}>Node {env.node.version}</Typography>
+            <CliRows env={env} onChange={setChoosing} />
           </Box>
         )}
         <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
@@ -82,6 +76,14 @@ export function TopBar({ limits, env, envLoading, refreshEnv, mode, onToggleMode
           </Button>
         </Box>
       </Popover>
+      <CliDialog
+        status={env && choosing ? env.clis[choosing] : null}
+        onClose={() => setChoosing(null)}
+        onSaved={() => {
+          setChoosing(null);
+          refreshEnv();
+        }}
+      />
     </Box>
   );
 }

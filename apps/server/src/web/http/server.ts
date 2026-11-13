@@ -3,7 +3,7 @@ import type { Duplex } from 'node:stream';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { AUTH_REQUIRED, LOGIN_EXPIRED, SOCKET_PROTOCOL, type ApiError, type ComposeResult, type EventServerMessage, type LoginResult } from '@agenthouse/protocol';
 import { LaunchError } from '../cli/launch';
-import { EnvService } from '../doctor';
+import { CliChoiceError, EnvService } from '../doctor';
 import { HostUnavailableError, type HostClient } from '../host-client';
 import { HostRequestError } from '../../shared/host-protocol';
 import { Conversations } from '../conversations';
@@ -11,7 +11,7 @@ import { DelegationError, Delegations, delegationsFile } from '../delegations';
 import { LinkError } from '../links';
 import { SessionManager } from '../manager';
 import { AccessControl } from './access';
-import { ComposeBody, DelegateBody, DeliverBody, LaunchBody, LinkBody, LoginBody, TerminalClient } from './schemas';
+import { ChooseCliBody, ComposeBody, DelegateBody, DeliverBody, LaunchBody, LinkBody, LoginBody, TerminalClient } from './schemas';
 import { serveStatic } from './static';
 
 export interface ServerOptions {
@@ -221,6 +221,19 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
     }
     if (url.pathname === '/api/env' && req.method === 'GET') {
       send(res, 200, await env.report(url.searchParams.has('refresh')));
+      return;
+    }
+    // Which executable runs a CLI: one picked or typed in the environment check, or null for the shell's.
+    if (parts[0] === 'api' && parts[1] === 'cli' && parts.length === 3 && req.method === 'PUT') {
+      const vendor = parts[2];
+      if (vendor !== 'claude' && vendor !== 'codex') throw new HttpError(404, '찾을 수 없습니다.');
+      const { path: chosen } = parse(ChooseCliBody, await readJson(req, 8192));
+      try {
+        send(res, 200, await env.choose(vendor, chosen));
+      } catch (error) {
+        if (error instanceof CliChoiceError) throw new HttpError(400, error.message, 'INVALID_CLI');
+        throw error;
+      }
       return;
     }
     if (url.pathname === '/api/sessions' && req.method === 'GET') {

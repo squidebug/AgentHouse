@@ -17,8 +17,13 @@ export function runQuick(file: string, args: string[], timeoutMs = 10_000): Prom
 }
 
 export async function detectVersion(install: Pick<CliInstall, 'file' | 'args'>): Promise<string | null> {
+  return (await identify(install)).version;
+}
+
+/** What `--version` says: the version, and the whole line, which names the program ("2.1.323 (Claude Code)", "codex-cli 0.167.2"). */
+export async function identify(install: Pick<CliInstall, 'file' | 'args'>): Promise<{ version: string | null; text: string }> {
   const { stdout } = await runQuick(install.file, [...install.args, '--version']);
-  return stdout.match(/(\d+\.\d+\.\d+)/)?.[1] ?? null;
+  return { version: stdout.match(/(\d+\.\d+\.\d+)/)?.[1] ?? null, text: stdout.trim() };
 }
 
 export async function claudeLoggedIn(install: Pick<CliInstall, 'file' | 'args'>): Promise<boolean | null> {

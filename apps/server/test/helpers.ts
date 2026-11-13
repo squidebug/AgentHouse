@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
@@ -166,4 +167,32 @@ export async function login(app: { port: number; loginUrl(): string }): Promise<
   const token = (res.json as { token?: unknown } | null)?.token;
   if (typeof token !== 'string') throw new Error(`login failed: ${res.status}`);
   return `Bearer ${token}`;
+}
+
+/**
+ * A stand-in Claude Code installed in `bin` the way npm does (a .cmd shim to a
+ * script on Windows, an executable elsewhere). It answers `--version` and
+ * `auth status --json` as the real one does; returns the file to run.
+ */
+export function installFakeClaude(bin: string, version = '9.9.9'): string {
+  const source = [
+    '#!/usr/bin/env node',
+    "const args = process.argv.slice(2).join(' ');",
+    `if (args === '--version') console.log('${version} (Claude Code)');`,
+    "else if (args === 'auth status --json') console.log(JSON.stringify({ loggedIn: true }));",
+    '',
+  ].join('\n');
+  mkdirSync(bin, { recursive: true });
+  if (process.platform === 'win32') {
+    const script = path.join(bin, 'node_modules', 'fake-claude', 'cli.js');
+    mkdirSync(path.dirname(script), { recursive: true });
+    writeFileSync(script, source);
+    const shim = path.join(bin, 'claude.cmd');
+    writeFileSync(shim, '@ECHO off\r\n"%_prog%"  "%dp0%\\node_modules\\fake-claude\\cli.js" %*\r\n');
+    return shim;
+  }
+  const file = path.join(bin, 'claude');
+  writeFileSync(file, source);
+  chmodSync(file, 0o755);
+  return file;
 }

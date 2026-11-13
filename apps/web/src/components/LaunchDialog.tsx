@@ -125,7 +125,7 @@ export function LaunchDialog({ open, env, mode, onClose, onLaunched }: Props) {
             return (
               <ToggleButton key={id} value={id} sx={{ flexDirection: 'column', gap: 0.25, py: 1, textTransform: 'none' }}>
                 <span style={{ fontWeight: 500 }}>{t.vendorName[id]}</span>
-                <span style={{ fontSize: 12, color: v.on2 }}>{selected ? (selected.version ?? '') : env ? t.notInstalled : ''}</span>
+                <span style={{ fontSize: 12, color: v.on2 }}>{status?.chosenError ? t.chosenUnusable : selected ? (selected.version ?? '') : env ? t.notInstalled : ''}</span>
               </ToggleButton>
             );
           })}

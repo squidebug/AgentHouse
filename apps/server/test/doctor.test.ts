@@ -5,7 +5,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { writeAppSettings } from '../src/web/app-settings';
 import { formatChecks, outsidePath, type Check } from '../src/web/doctor-command';
+import { installFakeClaude } from './helpers';
 
 const serverDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const isWindows = process.platform === 'win32';
@@ -42,26 +44,6 @@ test('an install off the user\'s PATH is found in the usual folders; one on PATH
   }
 });
 
-/** A stand-in Claude Code that answers --version and auth status as the real one does, installed like npm does. */
-function installFakeClaude(bin: string): void {
-  const source = [
-    '#!/usr/bin/env node',
-    "const args = process.argv.slice(2).join(' ');",
-    "if (args === '--version') console.log('9.9.9 (Claude Code)');",
-    "else if (args === 'auth status --json') console.log(JSON.stringify({ loggedIn: true }));",
-    '',
-  ].join('\n');
-  if (isWindows) {
-    const script = path.join(bin, 'node_modules', 'fake-claude', 'cli.js');
-    mkdirSync(path.dirname(script), { recursive: true });
-    writeFileSync(script, source);
-    writeFileSync(path.join(bin, 'claude.cmd'), '@ECHO off\r\n"%_prog%"  "%dp0%\\node_modules\\fake-claude\\cli.js" %*\r\n');
-  } else {
-    writeFileSync(path.join(bin, 'claude'), source);
-    chmodSync(path.join(bin, 'claude'), 0o755);
-  }
-}
-
 function runDoctor(env: NodeJS.ProcessEnv): { status: number | null; ok: boolean; checks: Check[] } {
   const result = spawnSync(process.execPath, ['--import', 'tsx', 'src/main.ts', 'doctor', '--json'], { cwd: serverDir, env, encoding: 'utf8', timeout: 60_000 });
   const report = JSON.parse(result.stdout) as { ok: boolean; checks: Check[] };
@@ -83,13 +65,24 @@ test('doctor: without a CLI on PATH it fails; with one, that is the one it repor
     assert.ok(none.checks.some((c) => c.label === 'node-pty' && c.level === 'ok'));
     assert.ok(none.checks.some((c) => c.label === '상태 폴더' && c.level === 'ok'), 'a folder not made yet is fine');
 
-    installFakeClaude(bin);
+    const fake = installFakeClaude(bin);
     const found = runDoctor({ ...base, PATH: [bin, ...system].join(path.delimiter) });
     const claude = found.checks.filter((c) => c.label === 'Claude Code');
     assert.equal(found.status, 0, JSON.stringify(found.checks));
     assert.equal(claude.length, 1);
     assert.equal(claude[0]?.level, 'ok');
     assert.match(claude[0]?.detail ?? '', /^9\.9\.9 · 로그인됨 · .*claude(\.cmd)?$/);
+
+    // Chosen in the environment check: off PATH, it is still the one run, and said so.
+    writeAppSettings(base.AGENTHOUSE_HOME, { cli: { claude: fake } });
+    const chosen = runDoctor({ ...base, PATH: system.join(path.delimiter) });
+    assert.equal(chosen.status, 0, JSON.stringify(chosen.checks));
+    assert.match(chosen.checks.find((c) => c.label === 'Claude Code')?.detail ?? '', /^9\.9\.9 · 지정함 · 로그인됨 · /);
+
+    rmSync(bin, { recursive: true, force: true });
+    const gone = runDoctor({ ...base, PATH: system.join(path.delimiter) });
+    assert.equal(gone.status, 1);
+    assert.ok(gone.checks.some((c) => c.label === 'Claude Code' && c.level === 'error' && c.detail.includes('파일이 없습니다')), JSON.stringify(gone.checks));
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

@@ -1,8 +1,9 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
+import { existsSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import path from 'node:path';
-import type { AccountLimits, ComposeRequest, LaunchOptions, LinkKind, SessionInfo, SessionLink, Vendor } from '@agenthouse/protocol';
+import { VENDOR_NAMES, type AccountLimits, type CliStatus, type ComposeRequest, type LaunchOptions, type LinkKind, type SessionInfo, type SessionLink, type Vendor } from '@agenthouse/protocol';
 import { buildLaunch, LaunchError } from './cli/launch';
 import { EnvService, INSTALL_COMMAND } from './doctor';
 import type { HostClient } from './host-client';
@@ -42,6 +43,12 @@ export function versionAtLeast(version: string | null, minimum: number[]): boole
     if (a !== b) return a > b;
   }
   return true;
+}
+
+/** The install the check picked is still there to run: its program and the script it runs. */
+function stillThere(status: CliStatus): boolean {
+  const install = status.selected === null ? undefined : status.installs[status.selected];
+  return Boolean(install) && [install!.file, ...install!.args].every((part) => existsSync(part));
 }
 
 async function resolveCwd(requested: string | undefined, fallback: string): Promise<string> {
@@ -109,7 +116,12 @@ export class SessionManager extends EventEmitter {
       if (!this.options.fakeAgentPath) throw new LaunchError('알 수 없는 CLI입니다.', 'INVALID_OPTION');
       install = { file: process.execPath, args: [this.options.fakeAgentPath], version: null };
     } else {
-      const status = await this.options.env.cli(opts.vendor);
+      let status = await this.options.env.cli(opts.vendor);
+      // The check is a minute old at most: a CLI installed, removed or moved since is looked for again.
+      if (!stillThere(status)) status = await this.options.env.cli(opts.vendor, true);
+      if (status.chosenError) {
+        throw new LaunchError(`지정한 ${VENDOR_NAMES[opts.vendor]} 실행 파일을 쓸 수 없습니다. ${status.chosenError}`, 'ENV_CLI_CHOSEN_UNUSABLE', 409);
+      }
       const selected = status.selected === null ? undefined : status.installs[status.selected];
       if (!selected) throw new LaunchError(MISSING_TEXT[opts.vendor], 'ENV_CLI_MISSING', 409, INSTALL_COMMAND[opts.vendor]);
       install = selected;

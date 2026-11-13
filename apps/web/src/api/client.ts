@@ -3,6 +3,7 @@ import {
   SOCKET_PROTOCOL,
   TOKEN_PROTOCOL_PREFIX,
   type ApiError,
+  type CliStatus,
   type ComposeRequest,
   type ComposeResult,
   type DelegationInfo,
@@ -12,6 +13,7 @@ import {
   type LinkKind,
   type SessionInfo,
   type SessionLink,
+  type Vendor,
 } from '@agenthouse/protocol';
 import { authToken, requireLogin } from './auth';
 
@@ -50,6 +52,8 @@ export const api = {
   /** Whether the page's token is still good; a refusal shows the login page. */
   auth: () => call<unknown>('GET', '/api/auth'),
   env: (refresh = false) => call<EnvReport>('GET', refresh ? '/api/env?refresh=1' : '/api/env'),
+  /** Runs this file for the CLI from now on (null: the one the user's shell runs); refused with the reason if it is not that program. */
+  chooseCli: (vendor: Vendor, path: string | null) => call<CliStatus>('PUT', `/api/cli/${vendor}`, { path }),
   launch: (opts: LaunchOptions) => call<SessionInfo>('POST', '/api/sessions', opts),
   /** Ends the CLI; the session stays listed, ended. */
   end: (id: string) => call<unknown>('POST', `/api/sessions/${encodeURIComponent(id)}/end`),

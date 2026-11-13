@@ -68,6 +68,9 @@ export function resolveShim(candidate: string, shimText?: string): Omit<Resolved
   return null;
 }
 
+/** What makes two installs one: the program and script they run. */
+export const installKey = (install: Pick<ResolvedCommand, 'file' | 'args'>) => [install.file, ...install.args].join('\0').toLowerCase();
+
 /** Distinct installs of `name`; the first is the one the user's shell runs. */
 export function resolveCli(name: string): ResolvedCommand[] {
   const installs: ResolvedCommand[] = [];
@@ -75,10 +78,21 @@ export function resolveCli(name: string): ResolvedCommand[] {
   for (const hit of findOnPath(name)) {
     const resolved = resolveShim(hit);
     if (!resolved) continue;
-    const key = [resolved.file, ...resolved.args].join('\0').toLowerCase();
+    const key = installKey(resolved);
     if (seen.has(key)) continue;
     seen.add(key);
     installs.push({ shim: hit, ...resolved });
   }
   return installs;
+}
+
+/**
+ * A file the user chose to run as a CLI, as node-pty can start it; null if it
+ * is not one: a full path to a program (on Windows a .exe, or an npm or pnpm
+ * .cmd shim, which is resolved like those found on PATH).
+ */
+export function resolveChosen(file: string): ResolvedCommand | null {
+  if (!path.isAbsolute(file) || !isExecutableFile(file)) return null;
+  const resolved = resolveShim(file);
+  return resolved ? { shim: file, ...resolved } : null;
 }

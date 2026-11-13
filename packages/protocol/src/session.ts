@@ -192,16 +192,29 @@ export interface SessionInfo {
 export interface CliInstall {
   file: string;
   args: string[];
+  /** As found or given: the PATH entry (an npm shim) or the file the user chose. */
   shim: string;
   version: string | null;
+  /** Found through PATH; the first such is the one the user's shell runs. */
+  onPath: boolean;
 }
 
 export interface CliStatus {
   vendor: Vendor;
+  /** Those on PATH in PATH order, then the one the user chose if it is not among them. */
   installs: CliInstall[];
-  /** Index into `installs` of the one AgentHouse launches: the one the user's shell runs. */
+  /** Index into `installs` of the one AgentHouse launches: the one the user chose, else the one the user's shell runs. Null when there is none, or the chosen one cannot run. */
   selected: number | null;
   loggedIn: boolean | null;
+  /** The executable the user chose for this CLI (in the environment check), or null to follow PATH. */
+  chosen: string | null;
+  /** Why the chosen executable cannot run (gone, not a program): nothing launches until it is chosen again. */
+  chosenError?: string;
+}
+
+/** PUT /api/cli/:vendor: the executable to run for this CLI, or null for the one the user's shell runs. */
+export interface ChooseCliRequest {
+  path: string | null;
 }
 
 export type EnvLevel = 'error' | 'warn' | 'info';

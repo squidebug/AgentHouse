@@ -8,7 +8,7 @@
 // sessions or ~/.claude.
 //   pnpm build && pnpm ui:check [-- --out <folder>] [-- --headed]
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
@@ -32,6 +32,20 @@ mkdirSync(work, { recursive: true });
 const env = { ...process.env, AGENTHOUSE_HOME: home, CLAUDE_CONFIG_DIR: config };
 writeSampleSession({ home, config, cwd: work });
 
+/** A stand-in Claude Code that answers --version like the real one, installed as npm would; the file to choose. */
+function installFakeClaude(bin, version) {
+  const source = `#!/usr/bin/env node\nif (process.argv[2] === '--version') console.log('${version} (Claude Code)');\nelse console.log(JSON.stringify({ loggedIn: true }));\n`;
+  mkdirSync(path.join(bin, 'node_modules', 'fake-claude'), { recursive: true });
+  if (process.platform !== 'win32') {
+    writeFileSync(path.join(bin, 'claude'), source);
+    chmodSync(path.join(bin, 'claude'), 0o755);
+    return path.join(bin, 'claude');
+  }
+  writeFileSync(path.join(bin, 'node_modules', 'fake-claude', 'cli.js'), source);
+  writeFileSync(path.join(bin, 'claude.cmd'), '@ECHO off\r\n"%_prog%"  "%dp0%\\node_modules\\fake-claude\\cli.js" %*\r\n');
+  return path.join(bin, 'claude.cmd');
+}
+
 let failures = 0;
 const check = (ok, label, detail = '') => {
   if (!ok) failures += 1;
@@ -49,8 +63,16 @@ try {
   await page.emulateMedia({ colorScheme: 'dark' });
   // The terminal draws on a canvas (WebGL); its text is checked on the server side by the tests.
   const terminalShown = () => page.locator('.xterm-screen').first().waitFor({ timeout: 10_000 });
-  page.on('console', (message) => message.type() === 'error' && errors.push(message.text()));
+  // A refused choice of executable is a 400 the check provokes on purpose; Chrome logs it as an error.
+  const provoked = (message) => message.location().url.includes('/api/cli/') && /status of 400/.test(message.text());
+  page.on('console', (message) => message.type() === 'error' && !provoked(message) && errors.push(message.text()));
   page.on('pageerror', (error) => errors.push(error.message));
+  // Out of the way of hover styles and tooltips, after animations settle.
+  const settle = async () => {
+    await page.mouse.move(1, 899);
+    await page.locator('body').evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur());
+    await page.waitForTimeout(700);
+  };
   await page.goto(url);
   await page.getByRole('heading', { name: 'AgentHouse' }).waitFor();
   check(!new URL(page.url()).searchParams.has('code'), 'the login code is spent and leaves the address');
@@ -72,6 +94,32 @@ try {
     }
     await stranger.close();
   }
+
+  // The executable a CLI runs, chosen in the environment check: checked by running it, then saved.
+  const fakeClaude = installFakeClaude(path.join(scratch, 'fake-claude'), '2.1.400');
+  const chooseDialog = page.getByRole('dialog', { name: 'Claude Code 실행 파일' });
+  await page.getByRole('button', { name: '환경 점검' }).click();
+  await page.getByRole('button', { name: 'Claude Code 실행 파일 변경' }).click();
+  await chooseDialog.getByRole('radio', { name: '직접 지정' }).check();
+  await chooseDialog.getByRole('textbox', { name: '전체 경로' }).fill(process.execPath);
+  await chooseDialog.getByRole('button', { name: '저장' }).click();
+  await chooseDialog.getByText('Claude Code가 아닙니다', { exact: false }).waitFor();
+  check(true, 'a file that is not Claude Code is refused, with the reason');
+  await chooseDialog.getByRole('textbox', { name: '전체 경로' }).fill(fakeClaude);
+  await settle();
+  await page.screenshot({ path: path.join(out, 'cli-choice-dark.png') });
+  await chooseDialog.getByRole('button', { name: '저장' }).click();
+  await chooseDialog.waitFor({ state: 'detached' });
+  await page.getByText('2.1.400 · 지정함').waitFor();
+  check(await page.getByText(fakeClaude).isVisible(), 'the chosen file is the one the environment check shows');
+  // And back to the one the shell runs.
+  await page.getByRole('button', { name: 'Claude Code 실행 파일 변경' }).click();
+  await chooseDialog.getByRole('radio', { name: /^셸 기본/ }).check();
+  await chooseDialog.getByRole('button', { name: '저장' }).click();
+  await chooseDialog.waitFor({ state: 'detached' });
+  await page.getByText('2.1.400 · 지정함').waitFor({ state: 'detached' });
+  check(true, 'back to the shell\'s own');
+  await page.keyboard.press('Escape');
 
   const created = await fetch(`${origin}/api/sessions`, {
     method: 'POST',
@@ -111,12 +159,6 @@ try {
   check(true, 'an opened tool call shows its output');
   check(await page.getByText(/fake-model · low · 입력/).isVisible(), 'the turn shows model, effort and tokens');
 
-  // Out of the way of hover styles and tooltips, after animations settle.
-  const settle = async () => {
-    await page.mouse.move(1, 899);
-    await page.locator('body').evaluate((body) => document.activeElement instanceof HTMLElement && document.activeElement.blur());
-    await page.waitForTimeout(700);
-  };
   await settle();
   await page.screenshot({ path: path.join(out, 'conversation-dark.png') });
   await page.getByRole('button', { name: '라이트 모드' }).click();

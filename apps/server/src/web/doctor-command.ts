@@ -76,19 +76,25 @@ export function outsidePath(name: string, folders = usualFolders()): string[] {
 
 function cliChecks(status: CliStatus, other: CliStatus): Check[] {
   const name = VENDOR_NAMES[status.vendor];
-  if (!status.installs.length) {
+  // Chosen in the environment check, and gone or not a program now: nothing of this CLI launches.
+  const unusable: Check[] = status.chosenError ? [{ level: 'error', label: name, detail: `지정한 파일을 쓸 수 없음: ${status.chosenError} · ${status.chosen}` }] : [];
+  if (!status.installs.length && !status.chosenError) {
     const elsewhere = outsidePath(status.vendor);
     // AgentHouse runs what the user's shell would; this one the shell does not find either.
     if (elsewhere.length) return elsewhere.map((file) => ({ level: 'warn', label: name, detail: `PATH 밖에 있어 쓰지 않음 · ${file}` }));
     // With neither CLI, one line says so for both.
     return other.installs.length ? [{ level: 'info', label: name, detail: '없음', command: INSTALL_COMMAND[status.vendor] }] : [];
   }
-  return status.installs.map((install, index): Check => {
-    const version = install.version ?? '버전 확인 못 함';
-    if (index !== status.selected) return { level: 'info', label: name, detail: `${version} · 쓰지 않음 · ${install.shim}` };
-    if (status.loggedIn === false) return { level: 'warn', label: name, detail: `${version} · 로그인 안 됨 · ${install.shim}`, command: LOGIN_COMMAND[status.vendor] };
-    return { level: 'ok', label: name, detail: `${version} · ${status.loggedIn ? '로그인됨' : '로그인 확인 못 함'} · ${install.shim}` };
-  });
+  return [
+    ...unusable,
+    ...status.installs.map((install, index): Check => {
+      const version = install.version ?? '버전 확인 못 함';
+      if (index !== status.selected) return { level: 'info', label: name, detail: `${version} · 쓰지 않음 · ${install.shim}` };
+      const how = status.chosen ? '지정함 · ' : '';
+      if (status.loggedIn === false) return { level: 'warn', label: name, detail: `${version} · ${how}로그인 안 됨 · ${install.shim}`, command: LOGIN_COMMAND[status.vendor] };
+      return { level: 'ok', label: name, detail: `${version} · ${how}${status.loggedIn ? '로그인됨' : '로그인 확인 못 함'} · ${install.shim}` };
+    }),
+  ];
 }
 
 /** What an older Claude Code turns off (features are gated by version, the terminal works either way). */
@@ -157,7 +163,7 @@ async function hostChecks(options: DoctorOptions): Promise<Check[]> {
 
 /** Every check, in the order a user would fix them. */
 export async function runChecks(options: DoctorOptions): Promise<Check[]> {
-  const report = await new EnvService(process.cwd()).report(true);
+  const report = await new EnvService(process.cwd(), undefined, options.stateDir).report(true);
   const { claude, codex } = report.clis;
   const checks: Check[] = [];
 

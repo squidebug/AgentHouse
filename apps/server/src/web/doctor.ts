@@ -1,9 +1,12 @@
+import { existsSync } from 'node:fs';
 import os from 'node:os';
+import path from 'node:path';
 import { VENDOR_NAMES, type CliInstall, type CliStatus, type EnvMessage, type EnvReport, type Vendor } from '@agenthouse/protocol';
 import { claudeHookBlocker, gitBashPath } from '../claude/settings';
 import { hostBuildId } from '../shared/build';
-import { claudeLoggedIn, codexLoggedIn, detectVersion } from './cli/probe';
-import { findOnPath, resolveCli } from './cli/resolve';
+import { readAppSettings, writeAppSettings } from './app-settings';
+import { claudeLoggedIn, codexLoggedIn, detectVersion, identify } from './cli/probe';
+import { findOnPath, installKey, resolveChosen, resolveCli, type ResolvedCommand } from './cli/resolve';
 import { olderHosts } from './host-client';
 
 const CACHE_MS = 60_000;
@@ -26,16 +29,42 @@ function windowsBuild(): number | null {
   return Number.isFinite(build) ? build : null;
 }
 
-async function probeCli(vendor: Vendor): Promise<CliStatus> {
-  const resolved = resolveCli(vendor);
+// How each CLI names itself in `--version`, so a chosen file is the program it is chosen for.
+const PRODUCT: Record<Vendor, RegExp> = { claude: /claude code/i, codex: /codex/i };
+
+/** A refused choice of executable; the message says why. */
+export class CliChoiceError extends Error {}
+
+/** Why a chosen file cannot run, in the words the user reads. */
+const unusable = (file: string) => (existsSync(file) ? '실행할 수 있는 프로그램이 아닙니다.' : '파일이 없습니다.');
+
+/**
+ * The installs of a CLI: those on PATH, in PATH order (the first is the one the
+ * user's shell runs), then the file the user chose if it is not one of them.
+ * The chosen one is launched; one that cannot run launches nothing.
+ */
+async function probeCli(vendor: Vendor, chosen: string | null): Promise<CliStatus> {
+  const found: Array<ResolvedCommand & { onPath: boolean }> = resolveCli(vendor).map((r) => ({ ...r, onPath: true }));
+  let selected: number | null = found.length ? 0 : null;
+  let chosenError: string | undefined;
+  if (chosen) {
+    const resolved = resolveChosen(chosen);
+    if (!resolved) {
+      chosenError = unusable(chosen);
+      selected = null;
+    } else {
+      const same = found.findIndex((r) => installKey(r) === installKey(resolved));
+      if (same === -1) found.push({ ...resolved, onPath: false });
+      selected = same === -1 ? found.length - 1 : same;
+    }
+  }
   const installs: CliInstall[] = await Promise.all(
-    resolved.map(async (r) => ({ file: r.file, args: r.args, shim: r.shim, version: await detectVersion(r) })),
+    found.map(async (r) => ({ file: r.file, args: r.args, shim: r.shim, onPath: r.onPath, version: await detectVersion(r) })),
   );
-  const selected = installs.length ? 0 : null;
   let loggedIn: boolean | null = null;
-  const first = installs[0];
-  if (first) loggedIn = vendor === 'claude' ? await claudeLoggedIn(first) : await codexLoggedIn(first);
-  return { vendor, installs, selected, loggedIn };
+  const launched = selected === null ? undefined : installs[selected];
+  if (launched) loggedIn = vendor === 'claude' ? await claudeLoggedIn(launched) : await codexLoggedIn(launched);
+  return { vendor, installs, selected, loggedIn, chosen, ...(chosenError ? { chosenError } : {}) };
 }
 
 /** What decides whether Claude's hooks (status, usage) can reach AgentHouse. */
@@ -54,14 +83,21 @@ function messagesFor(report: Omit<EnvReport, 'messages'>, hooks: HookReach): Env
   }
   for (const status of [claude, codex]) {
     const name = VENDOR_NAMES[status.vendor];
+    const id = status.vendor.toUpperCase();
+    if (status.chosenError) {
+      // The file itself shows in the CLI's row, next to 변경.
+      messages.push({ id: `ENV_${id}_CHOSEN_UNUSABLE`, level: 'error', text: `지정한 ${name} 실행 파일을 쓸 수 없습니다. ${status.chosenError}` });
+      continue;
+    }
     if (!status.installs.length) {
       if (claude.installs.length || codex.installs.length) {
-        messages.push({ id: `ENV_${status.vendor.toUpperCase()}_MISSING`, level: 'info', text: `${name}가 설치되어 있지 않습니다.`, command: INSTALL_COMMAND[status.vendor] });
+        messages.push({ id: `ENV_${id}_MISSING`, level: 'info', text: `${name}가 설치되어 있지 않습니다.`, command: INSTALL_COMMAND[status.vendor] });
       }
       continue;
     }
     const selected = status.installs[status.selected ?? 0];
-    if (status.installs.length > 1 && selected) {
+    // A file the user chose is the one they meant; the others are not worth a word.
+    if (status.installs.length > 1 && selected && !status.chosen) {
       messages.push({
         id: `ENV_${status.vendor.toUpperCase()}_MULTIPLE_INSTALLS`,
         level: 'info',
@@ -127,6 +163,8 @@ export class EnvService {
   constructor(
     private readonly defaultCwd: string,
     private readonly host?: HostFacts,
+    /** Where the user's choice of executables is kept; none, no choices. */
+    private readonly stateDir: string | undefined = host?.stateDir,
   ) {}
 
   async report(refresh = false): Promise<EnvReport> {
@@ -135,8 +173,33 @@ export class EnvService {
     return { ...report, messages: [...report.messages, ...(await hostMessages(this.host))] };
   }
 
-  async cli(vendor: Vendor): Promise<CliStatus> {
-    return (await this.cliReport(false)).clis[vendor];
+  async cli(vendor: Vendor, refresh = false): Promise<CliStatus> {
+    return (await this.cliReport(refresh)).clis[vendor];
+  }
+
+  /**
+   * Makes this file the one to run for the CLI (null: the one the user's shell
+   * runs again), once it is known to be that program: a full path, a file that
+   * runs, and a `--version` naming it. Quotes around a pasted path are dropped.
+   */
+  async choose(vendor: Vendor, file: string | null): Promise<CliStatus> {
+    if (!this.stateDir) throw new CliChoiceError('상태 폴더가 없습니다.');
+    const settings = readAppSettings(this.stateDir);
+    if (file === null) delete settings.cli[vendor];
+    else {
+      const chosen = file.trim().replace(/^"(.*)"$/, '$1');
+      if (!path.isAbsolute(chosen)) throw new CliChoiceError('전체 경로를 입력하세요.');
+      const resolved = resolveChosen(chosen);
+      if (!resolved) throw new CliChoiceError(unusable(chosen));
+      const { version, text } = await identify(resolved);
+      if (!version) throw new CliChoiceError('버전을 확인하지 못했습니다.');
+      if (!PRODUCT[vendor].test(text)) throw new CliChoiceError(`${VENDOR_NAMES[vendor]}가 아닙니다. (${text.split('\n')[0]})`);
+      settings.cli[vendor] = chosen;
+    }
+    writeAppSettings(this.stateDir, settings);
+    // A probe already under way still reads the old choice.
+    await this.inflight?.catch(() => undefined);
+    return this.cli(vendor, true);
   }
 
   private cliReport(refresh: boolean): Promise<EnvReport> {
@@ -150,7 +213,8 @@ export class EnvService {
 
   private async build(): Promise<EnvReport> {
     const major = Number(process.versions.node.split('.')[0]);
-    const [claude, codex] = await Promise.all([probeCli('claude'), probeCli('codex')]);
+    const chosen = this.stateDir ? readAppSettings(this.stateDir).cli : {};
+    const [claude, codex] = await Promise.all([probeCli('claude', chosen.claude ?? null), probeCli('codex', chosen.codex ?? null)]);
     const base = {
       node: { version: process.versions.node, major, supported: major >= 18, eol: EOL_MAJORS.has(major) },
       platform: process.platform,
