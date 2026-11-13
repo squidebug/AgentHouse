@@ -45,11 +45,12 @@ export function isAsking(value: string | null | undefined): boolean {
 
 /**
  * A compose result's reason when the session could not take the text yet: a
- * dialog is open, or a Claude session has not started (its folder trust
- * question may be up). The text can go again later.
+ * dialog is open, a Claude session has not started (its folder trust question
+ * may be up), or someone is typing in its terminal (`typing`: only text sent
+ * while nobody may be watching waits for that). The text can go again later.
  */
 export function isHeld(reason: string | null | undefined): boolean {
-  return isAsking(reason) || reason === 'starting' || reason === 'unobserved';
+  return isAsking(reason) || reason === 'starting' || reason === 'unobserved' || reason === 'typing';
 }
 
 /** What the agent is doing, from confirmed signals only (hooks, the process exiting). */

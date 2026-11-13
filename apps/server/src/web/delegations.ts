@@ -22,6 +22,8 @@ const RETRY_MS = 1000;
 // A background agent's report starts a turn at once; if none came by then (an agent the tree
 // placed at the top by mistake reports to its parent agent instead), the work is settled anyway.
 const REPORT_WAIT_MS = 60_000;
+// The host holds automatic text back while someone types in that terminal; nothing else would say when to try again.
+const TYPING_RETRY_MS = 3000;
 // A transcript line is 64 MB at most (web/conversations.ts); an answer's range is no longer.
 const MAX_ANSWER_BYTES = 64 * 1024 * 1024;
 
@@ -388,7 +390,10 @@ export class Delegations extends EventEmitter {
     try {
       // Nobody may be watching the delegate: the CLI is asked too before Enter is pressed.
       const result = await this.manager.compose(task.childId, { text: '', enterOnly: true, verify: true });
-      if (!result.submitted) return false;
+      if (!result.submitted) {
+        this.retryAfterTyping(result.reason);
+        return false;
+      }
       delete task.enterPending;
       task.sentAt = Date.now();
       return true;
@@ -398,6 +403,11 @@ export class Delegations extends EventEmitter {
     } finally {
       this.sending.delete(task.id);
     }
+  }
+
+  /** A session's state does not change when its user stops typing, so nothing else would prompt another try. */
+  private retryAfterTyping(reason: string | undefined): void {
+    if (reason === 'typing' && !this.closed) setTimeout(() => this.check(), TYPING_RETRY_MS).unref();
   }
 
   private async send(task: Task): Promise<void> {
@@ -421,7 +431,8 @@ export class Delegations extends EventEmitter {
         } else if (result.sent) {
           task.pasted = true;
         }
-        // Otherwise a dialog opened or it got busy: still queued, tried again when it is idle.
+        // Otherwise a dialog opened, it got busy or someone types there: still queued, tried again when it is idle.
+        if (!result.submitted) this.retryAfterTyping(result.reason);
       }
     } catch {
       // the host is away: still queued

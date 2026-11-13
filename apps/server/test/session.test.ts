@@ -135,4 +135,22 @@ describe('a session in the host', () => {
       await client.closeSession(info.id);
     }
   });
+
+  test('text sent for nobody waits while someone types in the terminal', async () => {
+    const info = await client.spawn(spec());
+    const terminal = watch(info);
+    try {
+      await terminal.opened;
+      assert.ok(await waitFor(() => plain(screenText(terminal.messages)).includes('fake-agent ready'), 5000));
+      terminal.send('a');
+      const held = await client.compose(info.id, { text: 'for nobody', verify: true });
+      assert.deepEqual(held, { sent: false, submitted: false, reason: 'typing' });
+      // What the user sends themselves goes at once.
+      const sent = await client.compose(info.id, { text: 'from the composer', enterDelayMs: 50, quietMs: 50 });
+      assert.equal(sent.submitted, true);
+    } finally {
+      terminal.ws.close();
+      await client.closeSession(info.id);
+    }
+  });
 });

@@ -33,6 +33,8 @@ export const DEFAULT_BACKLOG: ViewerBacklog = { max: 4 * 1024 * 1024, resyncBelo
 const RELEASE_AFTER_EXIT_MS = 1500;
 // What a browser gets of the scrollback when it connects, and what is kept of an ended session.
 const SNAPSHOT_SCROLLBACK = 2000;
+// Text sent while nobody may be watching waits until the terminal has been left alone this long.
+const TYPING_QUIET_MS = 5000;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -127,6 +129,7 @@ export class Session extends EventEmitter {
   private composing: Promise<unknown> = Promise.resolve();
   /** The last screen of an ended CLI, as text: the mirror itself (megabytes of scrollback) is let go. */
   private final: Extract<TerminalServerMessage, { type: 'snapshot' }> | null = null;
+  private lastTypedAt = 0;
 
   constructor(private readonly options: SessionOptions) {
     super();
@@ -298,6 +301,7 @@ export class Session extends EventEmitter {
     // xterm.js in the browser answers terminal queries too; the mirror already did.
     if (isAutoResponse(data)) return false;
     this.pty.write(binary ? Buffer.from(data, 'latin1') : data);
+    this.lastTypedAt = Date.now();
     this.observer.typed(data);
     return true;
   }
@@ -330,6 +334,8 @@ export class Session extends EventEmitter {
     // A dialog is open, or the CLI has not started (Claude's folder trust question): text and Enter would answer it.
     if (!this.observer.acceptsInput()) return held(this.status.value);
     if (verify) {
+      // Somebody is typing in this terminal (a prompt, a menu no hook reports): the text would land in the middle of it.
+      if (Date.now() - this.lastTypedAt < TYPING_QUIET_MS) return held('typing');
       // Nobody may be watching: the CLI itself is asked as well, in case a dialog opened unreported.
       const waiting = await this.observer.waiting();
       if (waiting) return held(waiting);
