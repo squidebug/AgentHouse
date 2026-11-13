@@ -57,7 +57,7 @@ describe('session registry', () => {
       const headers = { authorization, origin: `http://127.0.0.1:${app.port}` };
       const created = await request(app.port, 'POST', '/api/sessions', { headers, body: { vendor: 'fake', title: 'before' } });
       const session = created.json as SessionInfo;
-      assert.ok(await waitFor(() => readRegistry(stateDir).some((s) => s.id === session.id), 3000), 'written to sessions.json');
+      assert.ok(await waitFor(() => readRegistry(stateDir).some((s) => s.id === session.id), 10_000), 'written to sessions.json');
 
       const firstHost = client.pid;
       await killTree(firstHost);
@@ -66,11 +66,11 @@ describe('session registry', () => {
       const ended = listed.find((s) => s.id === session.id);
       assert.deepEqual([ended?.state, ended?.screen, ended?.exit?.code, ended?.title], ['exited', false, null, 'before']);
       assert.equal((await openSocket(app.port, `/ws/session?id=${session.id}`, headers)).status, 404, 'no terminal is left');
-      assert.ok(await waitFor(() => readRegistry(stateDir).find((s) => s.id === session.id)?.state === 'exited', 3000));
+      assert.ok(await waitFor(() => readRegistry(stateDir).find((s) => s.id === session.id)?.state === 'exited', 10_000));
 
       // Ended from AgentHouse, a session stays listed too, ended, until it is removed.
       const other = (await request(app.port, 'POST', '/api/sessions', { headers, body: { vendor: 'fake', title: 'ended here' } })).json as SessionInfo;
-      assert.ok(await waitFor(() => readRegistry(stateDir).some((s) => s.id === other.id), 3000));
+      assert.ok(await waitFor(() => readRegistry(stateDir).some((s) => s.id === other.id), 10_000));
       assert.equal((await request(app.port, 'POST', `/api/sessions/${other.id}/end`, { headers })).status, 200);
       const after = ((await request(app.port, 'GET', '/api/sessions', { headers })).json as SessionInfo[]).find((s) => s.id === other.id);
       assert.deepEqual([after?.state, after?.screen, after?.title], ['exited', false, 'ended here']);

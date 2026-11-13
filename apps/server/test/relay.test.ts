@@ -88,9 +88,12 @@ describe('hook relay', () => {
     await new Promise<void>((resolve) => closed.listen(0, '127.0.0.1', resolve));
     const deadPort = (closed.address() as AddressInfo).port;
     await new Promise<void>((resolve) => closed.close(() => resolve()));
+    // What starting the relay alone takes right now (nothing to send): several times longer while the
+    // other test files run. A refused connection adds next to nothing; waiting for a timeout would add 1.5 s.
+    const idle = await runRelay('hook', {}, '{}');
     const result = await runRelay('hook', { port: deadPort, token: 'secret' }, '{}');
     assert.deepEqual([result.code, result.stdout], [0, '']);
-    assert.ok(result.ms < 2500, `took ${result.ms} ms`);
+    assert.ok(result.ms < idle.ms + 1000, `took ${result.ms} ms, ${idle.ms} ms with nothing to send`);
   });
 
   test("as the status line it prints the user's own status line, unchanged", { skip: !shell }, async () => {
