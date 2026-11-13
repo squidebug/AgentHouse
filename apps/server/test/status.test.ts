@@ -97,7 +97,11 @@ describe('status line', () => {
 
   test('telemetry takes model, effort, context and cost', () => {
     const telemetry = applyStatusLine(initialTelemetry(), line);
-    assert.deepEqual(telemetry, { level: 'minimal', model: 'Haiku 5.5', effort: 'low', contextPct: 12.5, contextWindow: 1_000_000, costUsd: 0.03 });
+    // Whole percents and cents, as the page shows them.
+    assert.deepEqual(telemetry, { level: 'minimal', model: 'Haiku 5.5', effort: 'low', contextPct: 13, contextWindow: 1_000_000, costUsd: 0.03 });
+    // A step too small to show changes nothing, so no session list goes out for it.
+    const next = applyStatusLine(telemetry, { ...line, context_window: { used_percentage: 12.9, context_window_size: 1_000_000 }, cost: { total_cost_usd: 0.0349 } });
+    assert.deepEqual(next, telemetry);
     // Right after /clear the percentage is null: unknown, not the old value.
     const cleared = applyStatusLine(telemetry, { ...line, context_window: { used_percentage: null, context_window_size: 1_000_000 } });
     assert.equal(cleared.contextPct, null);

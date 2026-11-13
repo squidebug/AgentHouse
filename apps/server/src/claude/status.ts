@@ -25,7 +25,10 @@ export interface HookEvent {
   background_tasks?: unknown;
 }
 
-const text = (value: unknown): string | null => (typeof value === 'string' && value ? value : null);
+// A tool name, an error kind, an id: short by nature. Whatever holds a session's hook token can
+// send anything, and these go to every browser and into sessions.json.
+const TEXT_CHARS = 200;
+const text = (value: unknown): string | null => (typeof value === 'string' && value ? value.slice(0, TEXT_CHARS) : null);
 const number = (value: unknown): number | null => (typeof value === 'number' && Number.isFinite(value) ? value : null);
 
 function status(value: StatusValue, at: number, extra: Partial<SessionStatus> = {}): SessionStatus {
@@ -245,15 +248,20 @@ interface RateLimitInput {
   resets_at?: unknown;
 }
 
+// The page shows whole percents and cents. Finer steps would send the whole session list to every
+// browser on each status line of a working session, to show the same numbers.
+const wholePercent = (value: number | null) => (value === null ? null : Math.round(value));
+const cents = (value: number | null) => (value === null ? null : Math.round(value * 100) / 100);
+
 export function applyStatusLine(current: SessionTelemetry, line: StatusLineInput): SessionTelemetry {
   return {
     level: current.level,
     model: text(line.model?.display_name) ?? text(line.model?.id) ?? current.model,
     effort: text(line.effort?.level) ?? current.effort,
     // Null right after /clear and before the first reply: unknown, not zero.
-    contextPct: number(line.context_window?.used_percentage),
+    contextPct: wholePercent(number(line.context_window?.used_percentage)),
     contextWindow: number(line.context_window?.context_window_size) ?? current.contextWindow,
-    costUsd: number(line.cost?.total_cost_usd) ?? current.costUsd,
+    costUsd: cents(number(line.cost?.total_cost_usd)) ?? current.costUsd,
   };
 }
 
