@@ -268,6 +268,12 @@ try {
   await terminalShown();
   await settle();
   await page.screenshot({ path: path.join(out, 'terminal-light.png') });
+  // What a change of looks must leave alone, to compare before and after it: where the pane and its
+  // terminal are, and the size the terminal asked the PTY for.
+  const listed = await (await fetch(`${origin}/api/sessions`, { headers: { authorization: `Bearer ${key}`, origin } })).json();
+  const sized = listed.find((session) => session.title === 'ui-check');
+  const round = (rect) => rect && Object.fromEntries(Object.entries(rect).map(([side, px]) => [side, Math.round(px * 100) / 100]));
+  console.log(`INFO  pane ${JSON.stringify(round(await paneBox()))}, terminal ${JSON.stringify(round(await page.locator('.xterm-screen').first().boundingBox()))}, ${sized?.cols}×${sized?.rows}`);
 
   // An ended session from an earlier host: folded into one row with the other ended ones until asked for;
   // its conversation is all that is left.
