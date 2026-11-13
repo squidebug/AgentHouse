@@ -32,6 +32,7 @@ export const t = {
   disconnected: '서버 연결 끊김 · 다시 연결 중',
   loginNeeded: '로그인 필요',
   loginExpired: '로그인 링크 만료',
+  openLink: '링크 열기',
   cancel: '취소',
   start: '시작',
   launchTitle: '새 세션',

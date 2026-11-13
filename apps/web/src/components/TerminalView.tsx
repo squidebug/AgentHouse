@@ -6,6 +6,8 @@ import { Terminal } from '@xterm/xterm';
 import { useEffect, useRef } from 'react';
 import { isAutoResponse, type TerminalClientMessage, type TerminalServerMessage, type ThemeMode } from '@agenthouse/protocol';
 import { openSocket } from '../api/client';
+import { linkTarget } from '../links';
+import { t } from '../strings';
 import { FONT_MONO } from '../theme/theme';
 import { MIN_CONTRAST, XTERM_THEMES } from '../theme/terminal';
 
@@ -17,6 +19,17 @@ const fontsReady: Promise<unknown> =
     : Promise.all([document.fonts.load('13px "JetBrains Mono"'), document.fonts.load('13px "Nanum Gothic Coding"', '가')]).catch(() => undefined);
 
 const MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
+
+/**
+ * A link a CLI wrote into its output (OSC 8), clicked: its text may differ from
+ * where it goes, so the real address is shown first. xterm makes links of web
+ * addresses only; its own handler asks in English and opens on any mouse button.
+ */
+function openLink(event: MouseEvent, uri: string): void {
+  if (event.button !== 0) return;
+  const target = linkTarget(uri);
+  if (target && window.confirm(`${t.openLink}\n\n${target}`)) window.open(target, '_blank', 'noopener,noreferrer');
+}
 
 interface Props {
   sessionId: string;
@@ -55,6 +68,7 @@ export function TerminalView({ sessionId, mode, windowsBuild, onFocus, autoFocus
         theme: XTERM_THEMES[modeRef.current],
         minimumContrastRatio: MIN_CONTRAST[modeRef.current],
         ...(windowsBuild ? { windowsPty: { backend: 'conpty' as const, buildNumber: windowsBuild } } : {}),
+        linkHandler: { activate: openLink },
       });
       const fit = new FitAddon();
       term.loadAddon(fit);
