@@ -161,9 +161,10 @@ function SessionBranch(props: BranchProps) {
   const pending = state.pending?.parentId === session.id ? state.pending : null;
   const placing = pending ? byId.get(pending.childId) : undefined;
   const candidates = tops.filter((s) => s.id !== session.id);
-  const details = sessionDetails(session);
   const delegated = link?.kind === 'delegate';
-  if (parent) details.splice(1, 0, { k: delegated ? t.delegate : t.group, v: parent.title });
+  // Made only for an open row: the list is redrawn with every status any session reports.
+  const details = open ? sessionDetails(session) : [];
+  if (open && parent) details.splice(1, 0, { k: delegated ? t.delegate : t.group, v: parent.title });
   return (
     <Box>
       <Box
@@ -280,11 +281,16 @@ interface Props {
   onNew: () => void;
   onEnd: (id: string) => void;
   onRemove: (id: string) => void;
+  /** Takes these ended sessions off the list at once (after asking). */
+  onRemoveEnded: (sessions: SessionInfo[]) => void;
   /** Places a session under another one (grouped, or delegated to), or back at the top (null). */
   onLink: (childId: string, parentId: string | null, kind?: LinkKind) => void;
 }
 
-export function SessionTree({ sessions, links, state, dispatch, dnd, onNew, onEnd, onRemove, onLink }: Props) {
+// The row that folds the ended sessions away, in `rowOpen`.
+const ENDED_KEY = '#ended';
+
+export function SessionTree({ sessions, links, state, dispatch, dnd, onNew, onEnd, onRemove, onRemoveEnded, onLink }: Props) {
   const groups = sessionTree(sessions, links);
   const shown = new Set(state.panes.filter((p) => !p.agentId).map((p) => p.sessionId));
   const byId = new Map(sessions.map((s) => [s.id, s]));
@@ -292,9 +298,19 @@ export function SessionTree({ sessions, links, state, dispatch, dnd, onNew, onEn
   const root = { type: 'root' as const };
   const toTop = dnd.canDrop(root);
   const branch = { tops, shown, byId, state, dispatch, dnd, onEnd, onRemove, onLink };
+  // Ended sessions stay listed until removed and would bury the running ones: those at the top with
+  // nothing under them and no pane showing them fold into one row, like finished sub-agents.
+  const folds = (node: SessionNode) => node.session.state === 'exited' && !node.children.length && !shown.has(node.session.id);
+  const ended = groups.flatMap((g) => g.nodes.filter(folds));
+  const endedOpen = Boolean(state.rowOpen[ENDED_KEY]);
+  const listed = endedOpen ? groups : groups.map((g) => ({ ...g, nodes: g.nodes.filter((n) => !folds(n)) })).filter((g) => g.nodes.length);
 
   return (
-    <Box component="aside" aria-label={t.sessions} sx={{ flex: '1 1 272px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: '2px' }}>
+    <Box
+      component="aside"
+      aria-label={t.sessions}
+      sx={{ flex: '1 1 272px', minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', gap: '2px', overflowY: { md: 'auto' }, scrollbarWidth: 'thin' }}
+    >
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, p: '2px 4px 6px 6px' }}>
         <Typography component="h2" sx={{ fontSize: 13, fontWeight: 600 }}>
           {t.sessions}
@@ -308,7 +324,7 @@ export function SessionTree({ sessions, links, state, dispatch, dnd, onNew, onEn
         </Tooltip>
       </Box>
 
-      {groups.map((group) => (
+      {listed.map((group) => (
         <Box key={group.cwd} role="group" aria-label={group.label}>
           <Tooltip title={group.cwd} placement="right">
             <Typography sx={{ p: '10px 6px 4px', fontSize: 12, lineHeight: '16px', color: v.on2 }}>{group.label}</Typography>
@@ -318,6 +334,23 @@ export function SessionTree({ sessions, links, state, dispatch, dnd, onNew, onEn
           ))}
         </Box>
       ))}
+
+      {ended.length > 0 && (
+        <Box sx={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 1, mt: '6px', pl: '2px' }}>
+          <ButtonBase
+            onClick={() => dispatch({ type: 'toggleRow', id: ENDED_KEY })}
+            aria-expanded={endedOpen}
+            sx={{ minHeight: 32, gap: '6px', px: '6px', borderRadius: '6px', fontSize: 12, color: v.on2, '&:hover': { bgcolor: v.surface2 } }}
+          >
+            <ChevronIcon open={endedOpen} size={14} />
+            {t.endedSessions(ended.length)}
+          </ButtonBase>
+          <Box sx={{ flex: 1 }} />
+          <Button size="small" color="inherit" onClick={() => onRemoveEnded(ended.map((node) => node.session))} sx={{ ...smallButton, color: v.on2 }}>
+            {t.removeAll}
+          </Button>
+        </Box>
+      )}
 
       {toTop && (
         // While a placed session is dragged: drop it here to bring it back to the top.

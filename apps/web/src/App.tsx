@@ -27,6 +27,8 @@ export function App() {
   const [launched, setLaunched] = useState<Record<string, SessionInfo>>({});
   const [launchOpen, setLaunchOpen] = useState(false);
   const [ending, setEnding] = useState<SessionInfo | null>(null);
+  // Ended sessions to take off the list at once, after a yes.
+  const [removing, setRemoving] = useState<{ open: boolean; list: SessionInfo[] }>({ open: false, list: [] });
 
   const ctxRef = useRef<DropContext>({ runningIds: [] });
   const [state, dispatch] = useReducer((s: WorkspaceState, a: Action) => reducer(s, a, ctxRef.current), undefined, () => loadWorkspace());
@@ -123,7 +125,9 @@ export function App() {
     <Box
       onDragOver={() => dispatch({ type: 'clearOver' })}
       onDragEnd={() => dispatch({ type: 'dragEnd' })}
-      sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', bgcolor: v.bg, color: v.on }}
+      // Side by side (a window wide enough), the page is the window: the tree and the panes scroll on their
+      // own, so a long tree never takes the panes off the screen. Narrower, it is a page that scrolls.
+      sx={{ minHeight: '100vh', height: { md: '100vh' }, overflow: { md: 'hidden' }, display: 'flex', flexDirection: 'column', bgcolor: v.bg, color: v.on }}
     >
       <TopBar limits={limits} env={env} envLoading={envLoading} refreshEnv={() => refreshEnv().catch(() => {})} mode={resolved} onToggleMode={() => setMode(resolved === 'dark' ? 'light' : 'dark')} />
 
@@ -134,7 +138,7 @@ export function App() {
         </Box>
       )}
 
-      <Box sx={{ flex: 1, display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', gap: '12px 20px', p: '12px 16px 16px' }}>
+      <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexWrap: { xs: 'wrap', md: 'nowrap' }, alignItems: { xs: 'flex-start', md: 'stretch' }, gap: '12px 20px', p: '12px 16px 16px' }}>
         <SessionTree
           sessions={[...byId.values()]}
           links={links}
@@ -145,8 +149,27 @@ export function App() {
           onNew={() => setLaunchOpen(true)}
           onEnd={(id) => setEnding(byId.get(id) ?? null)}
           onRemove={(id) => api.remove(id).catch(failed(t.failure.remove))}
+          onRemoveEnded={(list) => setRemoving({ open: true, list })}
         />
-        <Box component="main" sx={{ flex: '999 1 560px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        <Box
+          component="main"
+          sx={{
+            flex: '999 1 560px',
+            minWidth: 0,
+            minHeight: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '12px',
+            // Its scrollbar has its place whether it shows or not: a draft growing in the composer must
+            // not narrow the panes, which would resize every terminal. The padding keeps the active
+            // pane's outline inside what scrolls.
+            overflowY: { md: 'auto' },
+            scrollbarGutter: { md: 'stable' },
+            scrollbarWidth: 'thin',
+            p: { md: '3px' },
+            m: { md: '-3px' },
+          }}
+        >
           <PaneGrid
             state={state}
             dispatch={dispatch}
@@ -189,6 +212,25 @@ export function App() {
           </Button>
           <Button variant="contained" color="error" onClick={() => ending && endSession(ending)}>
             {t.endSession}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={removing.open} onClose={() => setRemoving((current) => ({ ...current, open: false }))} maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ fontSize: 18, fontWeight: 600 }}>{t.removeEnded(removing.list.length)}</DialogTitle>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button color="inherit" onClick={() => setRemoving((current) => ({ ...current, open: false }))}>
+            {t.cancel}
+          </Button>
+          <Button
+            variant="contained"
+            color="error"
+            onClick={() => {
+              setRemoving((current) => ({ ...current, open: false }));
+              void Promise.all(removing.list.map((session) => api.remove(session.id))).catch(failed(t.failure.remove));
+            }}
+          >
+            {t.removeAll}
           </Button>
         </DialogActions>
       </Dialog>

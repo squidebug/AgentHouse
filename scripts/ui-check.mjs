@@ -266,7 +266,11 @@ try {
   await settle();
   await page.screenshot({ path: path.join(out, 'terminal-light.png') });
 
-  // An ended session from an earlier host: its conversation is all that is left.
+  // An ended session from an earlier host: folded into one row with the other ended ones until asked for;
+  // its conversation is all that is left.
+  const endedRow = page.getByRole('button', { name: /^종료 \d+$/ });
+  check((await endedRow.isVisible()) && !(await page.getByRole('button', { name: 'readme-cleanup 열기' }).isVisible()), 'ended sessions fold into one row of the tree');
+  await endedRow.click();
   await page.getByRole('button', { name: 'readme-cleanup 열기' }).click();
   await page.getByText('README를 정리하고 테스트를 돌려 줘').waitFor({ timeout: 10_000 });
   check(await page.getByRole('table').isVisible(), 'an ended session shows its conversation, markdown included');

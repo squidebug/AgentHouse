@@ -49,6 +49,7 @@ pnpm dev:stop     # ends the dev sessions and the dev session host
 - **Sub-agents**: the agents a Claude Code session starts show under it in the tree, each under the agent that started it, with its kind and model; open one for its tokens and run time. Click one for its session's flow, with that agent marked; an agent in a conversation opens in the same pane, a chip in the pane header in a pane beside it; or drag it to a pane or the `+` strip. Many finished ones fold behind "완료 N". Claude runs them in the background, so a session can be idle while its agents work.
 - **Terminal keys**: as in Windows Terminal, `Ctrl+C` copies a selection (without one it interrupts, as always) and `Ctrl+V` pastes; `Ctrl+Shift+C`/`V` too.
 - **Details**: the chevron on a row or pane shows CLI version, model, effort, context use, folder and PID.
+- **Ending**: 세션 종료 in a session's details ends its CLI; the session stays listed, ended, with its conversation, like one that quit by itself. Ended sessions fold into one row at the end of the tree ("종료 N"; one shown in a pane or with sessions under it stays where it is). Open the row to see them, 목록에서 제거 in a session's details takes it off the list, and 모두 제거 takes all the folded ones off at once.
 
 ## Checks
 
