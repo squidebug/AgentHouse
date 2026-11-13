@@ -4,6 +4,7 @@
 // who is under whom; this shows when. Kept free of React so it can be tested
 // directly.
 import { isAsking, type AgentInfo, type ConversationTurn, type SessionInfo, type SessionLink } from '@agenthouse/protocol';
+import { t } from '../strings';
 import { agentRows } from './agents';
 
 export type BarKind = 'working' | 'waiting' | 'done';
@@ -123,12 +124,13 @@ export function labelPlace(bars: Bar[], window: TimeWindow): { left: number } | 
 
 /** A stretch of time, short: 45초, 1분 30초 (seconds under ten minutes), 12분, 1시간 5분. */
 export function ago(ms: number): string {
+  const { hour, minute, second } = t.unit;
   const seconds = Math.max(0, Math.round(ms / 1000));
-  if (seconds < 60) return `${seconds}초`;
-  if (seconds < 600) return `${Math.floor(seconds / 60)}분${seconds % 60 ? ` ${seconds % 60}초` : ''}`;
+  if (seconds < 60) return `${seconds}${second}`;
+  if (seconds < 600) return `${Math.floor(seconds / 60)}${minute}${seconds % 60 ? ` ${seconds % 60}${second}` : ''}`;
   const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes}분`;
-  return `${Math.floor(minutes / 60)}시간${minutes % 60 ? ` ${minutes % 60}분` : ''}`;
+  if (minutes < 60) return `${minutes}${minute}`;
+  return `${Math.floor(minutes / 60)}${hour}${minutes % 60 ? ` ${minutes % 60}${minute}` : ''}`;
 }
 
 /** The axis: five marks from the start of the window to now. */

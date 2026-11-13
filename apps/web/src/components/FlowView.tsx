@@ -76,7 +76,7 @@ function Lane({ row, bars, window, highlight, onOpen }: { row: FlowRow; bars: Ba
   return (
     <ButtonBase
       onClick={() => onOpen(row)}
-      aria-label={`${title} 열기`}
+      aria-label={t.open(title)}
       sx={{ display: 'block', width: '100%', height: 40, borderRadius: '8px', bgcolor: highlight ? v.dropBg : 'transparent', '&:hover': { bgcolor: highlight ? v.dropBg : v.surface2 } }}
     >
       <Box component="span" sx={{ position: 'relative', display: 'block', height: '100%', mx: `${INSET}px` }}>

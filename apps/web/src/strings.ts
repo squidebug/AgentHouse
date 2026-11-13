@@ -1,14 +1,19 @@
-import { VENDOR_NAMES } from '@agenthouse/protocol';
+import { VENDOR_NAMES, type DelegationInfo, type NoticeKind, type StatusValue, type ToolState } from '@agenthouse/protocol';
 
-// UI text in one place so an English catalog can be added later.
+// UI text in one place so an English catalog can be added later. A map of labels
+// is checked against the values it names (`satisfies`): a value added to the
+// protocol without its label does not compile.
 export const t = {
   appName: 'AgentHouse',
   sessions: '세션',
   newSession: '새 세션',
   dropHere: '여기에 놓기',
   openHere: '여기서 열기',
+  open: (name: string) => `${name} 열기`,
   swap: '자리 바꾸기',
   addRecipient: '받는 세션 추가',
+  removeRecipient: (name: string) => `${name} 빼기`,
+  composer: '입력',
   message: '메시지',
   send: '보내기',
   sendShortcut: '보내기 · Ctrl+Enter',
@@ -59,8 +64,12 @@ export const t = {
   start: '시작',
   launchTitle: '새 세션',
   cli: 'CLI',
+  pid: 'PID',
   title: '제목',
   folder: '작업 폴더',
+  path: '경로',
+  size: '크기',
+  exitCode: '종료 코드',
   model: '모델',
   effort: 'effort',
   permissionMode: '권한 모드',
@@ -79,7 +88,8 @@ export const t = {
     awaiting_permission: '승인 대기',
     awaiting_input: '입력 대기',
     exited: '종료',
-  } as Record<string, string>,
+  } satisfies Record<StatusValue, string>,
+  // Open: besides these, a reason is a tool's name or an error kind, shown as it is.
   reason: { interrupted: '중단됨', cleared: '새 대화', question: '질문', plan: '계획 확인', elicitation: '입력 요청' } as Record<string, string>,
   error: '오류',
   statusLabel: '상태',
@@ -89,7 +99,7 @@ export const t = {
   fiveHour: '5시간',
   sevenDay: '주간',
   resetsAt: '초기화',
-  vendorName: VENDOR_NAMES as Record<string, string>,
+  vendorName: VENDOR_NAMES,
   terminal: '터미널',
   conversation: '대화',
   flow: '흐름',
@@ -97,10 +107,14 @@ export const t = {
   back: '뒤로',
   filterAll: '전체',
   filterRunning: '실행 중',
-  legend: { working: '작업 중', waiting: '승인 대기', done: '완료' } as Record<string, string>,
+  legend: { working: '작업 중', waiting: '승인 대기', done: '완료' } satisfies Record<'working' | 'waiting' | 'done', string>,
   before: (span: string) => `${span} 전`,
+  later: (span: string) => `${span} 후`,
   now: '지금',
   recent: (span: string) => `최근 ${span}`,
+  // Spans of time are put together where they are shown: 45초, 1분 30초, 1시간 5분.
+  unit: { day: '일', hour: '시간', minute: '분', second: '초' },
+  underSecond: '1초 미만',
   noConversation: '대화 없음',
   earlierTurns: (n: number) => `이전 턴 ${n}개`,
   tools: (n: number) => `도구 ${n}`,
@@ -119,9 +133,9 @@ export const t = {
   cacheWrite: '캐시 쓰기',
   uncached: '캐시 없이',
   apiCalls: 'API 호출',
-  toolState: { running: '실행 중', done: '완료', error: '오류', denied: '거부됨', interrupted: '중단됨' } as Record<string, string>,
-  agentState: { running: '작업 중', asking: '승인 대기', stopped: '완료' } as Record<string, string>,
-  report: { done: '보고', error: '실패 보고', interrupted: '중단 보고', running: '보고', denied: '실패 보고' } as Record<string, string>,
+  toolState: { running: '실행 중', done: '완료', error: '오류', denied: '거부됨', interrupted: '중단됨' } satisfies Record<ToolState, string>,
+  agentState: { running: '작업 중', asking: '승인 대기', stopped: '완료' } satisfies Record<'running' | 'asking' | 'stopped', string>,
+  report: { done: '보고', error: '실패 보고', interrupted: '중단 보고', running: '보고', denied: '실패 보고' } satisfies Record<ToolState, string>,
   finishedAgents: (n: number) => `완료 ${n}`,
   foldAgents: '접기',
   moreAgents: (n: number) => `+${n}`,
@@ -138,9 +152,9 @@ export const t = {
   delegateAction: '위임',
   delegateTo: '위임할 세션',
   deliver: '전달',
-  delegation: { running: '진행 중', done: '완료', interrupted: '중단됨', failed: '실패' } as Record<string, string>,
-  delivery: { queued: '대기열', sent: '전달됨', failed: '전달 실패' } as Record<string, string>,
+  delegation: { running: '진행 중', done: '완료', interrupted: '중단됨', failed: '실패' } satisfies Record<DelegationInfo['status'], string>,
+  delivery: { queued: '대기열', sent: '전달됨', failed: '전달 실패' } satisfies Record<Exclude<DelegationInfo['delivery'], 'none'>, string>,
   /** What the parent session gets in front of the delegate's answer. */
   delegationResult: (title: string) => `[위임 결과 · ${title}]`,
-  notice: { interrupted: '중단됨', cleared: '새 대화', compacted: '대화 요약', api_error: 'API 오류' } as Record<string, string>,
+  notice: { interrupted: '중단됨', cleared: '새 대화', compacted: '대화 요약', api_error: 'API 오류' } satisfies Record<NoticeKind, string>,
 } as const;

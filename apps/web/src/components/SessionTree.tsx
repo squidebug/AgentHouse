@@ -66,7 +66,7 @@ function AgentRow({ session, agent, depth, shown, state, dispatch, dnd }: AgentR
         <AgentStatusIcon agent={agent} />
         <ButtonBase
           onClick={() => dispatch({ type: 'open', sessionId: session.id, mode: 'flow', focusAgent: agent.id })}
-          aria-label={`${title} 열기`}
+          aria-label={t.open(title)}
           sx={{ flex: 1, minWidth: 0, flexDirection: 'column', alignItems: 'flex-start', textAlign: 'left', py: '2px', borderRadius: '6px' }}
         >
           <Typography noWrap sx={{ maxWidth: '100%', fontWeight: 500, color: agent.state === 'stopped' && !agent.asking ? v.on2 : v.on }}>
@@ -190,7 +190,7 @@ function SessionBranch(props: BranchProps) {
         <StatusIcon status={session.status} />
         <ButtonBase
           onClick={() => dispatch({ type: 'open', sessionId: session.id })}
-          aria-label={`${session.title} 열기`}
+          aria-label={t.open(session.title)}
           sx={{ flex: 1, minWidth: 0, flexDirection: 'column', alignItems: 'flex-start', textAlign: 'left', py: '3px', borderRadius: '6px' }}
         >
           <Typography noWrap sx={{ maxWidth: '100%', fontWeight: 500, color: session.state === 'exited' ? v.on2 : v.on }}>

@@ -90,7 +90,7 @@ export function Composer({ state, dispatch, dnd, sessionById, activeSession }: P
     <Box>
       <Box
         component="section"
-        aria-label="입력"
+        aria-label={t.composer}
         onDragOver={dnd.over(target)}
         onDrop={dnd.drop(target)}
         onFocus={() => setFocused(true)}
@@ -137,7 +137,7 @@ export function Composer({ state, dispatch, dnd, sessionById, activeSession }: P
               </Box>
               {!implicit && (
                 <IconButton
-                  aria-label={`${session.title} 빼기`}
+                  aria-label={t.removeRecipient(session.title)}
                   onClick={() => dispatch({ type: 'removeTarget', id: session.id })}
                   sx={{ width: 28, height: 28, borderRadius: '6px', color: v.on2 }}
                 >

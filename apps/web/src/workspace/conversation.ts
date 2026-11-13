@@ -1,6 +1,7 @@
 // How the conversation view lays out a session's turns, kept free of React so
 // it can be tested directly.
 import type { ConversationEntry, ConversationTurn, DelegationInfo } from '@agenthouse/protocol';
+import { t } from '../strings';
 
 export type WorkEntry = Extract<ConversationEntry, { kind: 'tool' | 'thinking' }>;
 
@@ -65,14 +66,15 @@ export function compactCount(n: number): string {
 
 /** 45초, 1분 23초, 1시간 5분 */
 export function duration(ms: number): string {
-  if (ms < 1000) return '1초 미만';
+  if (ms < 1000) return t.underSecond;
+  const { hour, minute, second } = t.unit;
   const seconds = Math.max(0, Math.round(ms / 1000));
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
   const s = seconds % 60;
-  if (h) return `${h}시간 ${m}분`;
-  if (m) return s ? `${m}분 ${s}초` : `${m}분`;
-  return `${s}초`;
+  if (h) return `${h}${hour} ${m}${minute}`;
+  if (m) return s ? `${m}${minute} ${s}${second}` : `${m}${minute}`;
+  return `${s}${second}`;
 }
 
 /**

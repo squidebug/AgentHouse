@@ -97,7 +97,7 @@ export function sessionDetails(session: SessionInfo): Detail[] {
   const { telemetry } = session;
   const list: Detail[] = [
     { k: t.statusLabel, v: statusText(session.status) },
-    { k: 'CLI', v: [t.vendorName[session.vendor], session.cli.version].filter(Boolean).join(' ') },
+    { k: t.cli, v: [t.vendorName[session.vendor], session.cli.version].filter(Boolean).join(' ') },
   ];
   const model = telemetry.model ?? session.model;
   if (model) list.push({ k: t.model, v: model });
@@ -109,10 +109,10 @@ export function sessionDetails(session: SessionInfo): Detail[] {
   }
   if (session.permissionMode) list.push({ k: t.permissionMode, v: session.permissionMode });
   if (telemetry.costUsd) list.push({ k: t.cost, v: `$${telemetry.costUsd.toFixed(2)}` });
-  list.push({ k: '경로', v: session.cwd, path: true });
-  list.push({ k: '크기', v: `${session.cols}×${session.rows}` });
-  list.push({ k: 'PID', v: String(session.pid) });
-  if (session.exit?.code != null) list.push({ k: '종료 코드', v: String(session.exit.code) });
+  list.push({ k: t.path, v: session.cwd, path: true });
+  list.push({ k: t.size, v: `${session.cols}×${session.rows}` });
+  list.push({ k: t.pid, v: String(session.pid) });
+  if (session.exit?.code != null) list.push({ k: t.exitCode, v: String(session.exit.code) });
   return list;
 }
 

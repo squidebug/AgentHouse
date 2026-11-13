@@ -15,8 +15,9 @@ function resetText(at: number, now: number): string {
   const day = new Date(now).toDateString() === date.toDateString() ? '' : `${date.toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'short' })} `;
   const minutes = Math.max(0, Math.round((at - now) / 60_000));
   const hours = Math.floor(minutes / 60);
-  const left = hours >= 24 ? `${Math.floor(hours / 24)}일 ${hours % 24}시간` : hours ? `${hours}시간 ${minutes % 60}분` : `${minutes}분`;
-  return `${day}${time} ${t.resetsAt} · ${left} 후`;
+  const { day: days, hour, minute } = t.unit;
+  const left = hours >= 24 ? `${Math.floor(hours / 24)}${days} ${hours % 24}${hour}` : hours ? `${hours}${hour} ${minutes % 60}${minute}` : `${minutes}${minute}`;
+  return `${day}${time} ${t.resetsAt} · ${t.later(left)}`;
 }
 
 function WindowRow({ label, window, now }: { label: string; window: RateWindow | null; now: number }) {
