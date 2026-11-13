@@ -4,16 +4,13 @@ import { t } from '../strings';
 import { v } from '../theme/tokens';
 import { elapsedMs } from '../workspace/agents';
 import { compactCount, duration, modelName } from '../workspace/conversation';
+import { PathText } from './PathText';
 
 export interface Detail {
   k: string;
   v: string;
-  /** Wrap at path separators instead of in the middle of a folder name. */
+  /** A path: on a line of its own, cut at its start when it does not fit. */
   path?: boolean;
-}
-
-function withPathBreaks(path: string): React.ReactNode[] {
-  return path.split(/(?<=[\\/])/).flatMap((part, i) => (i ? [<wbr key={i} />, part] : [part]));
 }
 
 /** Collapsed views show only the model; everything else lives behind the expand toggle. */
@@ -109,40 +106,39 @@ export function sessionDetails(session: SessionInfo): Detail[] {
   }
   if (session.permissionMode) list.push({ k: t.permissionMode, v: session.permissionMode });
   if (telemetry.costUsd) list.push({ k: t.cost, v: `$${telemetry.costUsd.toFixed(2)}` });
-  list.push({ k: t.path, v: session.cwd, path: true });
   list.push({ k: t.size, v: `${session.cols}×${session.rows}` });
   list.push({ k: t.pid, v: String(session.pid) });
   if (session.exit?.code != null) list.push({ k: t.exitCode, v: String(session.exit.code) });
+  // Last, on a line of its own across the columns.
+  list.push({ k: t.path, v: session.cwd, path: true });
   return list;
 }
 
+// Every label starts its value at the same place: wide enough for 컨텍스트, 권한 모드, API 환산.
+const LABEL_PX = 64;
+
+/**
+ * What a row or a pane shows when opened: a line per fact, its label in a
+ * column of its own so the values line up, in as many columns as fit (one in
+ * the tree, several in a pane). What can be done about it (`children`) sits
+ * below a line, apart from what is only read.
+ */
 export function Details({ items, children, inset = 0 }: { items: Detail[]; children?: React.ReactNode; inset?: number }) {
   return (
-    <Box
-      sx={{
-        display: 'flex',
-        flexWrap: 'wrap',
-        alignItems: 'center',
-        gap: '6px 14px',
-        m: `0 4px 6px ${inset}px`,
-        p: '8px 10px',
-        borderRadius: '10px',
-        bgcolor: v.surface2,
-        fontSize: 12,
-        lineHeight: '16px',
-      }}
-    >
-      {items.map((item) => (
-        <Box key={item.k} component="span" sx={{ display: 'inline-flex', gap: '6px', minWidth: 0, maxWidth: '100%' }}>
-          <Box component="span" sx={{ color: v.on2, flex: 'none' }}>
-            {item.k}
+    <Box sx={{ m: `0 4px 6px ${inset}px`, p: '8px 10px', borderRadius: '10px', bgcolor: v.surface2, fontSize: 12, lineHeight: '18px' }}>
+      <Box component="dl" sx={{ m: 0, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))', gap: '2px 20px' }}>
+        {items.map((item) => (
+          <Box key={item.k} sx={{ display: 'grid', gridTemplateColumns: `${LABEL_PX}px minmax(0, 1fr)`, columnGap: '8px', gridColumn: item.path ? '1 / -1' : 'auto' }}>
+            <Box component="dt" sx={{ color: v.on2 }}>
+              {item.k}
+            </Box>
+            <Box component="dd" sx={{ m: 0, minWidth: 0, overflowWrap: 'anywhere' }}>
+              {item.path ? <PathText path={item.v} /> : item.v}
+            </Box>
           </Box>
-          <Box component="span" sx={{ fontWeight: 500, overflowWrap: 'anywhere' }}>
-            {item.path ? withPathBreaks(item.v) : item.v}
-          </Box>
-        </Box>
-      ))}
-      {children}
+        ))}
+      </Box>
+      {children && <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '2px', mt: '6px', mx: '-6px', pt: '4px', borderTop: `1px solid ${v.outline}` }}>{children}</Box>}
     </Box>
   );
 }

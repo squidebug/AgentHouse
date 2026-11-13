@@ -224,6 +224,8 @@ function SessionBranch(props: BranchProps) {
               </>
             )
           )}
+          {/* What ends or removes the session stands apart, at the other end of the line. */}
+          <Box sx={{ flex: 1 }} />
           {session.state === 'running' ? (
             <Button size="small" color="inherit" onClick={() => onEnd(session.id)} sx={{ ...smallButton, color: v.error }}>
               {t.endSession}
