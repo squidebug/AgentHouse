@@ -6,6 +6,7 @@ import { chosenPath, CUSTOM, firstOnPath, initialChoice, SHELL } from '../cli-ch
 import { t } from '../strings';
 import { FONT_MONO } from '../theme/theme';
 import { v } from '../theme/tokens';
+import { PathText } from './PathText';
 
 const VENDORS = ['claude', 'codex'] as const;
 
@@ -19,16 +20,15 @@ export function CliRows({ env, onChange }: { env: EnvReport; onChange: (vendor: 
         const state = status.chosenError ? t.chosenUnusable : install ? [install.version ?? '?', status.chosen ? t.chosen : null].filter(Boolean).join(' · ') : t.notInstalled;
         const file = status.chosenError ? status.chosen : install?.shim;
         return (
-          <Box key={vendor} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Box sx={{ flex: 1, minWidth: 0 }}>
-              <Typography sx={{ fontSize: 13 }}>
-                {t.vendorName[vendor]}{' '}
-                <Box component="span" sx={{ color: status.chosenError ? v.error : v.on2 }}>
-                  {state}
-                </Box>
-              </Typography>
-              {file && <Typography sx={{ fontSize: 12, color: v.on2, fontFamily: FONT_MONO, overflowWrap: 'anywhere' }}>{file}</Typography>}
-            </Box>
+          // One line: the CLI, what runs of it, and the file at the end of the space left (its start cut when long).
+          <Box key={vendor} sx={{ display: 'flex', alignItems: 'center', gap: 1, minHeight: 32 }}>
+            <Typography noWrap sx={{ flex: 'none', fontSize: 13, fontWeight: 500 }}>
+              {t.vendorName[vendor]}
+            </Typography>
+            <Typography noWrap sx={{ flex: 'none', fontSize: 13, color: status.chosenError ? v.error : v.on2 }}>
+              {state}
+            </Typography>
+            {file ? <PathText path={file} sx={{ flex: 1, textAlign: 'right', fontSize: 12, color: v.on2, fontFamily: FONT_MONO }} /> : <Box sx={{ flex: 1 }} />}
             <Button size="small" onClick={() => onChange(vendor)} aria-label={`${t.vendorName[vendor]} ${t.executable} ${t.change}`} sx={{ flex: 'none', minWidth: 0 }}>
               {t.change}
             </Button>

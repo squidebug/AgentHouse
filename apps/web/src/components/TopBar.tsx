@@ -51,7 +51,7 @@ export function TopBar({ limits, env, envLoading, refreshEnv, mode, onToggleMode
         onClose={() => setAnchor(null)}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
         transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-        slotProps={{ paper: { sx: { width: 380, maxWidth: 'calc(100vw - 32px)', p: 2, display: 'flex', flexDirection: 'column', gap: 1.5 } } }}
+        slotProps={{ paper: { sx: { width: 420, maxWidth: 'calc(100vw - 32px)', p: 2, display: 'flex', flexDirection: 'column', gap: 1.5 } } }}
       >
         <Typography sx={{ fontSize: 14, fontWeight: 600 }}>{t.environment}</Typography>
         {messages.length === 0 && <Typography sx={{ color: v.on2 }}>{t.noIssues}</Typography>}
