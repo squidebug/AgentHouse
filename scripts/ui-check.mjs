@@ -222,6 +222,9 @@ try {
   const before = await paneBox();
   await page.keyboard.press('Control+Backquote');
   await page.getByRole('button', { name: /도구 1/ }).waitFor({ timeout: 5000 });
+  // The pane drew the terminal in between; the conversation comes back as it was left.
+  await page.getByText('fake-tool-output', { exact: true }).waitFor({ timeout: 5000 });
+  check(true, 'back in the conversation, the tool call opened before is still open');
   await sendButton.waitFor({ state: 'visible', timeout: 5000 });
   check(true, 'Ctrl+` in the terminal shows the conversation, and the composer opens');
   await page.waitForTimeout(400);

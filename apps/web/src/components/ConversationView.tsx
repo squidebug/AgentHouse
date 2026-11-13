@@ -31,6 +31,46 @@ const preSx = {
   overflowWrap: 'anywhere',
 } as const;
 
+/**
+ * What the user had in front of them in a conversation: how far back it shows,
+ * where it was scrolled to and what was opened. A pane draws one view at a
+ * time, so switching to the terminal and back makes this view anew; without
+ * this it would come back at the bottom with everything folded.
+ */
+interface ViewMemory {
+  shown: number;
+  /** Distance from the end of the page to the top of the view; null while it follows the newest turn. */
+  fromBottom: number | null;
+  open: Set<string>;
+}
+
+// For as long as the page lives; a reload starts every conversation at its end.
+const memories = new Map<string, ViewMemory>();
+const MAX_MEMORIES = 50;
+
+function memoryOf(sessionId: string, agentId: string | null): ViewMemory {
+  const key = `${sessionId}\n${agentId ?? ''}`;
+  let memory = memories.get(key);
+  if (!memory) {
+    memory = { shown: PAGE, fromBottom: null, open: new Set() };
+    memories.set(key, memory);
+    if (memories.size > MAX_MEMORIES) memories.delete(memories.keys().next().value!);
+  }
+  return memory;
+}
+
+/** Whether a part of the conversation is opened, remembered with the conversation. */
+function useOpen(source: ConversationSource, id: string): [boolean, (open: boolean) => void] {
+  const { memory } = source;
+  const [open, setOpen] = useState(() => memory.open.has(id));
+  const set = (next: boolean) => {
+    if (next) memory.open.add(id);
+    else memory.open.delete(id);
+    setOpen(next);
+  };
+  return [open, set];
+}
+
 /** A session delegated under the one whose conversation this is: an answer can be handed to it. */
 export interface DelegateTarget {
   id: string;
@@ -41,6 +81,7 @@ export interface DelegateTarget {
 export interface ConversationSource {
   sessionId: string;
   agentId: string | null;
+  memory: ViewMemory;
   /** Opens a sub-agent's own conversation, from its block. */
   onOpenAgent?: ((agentId: string) => void) | undefined;
   delegates?: DelegateTarget[] | undefined;
@@ -236,7 +277,7 @@ function StateDot({ state }: { state: ToolState }) {
 
 /** One tool call or one thought in an opened work row. */
 function WorkItem({ entry, source }: { entry: WorkEntry; source: ConversationSource }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useOpen(source, entry.id);
   const { detail, failed } = useDetail(source, entry, open);
   const label = entry.kind === 'tool' ? entry.name : t.thinking;
   const summary = entry.kind === 'tool' ? entry.summary : entry.chars ? t.chars(compactCount(entry.chars)) : '';
@@ -281,7 +322,7 @@ function WorkItem({ entry, source }: { entry: WorkEntry; source: ConversationSou
 
 /** A run of tool calls and thinking: one quiet row until opened. */
 function WorkRow({ entries, source }: { entries: WorkEntry[]; source: ConversationSource }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useOpen(source, `work:${entries[0]?.id}`);
   const summary = summarize(entries);
   const lastTool = [...entries].reverse().find((e): e is Extract<WorkEntry, { kind: 'tool' }> => e.kind === 'tool');
   const counts = [summary.tools ? t.tools(summary.tools) : '', summary.thinking ? t.thoughts(summary.thinking) : ''].filter(Boolean).join(' · ');
@@ -321,7 +362,7 @@ function WorkRow({ entries, source }: { entries: WorkEntry[]; source: Conversati
 }
 
 function Prompt({ entry, source }: { entry: Extract<ConversationEntry, { kind: 'prompt' }>; source: ConversationSource }) {
-  const [full, setFull] = useState(false);
+  const [full, setFull] = useOpen(source, `full:${entry.id}`);
   const { detail } = useDetail(source, entry, full);
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start' }}>
@@ -361,7 +402,7 @@ function Prompt({ entry, source }: { entry: Extract<ConversationEntry, { kind: '
 }
 
 function Notice({ entry, source }: { entry: Extract<ConversationEntry, { kind: 'notice' }>; source: ConversationSource }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useOpen(source, entry.id);
   const { detail } = useDetail(source, entry, open);
   const error = entry.notice === 'api_error';
   const label = error && entry.text ? `${t.notice.api_error} · ${entry.text}` : t.notice[entry.notice];
@@ -399,7 +440,7 @@ function Command({ entry }: { entry: Extract<ConversationEntry, { kind: 'command
 
 /** A sub-agent the model started: opened, what it reported; its own conversation is a click away. */
 function Agent({ entry, source }: { entry: Extract<ConversationEntry, { kind: 'agent' }>; source: ConversationSource }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useOpen(source, entry.id);
   const { detail, failed } = useDetail(source, entry, open);
   const { onOpenAgent } = source;
   return (
@@ -445,7 +486,7 @@ function Agent({ entry, source }: { entry: Extract<ConversationEntry, { kind: 'a
 
 /** A background agent reported back; its report opens below. */
 function Task({ entry, source }: { entry: Extract<ConversationEntry, { kind: 'task' }>; source: ConversationSource }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useOpen(source, entry.id);
   const { detail, failed } = useDetail(source, entry, open);
   const facts = [entry.tokens ? `${t.tokens} ${compactCount(entry.tokens)}` : null, entry.durationMs ? duration(entry.durationMs) : null].filter(Boolean).join(' · ');
   return (
@@ -491,8 +532,8 @@ function EntryView({ entry, source }: { entry: ConversationEntry; source: Conver
 }
 
 /** The model and tokens of a turn; the breakdown behind a click. */
-function TurnFooter({ turn }: { turn: ConversationTurn }) {
-  const [open, setOpen] = useState(false);
+function TurnFooter({ turn, source }: { turn: ConversationTurn; source: ConversationSource }) {
+  const [open, setOpen] = useOpen(source, `turn:${turn.index}`);
   const { usage } = turn;
   if (!usage.calls && !turn.model) return null;
   const input = usage.input + usage.cacheRead + usage.cacheWrite;
@@ -516,7 +557,7 @@ function Turn({ view, source, cards }: { view: TurnView; source: ConversationSou
       {view.blocks.map((block) =>
         block.kind === 'work' ? <WorkRow key={block.id} entries={block.entries} source={source} /> : <EntryView key={block.entry.id} entry={block.entry} source={source} />,
       )}
-      <TurnFooter turn={view.turn} />
+      <TurnFooter turn={view.turn} source={source} />
       {cards}
     </Box>
   );
@@ -553,27 +594,39 @@ export const ConversationView = memo(function ConversationView({
 }) {
   const conversation = useConversation(sessionId, agentId);
   const source = useMemo<ConversationSource>(
-    () => ({ sessionId, agentId, onOpenAgent, delegates, onDelegate, onDragText }),
+    () => ({ sessionId, agentId, memory: memoryOf(sessionId, agentId), onOpenAgent, delegates, onDelegate, onDragText }),
     [sessionId, agentId, onOpenAgent, delegates, onDelegate, onDragText],
   );
   const turns = useMemo(() => arrange(conversation.turns, conversation.entries), [conversation]);
   const placed = useMemo(() => delegationTurns(conversation.turns, delegations?.tasks ?? []), [conversation.turns, delegations?.tasks]);
   const cardsAfter = (index: number) =>
     placed.get(index)?.map((task) => <DelegationCard key={task.id} task={task} title={delegations!.titleOf(task.childId)} onDeliver={delegations!.onDeliver} />);
-  const [shown, setShown] = useState(PAGE);
+  const { memory } = source;
+  const [shown, setShown] = useState(memory.shown);
   const scroller = useRef<HTMLDivElement>(null);
-  const stick = useRef(true);
+  const stick = useRef(memory.fromBottom === null);
+  // Put back where the user was reading, once, when the conversation arrives.
+  const restored = useRef(false);
   // Showing older turns grows the page above the view: keep what is on screen in place.
   const fromBottom = useRef<number | null>(null);
 
   useEffect(() => {
-    setShown(PAGE);
-    stick.current = true;
+    // Another conversation in the same pane: as it was left.
+    setShown(memory.shown);
+    stick.current = memory.fromBottom === null;
+    restored.current = false;
   }, [sessionId, agentId]);
 
   useLayoutEffect(() => {
     const element = scroller.current;
     if (!element) return;
+    if (conversation.ready && !restored.current) {
+      restored.current = true;
+      if (memory.fromBottom !== null) {
+        element.scrollTop = element.scrollHeight - memory.fromBottom;
+        return;
+      }
+    }
     if (fromBottom.current !== null) {
       element.scrollTop = element.scrollHeight - fromBottom.current;
       fromBottom.current = null;
@@ -586,7 +639,10 @@ export const ConversationView = memo(function ConversationView({
       ref={scroller}
       onScroll={() => {
         const element = scroller.current;
-        if (element) stick.current = element.scrollHeight - element.scrollTop - element.clientHeight < STICK_PX;
+        if (!element) return;
+        stick.current = element.scrollHeight - element.scrollTop - element.clientHeight < STICK_PX;
+        // Not before the conversation is back: the empty view's own scroll event would overwrite the place.
+        if (restored.current) memory.fromBottom = stick.current ? null : element.scrollHeight - element.scrollTop;
       }}
       sx={{ height: '100%', overflowY: 'auto', pr: '8px', color: v.on }}
     >
@@ -598,6 +654,7 @@ export const ConversationView = memo(function ConversationView({
           onClick={() => {
             const element = scroller.current;
             if (element) fromBottom.current = element.scrollHeight - element.scrollTop;
+            memory.shown = shown + PAGE;
             setShown(shown + PAGE);
           }}
           sx={{ mt: '4px', fontSize: 12 }}
