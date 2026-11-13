@@ -19,6 +19,7 @@ const fontsReady: Promise<unknown> =
     : Promise.all([document.fonts.load('13px "JetBrains Mono"'), document.fonts.load('13px "Nanum Gothic Coding"', '가')]).catch(() => undefined);
 
 const MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
+const RESIZE_SETTLE_MS = 100;
 
 /**
  * A link a CLI wrote into its output (OSC 8), clicked: its text may differ from
@@ -158,7 +159,12 @@ export function TerminalView({ sessionId, mode, windowsBuild, onFocus, autoFocus
         focusRef.current?.();
       };
       term.textarea?.addEventListener('focus', onFocusIn);
-      const observer = new ResizeObserver(() => reportSize());
+      // A window being dragged changes size on every frame; the PTY (and the CLI, which redraws) is told once it settles.
+      let settling: ReturnType<typeof setTimeout> | undefined;
+      const observer = new ResizeObserver(() => {
+        clearTimeout(settling);
+        settling = setTimeout(reportSize, RESIZE_SETTLE_MS);
+      });
       observer.observe(element);
       // Back from the conversation (Ctrl+`) or after a reload: ready to type, unless the composer or another field has the keyboard.
       const idle = document.activeElement === null || document.activeElement === document.body;
@@ -166,6 +172,7 @@ export function TerminalView({ sessionId, mode, windowsBuild, onFocus, autoFocus
 
       teardown = () => {
         clearTimeout(retry);
+        clearTimeout(settling);
         observer.disconnect();
         term.textarea?.removeEventListener('focus', onFocusIn);
         dataSub.dispose();
