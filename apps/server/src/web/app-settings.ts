@@ -1,9 +1,10 @@
 // What the user chose in AgentHouse that outlives the web server: for now, which
 // executable runs each CLI. The web server writes the file (one writer); the
 // doctor only reads it.
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import type { Vendor } from '@agenthouse/protocol';
+import { writeJsonFile } from '../shared/state';
 
 export interface AppSettings {
   /** Per CLI, the executable to run instead of the one the user's shell runs. */
@@ -31,11 +32,7 @@ export function readAppSettings(stateDir: string): AppSettings {
   return { cli };
 }
 
-/** Replaces the file atomically, readable by the user only. */
+/** A choice that could not be saved is refused: the caller hears of it. */
 export function writeAppSettings(stateDir: string, settings: AppSettings): void {
-  mkdirSync(stateDir, { recursive: true, mode: 0o700 });
-  const file = appSettingsFile(stateDir);
-  const temp = `${file}.${process.pid}.tmp`;
-  writeFileSync(temp, JSON.stringify({ version: FILE_VERSION, cli: settings.cli }), { mode: 0o600 });
-  renameSync(temp, file);
+  writeJsonFile(appSettingsFile(stateDir), { version: FILE_VERSION, cli: settings.cli });
 }

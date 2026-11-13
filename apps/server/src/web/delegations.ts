@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { open, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { isAsking, isHeld, type DelegationInfo, type SessionInfo } from '@agenthouse/protocol';
 import { claudeConfigDir } from '../claude/settings';
 import { isClaudeTranscript } from '../claude/status';
+import { notSaved, writeJsonFile } from '../shared/state';
 import type { SessionManager } from './manager';
 
 const FILE_VERSION = 1;
@@ -442,15 +443,12 @@ export class Delegations extends EventEmitter {
     this.changed();
   }
 
-  // Replaced atomically: a reader never sees half a file.
   private save(): void {
     try {
-      mkdirSync(path.dirname(this.file), { recursive: true, mode: 0o700 });
-      const temp = `${this.file}.${process.pid}.tmp`;
-      writeFileSync(temp, JSON.stringify({ version: FILE_VERSION, tasks: [...this.tasks.values()] }), { mode: 0o600 });
-      renameSync(temp, this.file);
-    } catch {
-      // kept in memory; the next change tries again
+      writeJsonFile(this.file, { version: FILE_VERSION, tasks: [...this.tasks.values()] });
+    } catch (error) {
+      // Kept in memory; the next change tries again.
+      notSaved(this.file, error);
     }
   }
 }

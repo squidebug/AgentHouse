@@ -52,12 +52,42 @@ export function readAllStates(dir: string): HostState[] {
   return states;
 }
 
-/** Replaced atomically and readable only by the user: the token controls every session. */
+/** Renames over the target, trying again while Windows has it open (a virus scanner, an indexer, a reader). */
+function renameOver(from: string, to: string): void {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      renameSync(from, to);
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (attempt >= 5 || (code !== 'EPERM' && code !== 'EBUSY' && code !== 'EACCES')) throw error;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20 * (attempt + 1));
+    }
+  }
+}
+
+/**
+ * Writes a file of the state folder whole or not at all, readable by the user
+ * only: a temporary file beside it, renamed over it, so a reader never sees
+ * half a file. One writer per file.
+ */
+export function writeFileAtomic(file: string, text: string): void {
+  mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const temp = `${file}.${process.pid}.tmp`;
+  writeFileSync(temp, text, { mode: 0o600 });
+  try {
+    renameOver(temp, file);
+  } catch (error) {
+    rmSync(temp, { force: true });
+    throw error;
+  }
+}
+
+export const writeJsonFile = (file: string, value: unknown) => writeFileAtomic(file, JSON.stringify(value));
+
+/** Readable only by the user: the token controls every session. */
 export function writeState(dir: string, state: HostState): void {
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const temp = `${stateFile(dir)}.${process.pid}.tmp`;
-  writeFileSync(temp, JSON.stringify(state), { mode: 0o600 });
-  renameSync(temp, stateFile(dir));
+  writeJsonFile(stateFile(dir), state);
 }
 
 /** Removes the state file if it still describes this process (a newer host may have replaced it). */
@@ -66,8 +96,18 @@ export function clearState(dir: string, pid: number): void {
 }
 
 /** The host runs without a console, so it writes what happened to a small log file. */
-export function hostLogger(dir: string): (line: string) => void {
-  const file = logFile(dir);
+export const hostLogger = (dir: string) => fileLogger(logFile(dir));
+
+export const webLogFile = (dir: string) => path.join(dir, 'logs', 'web.log');
+/** The web server's log: what it could not save and errors nothing else caught, which its console may no longer show. */
+export const webLogger = (dir: string) => fileLogger(webLogFile(dir));
+
+/** A file of the state folder could not be written: it stays in memory until the next change, and the log says so. */
+export function notSaved(file: string, error: unknown): void {
+  webLogger(path.dirname(file))(`${path.basename(file)} not saved: ${(error as Error)?.message ?? error}`);
+}
+
+function fileLogger(file: string): (line: string) => void {
   try {
     mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
     if (statSync(file).size > 1024 * 1024) renameSync(file, `${file}.1`);
@@ -78,7 +118,7 @@ export function hostLogger(dir: string): (line: string) => void {
     try {
       appendFileSync(file, `${new Date().toISOString()} [${process.pid}] ${line}\n`);
     } catch {
-      // logging must never take the host down
+      // logging must never take a server down
     }
   };
 }

@@ -1,6 +1,7 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import type { LinkKind, SessionLink } from '@agenthouse/protocol';
+import { notSaved, writeJsonFile } from '../shared/state';
 
 const FILE_VERSION = 1;
 const KINDS: readonly LinkKind[] = ['group', 'delegate'];
@@ -81,15 +82,12 @@ export class LinkStore {
     return changed;
   }
 
-  // Replaced atomically: a reader never sees half a file.
   private save(): void {
     try {
-      mkdirSync(path.dirname(this.file), { recursive: true, mode: 0o700 });
-      const temp = `${this.file}.${process.pid}.tmp`;
-      writeFileSync(temp, JSON.stringify({ version: FILE_VERSION, links: this.list() }), { mode: 0o600 });
-      renameSync(temp, this.file);
-    } catch {
-      // kept in memory; the next change tries again
+      writeJsonFile(this.file, { version: FILE_VERSION, links: this.list() });
+    } catch (error) {
+      // Kept in memory; the next change tries again.
+      notSaved(this.file, error);
     }
   }
 }

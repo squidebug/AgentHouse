@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { findOnPath } from './web/cli/resolve';
 import { doctor } from './web/doctor-command';
 import { HostClient, stopHosts } from './web/host-client';
-import { defaultStateDir } from './shared/state';
+import { defaultStateDir, webLogger } from './shared/state';
 import { createAgentHouseServer } from './web/http/server';
 import { forgetWebServer, recordWebServer, runningWebServer, stopWebServer } from './web/instance';
 import { stateDirProblem } from './web/state-dir';
@@ -102,8 +102,15 @@ async function main(): Promise<void> {
   }
 
   // A failed request or socket must not take every tab down; the sessions live on in the host either way.
-  process.on('uncaughtException', (error) => console.error(`uncaught: ${error.stack ?? error}`));
-  process.on('unhandledRejection', (error) => console.error(`unhandled: ${(error as Error)?.stack ?? error}`));
+  // Also in logs/web.log: the console this was started from may be gone, or far up.
+  const log = webLogger(stateDir);
+  const report = (kind: string) => (error: unknown) => {
+    const text = `${kind}: ${(error as Error)?.stack ?? error}`;
+    console.error(text);
+    log(text);
+  };
+  process.on('uncaughtException', report('uncaught'));
+  process.on('unhandledRejection', report('unhandled'));
 
   const host = await HostClient.connect({ stateDir, spawn: true });
   const app = await createAgentHouseServer({

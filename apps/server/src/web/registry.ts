@@ -1,6 +1,7 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import type { SessionInfo } from '@agenthouse/protocol';
+import { notSaved, writeFileAtomic } from '../shared/state';
 
 const FILE_VERSION = 1;
 // Ended sessions stay listed until removed; beyond this many the oldest go.
@@ -103,18 +104,15 @@ export class SessionRegistry {
     }, SAVE_DELAY_MS);
   }
 
-  // Replaced atomically: a reader never sees half a file.
   private save(): void {
     const text = this.serialize();
     if (text === this.saved) return;
     try {
-      mkdirSync(path.dirname(this.file), { recursive: true, mode: 0o700 });
-      const temp = `${this.file}.${process.pid}.tmp`;
-      writeFileSync(temp, text, { mode: 0o600 });
-      renameSync(temp, this.file);
+      writeFileAtomic(this.file, text);
       this.saved = text;
-    } catch {
-      // kept in memory; the next change tries again
+    } catch (error) {
+      // Kept in memory; the next change tries again.
+      notSaved(this.file, error);
     }
   }
 }

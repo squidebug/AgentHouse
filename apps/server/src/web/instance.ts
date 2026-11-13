@@ -2,10 +2,11 @@
 // state.json and delegations.json whole, undoing each other's groups and
 // delegations and handing an answer over twice; a second start opens the
 // first one's address instead.
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { isAlive } from '../shared/kill-tree';
+import { notSaved, writeJsonFile } from '../shared/state';
 
 export interface WebServerRecord {
   pid: number;
@@ -77,13 +78,10 @@ export function webServerAnswering(stateDir: string): Promise<WebServerRecord | 
 /** Notes this web server for a later start to find; replaced atomically, readable by the user only. */
 export function recordWebServer(stateDir: string, record: Omit<WebServerRecord, 'pid'>): void {
   try {
-    mkdirSync(stateDir, { recursive: true, mode: 0o700 });
-    const file = webServerFile(stateDir);
-    const temp = `${file}.${process.pid}.tmp`;
-    writeFileSync(temp, JSON.stringify({ pid: process.pid, ...record }), { mode: 0o600 });
-    renameSync(temp, file);
-  } catch {
-    // unrecorded: a second start then runs a second server, as before
+    writeJsonFile(webServerFile(stateDir), { pid: process.pid, ...record });
+  } catch (error) {
+    // Unrecorded: a second start then runs a second server, as before.
+    notSaved(webServerFile(stateDir), error);
   }
 }
 
