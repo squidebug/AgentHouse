@@ -26,7 +26,7 @@ const globalStyles = {
   '@keyframes ah-pulse': { '0%, 100%': { opacity: 1 }, '50%': { opacity: 0.35 } },
   '.ah-working': { animation: 'ah-pulse 1.6s ease-in-out infinite' },
   // Composer parts that slide open sideways when they first appear.
-  '@keyframes ah-reveal': { from: { 'max-width': 0, opacity: 0, 'margin-left': 0, 'margin-right': 0 } },
+  '@keyframes ah-reveal': { from: { maxWidth: 0, opacity: 0, marginLeft: 0, marginRight: 0 } },
   '@media (prefers-reduced-motion: reduce)': {
     '.ah-working': { animation: 'none' },
     '.ah-fold': { animation: 'none !important', transition: 'none !important' },
