@@ -1,6 +1,8 @@
 #!/usr/bin/env node
-// Development: the server under `tsx watch` and Vite on 5173, sharing one token
-// across server restarts. Prints the address to open.
+// Development: the server under `tsx watch` and Vite on 5173. Prints the address
+// to open, with the one-time login code the server gives out on every start; a
+// page that logged in stays logged in across server restarts (the dev host keeps
+// its login secret).
 //
 // It keeps its own state folder (~/.agenthouse-dev) and port (7358), so it has
 // its own session host: stopping or restarting dev never touches the sessions
@@ -8,7 +10,6 @@
 //   node scripts/dev.mjs        start
 //   node scripts/dev.mjs stop   end the dev sessions and the dev session host
 import { execFile, spawn } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -19,12 +20,16 @@ const DEV_PORT = 7358;
 const devEnv = { AGENTHOUSE_HOME: path.join(os.homedir(), '.agenthouse-dev') };
 const children = [];
 
-function run(name, args, cwd, extraEnv = {}, filter = () => true) {
+/** Runs pnpm with these arguments; each output line goes through `map` (null drops it). */
+function run(name, args, cwd, extraEnv = {}, map = (line) => line) {
   const child = spawn('pnpm', args, { cwd, shell: isWindows, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...extraEnv } });
   const prefix = name ? `[${name}] ` : '';
   const forward = (stream, out) =>
     stream.on('data', (chunk) => {
-      for (const line of String(chunk).split(/\r?\n/)) if (line.trim() && filter(line)) out.write(prefix + line + '\n');
+      for (const line of String(chunk).split(/\r?\n/)) {
+        const shown = line.trim() ? map(line) : null;
+        if (shown !== null) out.write(shown.startsWith('\n') ? shown : prefix + shown + '\n');
+      }
     });
   forward(child.stdout, process.stdout);
   forward(child.stderr, process.stderr);
@@ -35,21 +40,24 @@ function run(name, args, cwd, extraEnv = {}, filter = () => true) {
 if (process.argv[2] === 'stop') {
   run('', ['exec', 'tsx', 'src/main.ts', '--stop'], path.join(root, 'apps/server'), devEnv);
 } else {
-  const token = randomBytes(24).toString('base64url');
-  const hideToken = (line) => !line.includes(token);
+  let noted = false;
+  // The server's own address becomes Vite's, which serves the page and passes the API on.
+  const login = /^AgentHouse\s+http:\/\/127\.0\.0\.1:\d+\/(\?code=\S+)$/;
+  const showLogin = (line) => {
+    const match = login.exec(line.trim());
+    if (!match) return line;
+    const note = noted ? '' : `개발용 세션은 ${devEnv.AGENTHOUSE_HOME}의 호스트에서 돕니다. 끝내려면: pnpm dev:stop\n`;
+    noted = true;
+    return `\nAgentHouse (dev)  http://localhost:5173/${match[1]}\n${note}\n`;
+  };
   run(
     'server',
     ['exec', 'tsx', 'watch', 'src/main.ts', '--port', String(DEV_PORT), '--dev-origin', 'http://localhost:5173', '--cwd', root],
     path.join(root, 'apps/server'),
-    { ...devEnv, AGENTHOUSE_TOKEN: token },
-    hideToken,
+    devEnv,
+    showLogin,
   );
-  run('web', ['exec', 'vite'], path.join(root, 'apps/web'), { AGENTHOUSE_DEV_SERVER: `http://127.0.0.1:${DEV_PORT}` }, hideToken);
-
-  setTimeout(() => {
-    process.stdout.write(`\nAgentHouse (dev)  http://localhost:5173/auth?token=${token}\n`);
-    process.stdout.write(`개발용 세션은 ${devEnv.AGENTHOUSE_HOME}의 호스트에서 돕니다. 끝내려면: pnpm dev:stop\n\n`);
-  }, 1500);
+  run('web', ['exec', 'vite'], path.join(root, 'apps/web'), { AGENTHOUSE_DEV_SERVER: `http://127.0.0.1:${DEV_PORT}` });
 
   const stop = () => {
     for (const child of children) {

@@ -15,7 +15,7 @@ let headers: Record<string, string>;
 
 before(async () => {
   app = await startServer();
-  headers = { cookie: await login(app.port, app.token), origin: `http://127.0.0.1:${app.port}` };
+  headers = { authorization: await login(app), origin: `http://127.0.0.1:${app.port}` };
 });
 
 after(async () => {

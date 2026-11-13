@@ -112,9 +112,10 @@ export interface Socket {
   messages: Array<{ type: string; [key: string]: unknown }>;
 }
 
-export function openSocket(port: number, pathname: string, headers: Record<string, string>): Promise<Socket> {
+/** A WebSocket as a tool opens it (headers), or as a page does: `protocols` carry its token. */
+export function openSocket(port: number, pathname: string, headers: Record<string, string>, protocols: string[] = []): Promise<Socket> {
   return new Promise((resolve) => {
-    const ws = new WebSocket(`ws://127.0.0.1:${port}${pathname}`, { headers });
+    const ws = new WebSocket(`ws://127.0.0.1:${port}${pathname}`, protocols, { headers });
     const messages: Socket['messages'] = [];
     ws.on('message', (raw) => messages.push(JSON.parse(raw.toString())));
     ws.on('open', () => resolve({ ws, status: 101, messages }));
@@ -158,9 +159,11 @@ export function screenText(messages: Socket['messages']): string {
     .join('');
 }
 
-export async function login(port: number, token: string): Promise<string> {
-  const res = await request(port, 'GET', `/auth?token=${token}`);
-  const cookie = (res.headers['set-cookie'] ?? [])[0]?.split(';')[0];
-  if (!cookie) throw new Error('login failed');
-  return cookie;
+/** Logs in as a page does, with the one-time code of an address the server gives out; the Authorization value. */
+export async function login(app: { port: number; loginUrl(): string }): Promise<string> {
+  const code = new URL(app.loginUrl()).searchParams.get('code');
+  const res = await request(app.port, 'POST', '/api/login', { headers: { origin: `http://127.0.0.1:${app.port}` }, body: { code } });
+  const token = (res.json as { token?: unknown } | null)?.token;
+  if (typeof token !== 'string') throw new Error(`login failed: ${res.status}`);
+  return `Bearer ${token}`;
 }

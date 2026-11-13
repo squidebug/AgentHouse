@@ -1,4 +1,19 @@
-import type { ApiError, ComposeRequest, ComposeResult, DelegationInfo, EntryDetail, EnvReport, LaunchOptions, LinkKind, SessionInfo, SessionLink } from '@agenthouse/protocol';
+import {
+  AUTH_REQUIRED,
+  SOCKET_PROTOCOL,
+  TOKEN_PROTOCOL_PREFIX,
+  type ApiError,
+  type ComposeRequest,
+  type ComposeResult,
+  type DelegationInfo,
+  type EntryDetail,
+  type EnvReport,
+  type LaunchOptions,
+  type LinkKind,
+  type SessionInfo,
+  type SessionLink,
+} from '@agenthouse/protocol';
+import { authToken, requireLogin } from './auth';
 
 export class RequestError extends Error {
   constructor(
@@ -12,22 +27,28 @@ export class RequestError extends Error {
 }
 
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const res = await fetch(path, {
-    method,
-    credentials: 'same-origin',
-    headers: body === undefined ? {} : { 'content-type': 'application/json' },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-  });
+  const token = authToken();
+  const headers: Record<string, string> = token ? { authorization: `Bearer ${token}` } : {};
+  if (body !== undefined) headers['content-type'] = 'application/json';
+  const res = await fetch(path, { method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
   const text = await res.text();
-  const data = text ? (JSON.parse(text) as unknown) : null;
+  let data: unknown = null;
+  try {
+    data = text ? (JSON.parse(text) as unknown) : null;
+  } catch {
+    // not JSON: an error page from something else on this port
+  }
   if (!res.ok) {
     const err = (data ?? {}) as Partial<ApiError>;
+    if (res.status === 401 && err.code === AUTH_REQUIRED) requireLogin(err.command ?? null, token);
     throw new RequestError(err.error ?? res.statusText, res.status, err.code, err.command);
   }
   return data as T;
 }
 
 export const api = {
+  /** Whether the page's token is still good; a refusal shows the login page. */
+  auth: () => call<unknown>('GET', '/api/auth'),
   env: (refresh = false) => call<EnvReport>('GET', refresh ? '/api/env?refresh=1' : '/api/env'),
   launch: (opts: LaunchOptions) => call<SessionInfo>('POST', '/api/sessions', opts),
   /** Ends the CLI; the session stays listed, ended. */
@@ -47,7 +68,9 @@ export const api = {
     call<EntryDetail>('GET', `/api/sessions/${encodeURIComponent(id)}/conversation/${encodeURIComponent(entryId)}${agentId ? `?agent=${encodeURIComponent(agentId)}` : ''}`),
 };
 
-export function socketUrl(path: string): string {
+/** A WebSocket to the server, with the page's token as a subprotocol (no headers on WebSockets, and no secret in the address). */
+export function openSocket(path: string): WebSocket {
   const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
-  return `${scheme}://${location.host}${path}`;
+  const token = authToken();
+  return new WebSocket(`${scheme}://${location.host}${path}`, token ? [SOCKET_PROTOCOL, `${TOKEN_PROTOCOL_PREFIX}${token}`] : [SOCKET_PROTOCOL]);
 }

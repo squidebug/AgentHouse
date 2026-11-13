@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 // Drives the built app in the installed Chrome (headless, nothing downloaded)
-// with the fake agent: a session opens in a pane, a message goes through the
-// composer, and the pane's conversation view shows the turn with its tool call.
-// Then an ended session that an earlier session host left in sessions.json
-// (ui-sample.mjs) shows its conversation. Light and dark screenshots go to the
-// output folder. Uses throwaway state and
-// Claude config folders, so it never touches real sessions or ~/.claude.
+// with the fake agent: the login, a session in a pane, a message through the
+// composer and its turn in the pane's conversation view, an ended session that
+// an earlier session host left in sessions.json (ui-sample.mjs), sub-agents,
+// groups and delegation. Light and dark screenshots go to the output folder.
+// Uses throwaway state and Claude config folders, so it never touches real
+// sessions or ~/.claude.
 //   pnpm build && pnpm ui:check [-- --out <folder>] [-- --headed]
 import { execFileSync, spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
@@ -39,7 +39,7 @@ const check = (ok, label, detail = '') => {
 };
 
 const server = spawn(process.execPath, [main, '--port', '0', '--json', '--allow-fake', '--cwd', work], { env, stdio: ['ignore', 'pipe', 'inherit'] });
-const { url, port, token } = JSON.parse(await new Promise((resolve) => createInterface({ input: server.stdout }).once('line', resolve)));
+const { url, port, key } = JSON.parse(await new Promise((resolve) => createInterface({ input: server.stdout }).once('line', resolve)));
 const origin = `http://127.0.0.1:${port}`;
 const browser = await chromium.launch({ channel: 'chrome', headless: !process.argv.includes('--headed') });
 const errors = [];
@@ -53,10 +53,29 @@ try {
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto(url);
   await page.getByRole('heading', { name: 'AgentHouse' }).waitFor();
+  check(!new URL(page.url()).searchParams.has('code'), 'the login code is spent and leaves the address');
+
+  // A browser without a token gets the login page and the command for a new address; a spent address says so.
+  for (const [address, label] of [
+    [`${origin}/`, '로그인 필요'],
+    [url, '로그인 링크 만료'],
+  ]) {
+    const stranger = await browser.newPage({ viewport: { width: 800, height: 600 } });
+    await stranger.emulateMedia({ colorScheme: 'dark' });
+    await stranger.goto(address);
+    await stranger.getByText(label).waitFor();
+    check(await stranger.getByText('pnpm start').isVisible(), `a browser without a token: ${label}, with the command`);
+    if (label === '로그인 필요') {
+      await stranger.screenshot({ path: path.join(out, 'login-dark.png') });
+      await stranger.emulateMedia({ colorScheme: 'light' });
+      await stranger.screenshot({ path: path.join(out, 'login-light.png') });
+    }
+    await stranger.close();
+  }
 
   const created = await fetch(`${origin}/api/sessions`, {
     method: 'POST',
-    headers: { cookie: `ah_token=${token}`, origin, 'content-type': 'application/json' },
+    headers: { authorization: `Bearer ${key}`, origin, 'content-type': 'application/json' },
     body: JSON.stringify({ vendor: 'fake', title: 'ui-check', cwd: work, theme: 'dark' }),
   });
   check(created.status === 201, 'a session starts', `HTTP ${created.status}`);
@@ -183,7 +202,7 @@ try {
   // Sub-agents in the background: nested rows in the tree, each with a conversation of its own.
   const agents = await fetch(`${origin}/api/sessions`, {
     method: 'POST',
-    headers: { cookie: `ah_token=${token}`, origin, 'content-type': 'application/json' },
+    headers: { authorization: `Bearer ${key}`, origin, 'content-type': 'application/json' },
     body: JSON.stringify({ vendor: 'fake', title: 'ui-agents', cwd: work, theme: 'dark' }),
   });
   check(agents.status === 201, 'a session for sub-agents starts', `HTTP ${agents.status}`);
@@ -259,7 +278,7 @@ try {
   for (const title of ['ui-lead', 'ui-helper']) {
     await fetch(`${origin}/api/sessions`, {
       method: 'POST',
-      headers: { cookie: `ah_token=${token}`, origin, 'content-type': 'application/json' },
+      headers: { authorization: `Bearer ${key}`, origin, 'content-type': 'application/json' },
       body: JSON.stringify({ vendor: 'fake', title, cwd: work, theme: 'dark' }),
     });
   }

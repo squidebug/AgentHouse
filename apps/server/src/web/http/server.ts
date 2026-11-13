@@ -1,7 +1,7 @@
 import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, type WebSocket } from 'ws';
-import type { ApiError, ComposeResult, EventServerMessage } from '@agenthouse/protocol';
+import { AUTH_REQUIRED, LOGIN_EXPIRED, SOCKET_PROTOCOL, type ApiError, type ComposeResult, type EventServerMessage, type LoginResult } from '@agenthouse/protocol';
 import { LaunchError } from '../cli/launch';
 import { EnvService } from '../doctor';
 import { HostUnavailableError, type HostClient } from '../host-client';
@@ -11,7 +11,7 @@ import { DelegationError, Delegations, delegationsFile } from '../delegations';
 import { LinkError } from '../links';
 import { SessionManager } from '../manager';
 import { AccessControl } from './access';
-import { ComposeBody, DelegateBody, DeliverBody, LaunchBody, LinkBody, TerminalClient } from './schemas';
+import { ComposeBody, DelegateBody, DeliverBody, LaunchBody, LinkBody, LoginBody, TerminalClient } from './schemas';
 import { serveStatic } from './static';
 
 export interface ServerOptions {
@@ -26,16 +26,20 @@ export interface ServerOptions {
   webDist?: string;
   defaultCwd?: string;
   fakeAgentPath?: string;
-  /** Browser login token. Defaults to the host's, which outlives web server restarts. */
-  token?: string;
   /** How the user ends the session host, for the environment check (default `pnpm stop`). */
   stopCommand?: string;
+  /** How the user gets a new login address, for a page that is not logged in (default `pnpm start`). */
+  startCommand?: string;
 }
 
 export interface AgentHouseServer {
   port: number;
-  token: string;
+  /** The address without a login code. */
   url: string;
+  /** For local tools (web.json, --json, tests): taken as a bearer, at this port only. */
+  key: string;
+  /** An address that logs a browser in, once: a new one-time code on every call. */
+  loginUrl(): string;
   manager: SessionManager;
   /** Stops serving. The sessions keep running in the host. */
   close(): Promise<void>;
@@ -172,8 +176,11 @@ function relayTerminal(browser: WebSocket, upstream: WebSocket): void {
 }
 
 export async function createAgentHouseServer(options: ServerOptions): Promise<AgentHouseServer> {
-  const token = options.token ?? options.host.webToken;
-  const access = new AccessControl(token, options.devOrigins ?? []);
+  // The host keeps its login secret for as long as it runs, so logins outlive web server restarts.
+  const access = new AccessControl(options.host.webToken, options.devOrigins ?? []);
+  const startCommand = options.startCommand ?? 'pnpm start';
+  // Called once the server listens, when the port is known.
+  const loginAddress = (code: string) => `http://127.0.0.1:${port}/?code=${code}`;
   const defaultCwd = options.defaultCwd ?? process.cwd();
   const { host } = options;
   const env = new EnvService(defaultCwd, {
@@ -207,6 +214,11 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
     if (req.method !== 'GET' && !access.originAllowed(req)) throw new HttpError(403, '허용되지 않은 출처입니다.');
     const parts = url.pathname.split('/').filter(Boolean); // ['api', 'sessions', id, action]
 
+    // The page's token is good: a page that lost its sockets tells a server restart from a lost login.
+    if (url.pathname === '/api/auth' && req.method === 'GET') {
+      send(res, 200, {});
+      return;
+    }
     if (url.pathname === '/api/env' && req.method === 'GET') {
       send(res, 200, await env.report(url.searchParams.has('refresh')));
       return;
@@ -289,24 +301,45 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
         return;
       }
       const url = new URL(req.url ?? '/', 'http://localhost');
-      const loginToken = url.searchParams.get('token');
-      if ((url.pathname === '/auth' || url.pathname === '/') && loginToken !== null) {
-        if (!access.tokenMatches(loginToken)) {
-          send(res, 401, '접속 토큰이 올바르지 않습니다.');
+      // A local tool (a second start) asks for an address to open.
+      if (url.pathname === '/auth/code' && req.method === 'POST') {
+        if (!access.isLocalTool(req)) {
+          send(res, 401, { error: '로그인 코드를 만들 수 없습니다.' } satisfies ApiError);
           return;
         }
-        send(res, 302, '', { location: '/', 'set-cookie': access.loginCookie() });
+        const code = access.issueCode();
+        send(res, 200, { code, url: loginAddress(code) });
         return;
       }
-      if (!access.authenticated(req)) {
-        send(res, 401, '접속 토큰이 없습니다. 서버를 시작할 때 출력된 주소로 접속하세요.');
+      if (url.pathname === '/api/login' && req.method === 'POST') {
+        if (!access.originAllowed(req)) throw new HttpError(403, '허용되지 않은 출처입니다.');
+        const { code } = parse(LoginBody, await readJson(req, 4096));
+        const token = access.redeem(code);
+        if (!token) {
+          send(res, 401, { error: '로그인 링크가 만료되었습니다.', code: LOGIN_EXPIRED, command: startCommand } satisfies ApiError);
+          return;
+        }
+        send(res, 200, { token } satisfies LoginResult);
         return;
       }
       if (url.pathname.startsWith('/api/')) {
+        if (!access.authenticated(req)) {
+          send(res, 401, { error: '로그인이 필요합니다.', code: AUTH_REQUIRED, command: startCommand } satisfies ApiError);
+          return;
+        }
         await handleApi(req, res, url);
         return;
       }
-      if (req.method === 'GET' && options.webDist && (await serveStatic(options.webDist, url.pathname, res))) return;
+      // The address of the old login: the page now logs itself in.
+      if (url.pathname === '/auth') {
+        send(res, 302, '', { location: '/' });
+        return;
+      }
+      // The page holds no secret; what it shows comes from the API.
+      if (req.method === 'GET' && options.webDist) {
+        if (access.sendsOldCookie(req)) res.setHeader('set-cookie', AccessControl.clearOldCookie);
+        if (await serveStatic(options.webDist, url.pathname, res)) return;
+      }
       send(res, 404, '찾을 수 없습니다.');
     } catch (error) {
       if (error instanceof HttpError || error instanceof LaunchError) {
@@ -326,7 +359,12 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
     }
   });
 
-  const wss = new WebSocketServer({ noServer: true, maxPayload: 2 * 1024 * 1024 });
+  // A page offers `agenthouse` and its token as subprotocols; the server answers with `agenthouse`, never the token.
+  const wss = new WebSocketServer({
+    noServer: true,
+    maxPayload: 2 * 1024 * 1024,
+    handleProtocols: (protocols) => (protocols.has(SOCKET_PROTOCOL) ? SOCKET_PROTOCOL : false),
+  });
   // A socket's error (a frame over maxPayload, a peer gone mid-frame) closes that socket only: ws closes
   // it by itself (1009 for a frame too big). Without a listener it would be thrown, and the web server
   // with every tab would go.
@@ -411,8 +449,9 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
 
   return {
     port,
-    token,
-    url: `http://127.0.0.1:${port}/auth?token=${token}`,
+    url: `http://127.0.0.1:${port}/`,
+    key: access.key,
+    loginUrl: () => loginAddress(access.issueCode()),
     manager,
     async close() {
       manager.off('change', broadcastSessions);

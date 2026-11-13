@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { ConversationEntry, ConversationServerMessage, ConversationTurn } from '@agenthouse/protocol';
-import { socketUrl } from './client';
+import { openSocket } from './client';
 
 export interface Conversation {
   turns: ConversationTurn[];
@@ -29,7 +29,7 @@ export function useConversation(sessionId: string | null, agentId: string | null
     if (!sessionId) return;
 
     const connect = () => {
-      ws = new WebSocket(socketUrl(`/ws/conversation?id=${encodeURIComponent(sessionId)}${agentId ? `&agent=${encodeURIComponent(agentId)}` : ''}${turnsOnly ? '&turns=only' : ''}`));
+      ws = openSocket(`/ws/conversation?id=${encodeURIComponent(sessionId)}${agentId ? `&agent=${encodeURIComponent(agentId)}` : ''}${turnsOnly ? '&turns=only' : ''}`);
       ws.onopen = () => {
         delay = 500;
       };

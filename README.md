@@ -4,7 +4,7 @@ A local web console for running AI coding-agent CLIs — Claude Code and Codex �
 
 > **Status: pre-alpha.** Working today: real CLI terminals in the browser, several sessions at once, drag-and-drop layout, a Korean-safe composer, light/dark themes and an environment check. Sessions keep running while the server restarts, and Claude Code sessions show live status (working, waiting for approval, idle), plan usage, their sub-agents as they work, a flow view of who worked when, and a read-only conversation view with tokens per turn. Sessions can be grouped under one another in the tree, or delegated to: one session hands work to another and gets the answer back. Next: Codex status, then the first public release. Codex runs in the terminal; its status view comes later and has not been tried with a real Codex install yet. The UI is in Korean for now; English is planned.
 
-- Runs only on your machine (`127.0.0.1`), behind a login token, a Host allowlist and an Origin check.
+- Runs only on your machine (`127.0.0.1`), behind a login, a Host allowlist and an Origin check. The address it opens carries a one-time code; the page trades it for a token of its own, which no other port of `127.0.0.1` can read.
 - Drives the CLIs exactly as installed, signed in with your own account. No reinstall, no PATH changes: Node 18 or newer and whatever Claude Code / Codex you already use.
 - AgentHouse never reads credential files or proxies model traffic.
 - Claude Code sessions are observed through hooks and a status line passed to that session with `--settings`. Your settings files are not changed, and your own status line keeps showing.
@@ -17,7 +17,7 @@ AgentHouse is an independent project. It is not affiliated with or endorsed by A
 ```sh
 pnpm install
 pnpm build
-pnpm start        # prints http://127.0.0.1:7357/auth?token=… and opens it; if it already runs, opens that one
+pnpm start        # prints a login address (http://127.0.0.1:7357/?code=…, good once, for 5 minutes) and opens it; if it already runs, opens a new one for that
 pnpm stop         # ends the server, every session and the session host
 ```
 
@@ -26,7 +26,7 @@ Sessions run in a separate session host, so they keep running when the server st
 Development:
 
 ```sh
-pnpm dev          # open the printed http://localhost:5173/auth?token=… address
+pnpm dev          # open the printed http://localhost:5173/?code=… address
 pnpm dev:stop     # ends the dev sessions and the dev session host
 ```
 

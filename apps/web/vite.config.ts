@@ -13,7 +13,6 @@ export default defineConfig({
     strictPort: true,
     proxy: {
       '/api': { target: server, changeOrigin: true },
-      '/auth': { target: server, changeOrigin: true },
       '/ws': { target: server, changeOrigin: true, ws: true },
     },
   },

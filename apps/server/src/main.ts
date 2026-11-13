@@ -73,16 +73,16 @@ async function main(): Promise<void> {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const webDist = path.resolve(here, '../../web/dist');
   const fakeAgentPath = path.resolve(here, '../test/fixtures/fake-agent.mjs');
-  // The dev runner passes one token for the whole session so `tsx watch` restarts keep the browser logged in.
-  const devToken = process.env.AGENTHOUSE_TOKEN;
+  // Only the dev runner passes --dev-origin; its sessions run in the dev host.
+  const dev = args.devOrigins.length > 0;
   const stateDir = defaultStateDir();
 
   // One web server per state folder: a second start opens the first one. The dev runner restarts its own server.
-  const already = devToken ? null : await runningWebServer(stateDir);
+  const already = dev ? null : await runningWebServer(stateDir);
   if (already) {
-    if (args.json) process.stdout.write(`${JSON.stringify({ url: already.url, port: already.port, token: already.token })}\n`);
-    else process.stdout.write(`AgentHouse  ${already.url}\n이미 실행 중입니다.\n`);
-    if (args.open) openBrowser(already.url);
+    if (args.json) process.stdout.write(`${JSON.stringify({ url: already.loginUrl, port: already.port, key: already.key })}\n`);
+    else process.stdout.write(`AgentHouse  ${already.loginUrl}\n이미 실행 중입니다.\n`);
+    if (args.open) openBrowser(already.loginUrl);
     return;
   }
 
@@ -90,28 +90,31 @@ async function main(): Promise<void> {
   process.on('uncaughtException', (error) => console.error(`uncaught: ${error.stack ?? error}`));
   process.on('unhandledRejection', (error) => console.error(`unhandled: ${(error as Error)?.stack ?? error}`));
 
-  const host = await HostClient.connect({ stateDir, spawn: true, ...(devToken ? { webToken: devToken } : {}) });
+  const host = await HostClient.connect({ stateDir, spawn: true });
   const app = await createAgentHouseServer({
-    // The default port keeps bookmarks working; the next ones if it is taken.
+    // The default port keeps bookmarks and logins working; the next ones if it is taken.
     port: args.port ?? DEFAULT_PORT,
     ...(args.port === null ? { fallbackPorts: FALLBACK_PORTS } : {}),
     host,
-    ...(devToken ? { token: devToken } : {}),
     devOrigins: args.devOrigins,
-    // Only the dev runner passes --dev-origin; its sessions run in the dev host.
-    stopCommand: args.devOrigins.length ? 'pnpm dev:stop' : 'pnpm stop',
+    stopCommand: dev ? 'pnpm dev:stop' : 'pnpm stop',
+    startCommand: dev ? 'pnpm dev' : 'pnpm start',
     defaultCwd: args.cwd ?? process.cwd(),
-    ...(existsSync(path.join(webDist, 'index.html')) && !args.devOrigins.length ? { webDist } : {}),
+    ...(existsSync(path.join(webDist, 'index.html')) && !dev ? { webDist } : {}),
     ...(args.allowFake ? { fakeAgentPath } : {}),
   });
-  if (!devToken) recordWebServer(stateDir, { port: app.port, url: app.url, token: app.token });
+  if (!dev) recordWebServer(stateDir, { port: app.port, url: app.url, key: app.key });
 
-  if (args.json) process.stdout.write(`${JSON.stringify({ url: app.url, port: app.port, token: app.token })}\n`);
+  // A one-time code: the address is spent once a browser has opened it.
+  const loginUrl = app.loginUrl();
+  if (args.json) process.stdout.write(`${JSON.stringify({ url: loginUrl, port: app.port, key: app.key })}\n`);
   else {
-    process.stdout.write(`AgentHouse  ${app.url}\n`);
+    process.stdout.write(`AgentHouse  ${loginUrl}\n`);
+    // Another port is another origin: bookmarks and logins of the usual one do not carry over.
+    if (args.port === null && app.port !== DEFAULT_PORT) process.stdout.write(`기본 포트 ${DEFAULT_PORT}을 다른 프로그램이 쓰고 있어 ${app.port}에서 열었습니다.\n`);
     if (running(host)) process.stdout.write(`실행 중인 세션 ${running(host)}개에 다시 연결했습니다.\n`);
   }
-  if (args.open) openBrowser(app.url);
+  if (args.open) openBrowser(loginUrl);
 
   let closing = false;
   const shutdown = async (signal: NodeJS.Signals) => {

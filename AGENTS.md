@@ -24,9 +24,9 @@ AgentHouse is three programs plus a browser app. Know which one a file runs in b
 
 ## State
 
-- `~/.agenthouse/` (dev: `~/.agenthouse-dev/`): `host-<protocol>.json` (host port and token, user-only), `web.json` (the web server serving this folder, user-only: a second start opens it instead of running another, `--stop` ends it before the host; the dev runner keeps none), `logs/host.log`, `run/<protocol>/` (per-session settings and relay config, removed when the session ends; a starting host clears leftovers).
+- `~/.agenthouse/` (dev: `~/.agenthouse-dev/`): `host-<protocol>.json` (host port and token, user-only), `web.json` (the web server serving this folder and the key local tools present to it, user-only: a second start asks it for a login address and opens that instead of running another, `--stop` ends it before the host; the dev runner keeps none), `logs/host.log`, `run/<protocol>/` (per-session settings and relay config, removed when the session ends; a starting host clears leftovers).
 - Written by the web server: `sessions.json` (session registry: what the host reported last, so ended sessions and their transcripts stay listed after a host restart), `usage/limits-YYYY-MM.jsonl` (plan usage, a line per change; the last one shows until a session reports again), `state.json` (which session the user placed under which, grouped or delegated; one level, links of removed sessions dropped), `delegations.json` (work handed to a delegated session: where its answer is in that session's transcript, never the answer itself).
-- Browser localStorage: layout (`ah-layout`), last folder (`ah-last-cwd`), theme (`mui-mode`).
+- Browser localStorage: login token (`ah-token`, per port), layout (`ah-layout`), last folder (`ah-last-cwd`), theme (`mui-mode`).
 - Everything else lives in memory. There is no database: anything that must persist goes into local JSON/JSONL files under the state folder, one writer per file, written atomically.
 
 ## Commands

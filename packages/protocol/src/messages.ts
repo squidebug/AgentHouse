@@ -45,3 +45,29 @@ export interface ApiError {
   code?: string;
   command?: string;
 }
+
+/**
+ * Logging in: the address the server prints and opens carries a one-time code,
+ * which the page trades for a token of its own (POST /api/login). The page keeps
+ * the token in its storage, which browsers keep apart per port, and sends it as
+ * `Authorization: Bearer`; a cookie would also reach every other port of 127.0.0.1.
+ */
+export interface LoginRequest {
+  code: string;
+}
+
+export interface LoginResult {
+  token: string;
+}
+
+/** 401 codes: no valid token (log in again), or a login code that was used or ran out. */
+export const AUTH_REQUIRED = 'AUTH_REQUIRED';
+export const LOGIN_EXPIRED = 'LOGIN_EXPIRED';
+
+/**
+ * Browsers cannot put headers on a WebSocket, so the page sends its token as a
+ * subprotocol (`ah-token.<token>`) next to `agenthouse`, the one the server picks:
+ * it stays out of the address, like the Authorization header of a request.
+ */
+export const SOCKET_PROTOCOL = 'agenthouse';
+export const TOKEN_PROTOCOL_PREFIX = 'ah-token.';

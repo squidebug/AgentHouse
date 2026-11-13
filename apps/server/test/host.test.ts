@@ -15,14 +15,14 @@ import { createAgentHouseServer } from '../src/web/http/server';
 import { isAlive, killTree } from '../src/shared/kill-tree';
 import { fakeAgentPath, fakeSpec, login, openSocket, plain, request, screenText, sleep, tempStateDir, waitFor, type Socket } from './helpers';
 
-async function webServer(stateDir: string) {
+async function webServer(stateDir: string, port = 0) {
   const client = await HostClient.connect({ stateDir, spawn: false });
-  const app = await createAgentHouseServer({ port: 0, fakeAgentPath, host: client });
-  const cookie = await login(app.port, app.token);
+  const app = await createAgentHouseServer({ port, fakeAgentPath, host: client });
+  const authorization = await login(app);
   return {
     app,
-    cookie,
-    headers: { cookie, origin: `http://127.0.0.1:${app.port}` },
+    authorization,
+    headers: { authorization, origin: `http://127.0.0.1:${app.port}` },
     async stop() {
       await app.close();
       client.close();
@@ -48,9 +48,10 @@ describe('session host', () => {
       assert.ok(isAlive(session.pid), 'the CLI keeps running without a web server');
       await sleep(2500);
 
-      const second = await webServer(stateDir);
-      assert.equal(second.app.token, first.app.token, 'the login token comes from the host');
-      const listed = await request(second.app.port, 'GET', '/api/sessions', { headers: { cookie: first.cookie } });
+      // Logins are bound to the port and to the host's secret: back on the same port, they still hold.
+      const second = await webServer(stateDir, first.app.port);
+      assert.equal(second.app.key, first.app.key, 'the key comes from the host and the port');
+      const listed = await request(second.app.port, 'GET', '/api/sessions', { headers: { authorization: first.authorization } });
       assert.equal(listed.status, 200, 'the browser stays logged in');
       assert.deepEqual(
         (listed.json as SessionInfo[]).map((s) => s.id),

@@ -5,7 +5,7 @@ import { WebglAddon } from '@xterm/addon-webgl';
 import { Terminal } from '@xterm/xterm';
 import { useEffect, useRef } from 'react';
 import { isAutoResponse, type TerminalClientMessage, type TerminalServerMessage, type ThemeMode } from '@agenthouse/protocol';
-import { socketUrl } from '../api/client';
+import { openSocket } from '../api/client';
 import { FONT_MONO } from '../theme/theme';
 import { MIN_CONTRAST, XTERM_THEMES } from '../theme/terminal';
 
@@ -85,7 +85,7 @@ export function TerminalView({ sessionId, mode, windowsBuild, onFocus, autoFocus
       };
 
       const connect = () => {
-        ws = new WebSocket(socketUrl(`/ws/session?id=${encodeURIComponent(sessionId)}`));
+        ws = openSocket(`/ws/session?id=${encodeURIComponent(sessionId)}`);
         ws.onopen = () => {
           delay = 500;
           send({ type: 'theme', mode: modeRef.current });

@@ -17,7 +17,7 @@ AgentHouse는 독립 프로젝트이며 Anthropic, OpenAI와 제휴하거나 승
 ```sh
 pnpm install
 pnpm build
-pnpm start        # http://127.0.0.1:7357/auth?token=… 주소를 출력하고 브라우저로 엽니다
+pnpm start        # 로그인 주소(http://127.0.0.1:7357/?code=…, 5분 동안 한 번만)를 출력하고 브라우저로 엽니다. 이미 실행 중이면 그 서버의 새 로그인 주소를 엽니다
 pnpm stop         # 모든 세션과 세션 호스트를 끝냅니다
 ```
 
@@ -26,7 +26,7 @@ pnpm stop         # 모든 세션과 세션 호스트를 끝냅니다
 개발 모드:
 
 ```sh
-pnpm dev          # 출력된 http://localhost:5173/auth?token=… 주소로 접속
+pnpm dev          # 출력된 http://localhost:5173/?code=… 주소로 접속
 pnpm dev:stop     # 개발용 세션과 개발용 세션 호스트를 끝냅니다
 ```
 

@@ -53,8 +53,8 @@ describe('session registry', () => {
     const app = await createAgentHouseServer({ port: 0, fakeAgentPath, host: client });
     let open = true;
     try {
-      const cookie = await login(app.port, app.token);
-      const headers = { cookie, origin: `http://127.0.0.1:${app.port}` };
+      const authorization = await login(app);
+      const headers = { authorization, origin: `http://127.0.0.1:${app.port}` };
       const created = await request(app.port, 'POST', '/api/sessions', { headers, body: { vendor: 'fake', title: 'before' } });
       const session = created.json as SessionInfo;
       assert.ok(await waitFor(() => readRegistry(stateDir).some((s) => s.id === session.id), 3000), 'written to sessions.json');

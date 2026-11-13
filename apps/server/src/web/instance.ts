@@ -10,9 +10,10 @@ import { isAlive } from '../shared/kill-tree';
 export interface WebServerRecord {
   pid: number;
   port: number;
-  /** The address to open, login token included (the file is the user's alone, like the host's). */
+  /** Its address, without a login code. */
   url: string;
-  token: string;
+  /** What it takes from local tools, e.g. to give out a login address (the file is the user's alone, like the host's). */
+  key: string;
 }
 
 export const webServerFile = (stateDir: string) => path.join(stateDir, 'web.json');
@@ -20,30 +21,43 @@ export const webServerFile = (stateDir: string) => path.join(stateDir, 'web.json
 function read(stateDir: string): WebServerRecord | null {
   try {
     const record = JSON.parse(readFileSync(webServerFile(stateDir), 'utf8')) as Partial<WebServerRecord>;
-    const valid = typeof record.pid === 'number' && typeof record.port === 'number' && typeof record.url === 'string' && typeof record.token === 'string';
+    const valid = typeof record.pid === 'number' && typeof record.port === 'number' && typeof record.url === 'string' && typeof record.key === 'string';
     return valid ? (record as WebServerRecord) : null;
   } catch {
     return null;
   }
 }
 
-/** Whether a web server listens on this port and takes this token: the login answers with a redirect and a cookie. */
-function answers(port: number, token: string): Promise<boolean> {
+/** An address that logs a browser in to the web server on this port, if one listens there and takes this key. */
+function loginAddress(port: number, key: string): Promise<string | null> {
   return new Promise((resolve) => {
-    const req = http.get({ host: '127.0.0.1', port, path: `/auth?token=${encodeURIComponent(token)}`, timeout: 2000 }, (res) => {
-      res.resume();
-      resolve(res.statusCode === 302 && Boolean(res.headers['set-cookie']));
+    const req = http.request({ host: '127.0.0.1', port, method: 'POST', path: '/auth/code', headers: { authorization: `Bearer ${key}` }, timeout: 2000 }, (res) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (chunk: Buffer) => chunks.push(chunk));
+      res.on('end', () => {
+        try {
+          const url = (JSON.parse(Buffer.concat(chunks).toString('utf8')) as { url?: unknown }).url;
+          resolve(res.statusCode === 200 && typeof url === 'string' ? url : null);
+        } catch {
+          resolve(null);
+        }
+      });
     });
     req.on('timeout', () => req.destroy());
-    req.on('error', () => resolve(false));
+    req.on('error', () => resolve(null));
+    req.end();
   });
 }
 
-/** The web server already serving this state folder, if one runs and answers; a record left by one that ended is ignored. */
-export async function runningWebServer(stateDir: string): Promise<WebServerRecord | null> {
+/**
+ * The web server already serving this state folder, if one runs and answers, with
+ * an address that logs a browser in to it; a record left by one that ended is ignored.
+ */
+export async function runningWebServer(stateDir: string): Promise<(WebServerRecord & { loginUrl: string }) | null> {
   const record = read(stateDir);
   if (!record || record.pid === process.pid || !isAlive(record.pid)) return null;
-  return (await answers(record.port, record.token)) ? record : null;
+  const loginUrl = await loginAddress(record.port, record.key);
+  return loginUrl ? { ...record, loginUrl } : null;
 }
 
 /** Notes this web server for a later start to find; replaced atomically, readable by the user only. */

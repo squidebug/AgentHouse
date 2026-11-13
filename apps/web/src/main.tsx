@@ -10,6 +10,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { Boundary } from './components/Boundary';
+import { LoginGate } from './components/LoginGate';
 import { t } from './strings';
 import { theme } from './theme/theme';
 import { cssVars, TOKENS } from './theme/tokens';
@@ -54,7 +55,9 @@ createRoot(root, {
       <CssBaseline enableColorScheme />
       <GlobalStyles styles={globalStyles} />
       <Boundary fallback={failed}>
-        <App />
+        <LoginGate>
+          <App />
+        </LoginGate>
       </Boundary>
     </ThemeProvider>
   </StrictMode>,

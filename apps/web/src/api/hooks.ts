@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { AccountLimits, DelegationInfo, EnvReport, EventServerMessage, SessionInfo, SessionLink } from '@agenthouse/protocol';
-import { api, socketUrl } from './client';
+import { api, openSocket } from './client';
 
 /** Live sessions, plan usage and session links from /ws/events, reconnecting with backoff while the server restarts. */
 export function useSessions(): {
@@ -25,7 +25,7 @@ export function useSessions(): {
     let stopped = false;
 
     const connect = () => {
-      ws = new WebSocket(socketUrl('/ws/events'));
+      ws = openSocket('/ws/events');
       ws.onopen = () => {
         delay = 500;
         setConnected(true);
@@ -46,6 +46,8 @@ export function useSessions(): {
       ws.onclose = () => {
         if (stopped) return;
         setConnected(false);
+        // A refused socket looks like a lost server; the API tells the two apart (and shows the login page).
+        api.auth().catch(() => {});
         retry = setTimeout(connect, delay);
         delay = Math.min(delay * 2, 8000);
       };

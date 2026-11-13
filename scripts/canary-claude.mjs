@@ -42,9 +42,9 @@ const check = (ok, label, detail = '') => {
 };
 
 const server = spawn(process.execPath, [main, '--port', '0', '--json', '--cwd', root], { env, stdio: ['ignore', 'pipe', 'inherit'] });
-const { port, token } = JSON.parse(await new Promise((resolve) => createInterface({ input: server.stdout }).once('line', resolve)));
+const { port, key } = JSON.parse(await new Promise((resolve) => createInterface({ input: server.stdout }).once('line', resolve)));
 const origin = `http://127.0.0.1:${port}`;
-const headers = { cookie: `ah_token=${token}`, origin, 'content-type': 'application/json' };
+const headers = { authorization: `Bearer ${key}`, origin, 'content-type': 'application/json' };
 const api = async (method, route, body) => {
   const res = await fetch(origin + route, { method, headers, ...(body ? { body: JSON.stringify(body) } : {}) });
   return { status: res.status, json: await res.json().catch(() => null) };
@@ -68,7 +68,7 @@ const waitFor = async (id, predicate, ms) => {
 };
 const describe = (s) => (s ? `${s.status.value}${s.status.reason ? ` · ${s.status.reason}` : ''}` : 'no session');
 const socket = (route, onMessage) => {
-  const ws = new WebSocket(`ws://127.0.0.1:${port}${route}`, { headers: { cookie: headers.cookie, origin } });
+  const ws = new WebSocket(`ws://127.0.0.1:${port}${route}`, { headers: { authorization: headers.authorization, origin } });
   let closing = false;
   ws.on('message', (raw) => onMessage(JSON.parse(raw.toString())));
   // A refused or broken socket is a failed check, not a crash that skips the cleanup.
