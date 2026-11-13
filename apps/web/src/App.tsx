@@ -158,20 +158,22 @@ export function App() {
         <Box
           component="main"
           sx={{
-            flex: '999 1 560px',
             minWidth: 0,
             minHeight: 0,
             display: 'flex',
             flexDirection: 'column',
             gap: '12px',
             // Its scrollbar has its place whether it shows or not: a draft growing in the composer must
-            // not narrow the panes, which would resize every terminal. The padding keeps the active
-            // pane's outline inside what scrolls.
+            // not narrow the panes, which would resize every terminal.
             overflowY: { md: 'auto' },
             scrollbarGutter: { md: 'stable' },
             scrollbarWidth: 'thin',
-            p: { md: '3px' },
-            m: { md: '-3px' },
+            // What scrolls cuts off whatever is outside it: the padding is room for the panes' shadows and
+            // the active pane's outline. The margin takes the room back and the basis grows by as much
+            // (560 + 2 × (12 - 3)), so the panes are exactly as wide as they were with 3px of it.
+            flex: { xs: '999 1 560px', md: '999 1 578px' },
+            p: { md: '12px' },
+            m: { md: '-12px' },
           }}
         >
           <PaneGrid
