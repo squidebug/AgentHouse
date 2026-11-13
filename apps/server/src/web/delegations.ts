@@ -22,6 +22,8 @@ const RETRY_MS = 1000;
 // A background agent's report starts a turn at once; if none came by then (an agent the tree
 // placed at the top by mistake reports to its parent agent instead), the work is settled anyway.
 const REPORT_WAIT_MS = 60_000;
+// A transcript line is 64 MB at most (web/conversations.ts); an answer's range is no longer.
+const MAX_ANSWER_BYTES = 64 * 1024 * 1024;
 
 export const delegationsFile = (stateDir: string) => path.join(stateDir, 'delegations.json');
 
@@ -139,6 +141,19 @@ function isTask(value: unknown): value is Task {
 }
 
 /**
+ * A task as the file has it. Its paths are opened later, so they are held to
+ * what a hook's path is held to: one of Claude's own transcripts (never a UNC
+ * path, which would send the user's credentials to that host), and a range
+ * no longer than a transcript line.
+ */
+function checked(task: Task): Task {
+  const ours = (file: unknown): file is string => typeof file === 'string' && isClaudeTranscript(file, claudeConfigDir());
+  const range = task.answer;
+  const answer = range && ours(range.path) && Number.isInteger(range.start) && Number.isInteger(range.end) && range.start >= 0 && range.end >= range.start && range.end - range.start <= MAX_ANSWER_BYTES ? range : null;
+  return { ...task, transcript: ours(task.transcript) ? task.transcript : null, from: Number.isFinite(task.from) && task.from >= 0 ? task.from : 0, answer };
+}
+
+/**
  * A session ready for a message: idle, or a CLI that reports no turns (nothing
  * tells it is busy). Never a Claude session that has not started: its folder
  * trust question may be up, and the host refuses it anyway.
@@ -175,7 +190,7 @@ export class Delegations extends EventEmitter {
     super();
     try {
       const data = JSON.parse(readFileSync(file, 'utf8')) as { version?: unknown; tasks?: unknown };
-      if (data.version === FILE_VERSION && Array.isArray(data.tasks)) for (const task of data.tasks) if (isTask(task)) this.tasks.set(task.id, task);
+      if (data.version === FILE_VERSION && Array.isArray(data.tasks)) for (const task of data.tasks) if (isTask(task)) this.tasks.set(task.id, checked(task));
     } catch {
       // none yet, or unreadable: start over
     }

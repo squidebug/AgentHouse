@@ -227,3 +227,55 @@ describe('when delegated work is done', () => {
     }
   });
 });
+
+describe('delegations read back from the file', () => {
+  test('paths that are not Claude transcripts are not opened', async () => {
+    const state = mkdtempSync(path.join(os.tmpdir(), 'agenthouse-delegations-'));
+    const transcript = path.join(config, 'projects', 'p', 'child.jsonl');
+    mkdirSync(path.dirname(transcript), { recursive: true });
+    const line = JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'kept answer' }] } });
+    writeFileSync(transcript, `${line}\n`);
+    const outside = path.join(state, 'elsewhere.jsonl');
+    writeFileSync(outside, `${line}\n`);
+    const task = (id: string, file: string, extra: object = {}) => ({
+      id,
+      parentId: 'parent',
+      childId: 'child',
+      sentAt: 1,
+      status: 'done',
+      endedAt: 2,
+      transcript: file,
+      from: 0,
+      answer: { path: file, start: 0, end: Buffer.byteLength(line) },
+      delivery: 'none',
+      deliveredAt: null,
+      header: null,
+      ...extra,
+    });
+    writeFileSync(
+      delegationsFile(state),
+      JSON.stringify({
+        version: 1,
+        tasks: [
+          task('ours', transcript),
+          task('outside', outside),
+          task('share', '\\\\elsewhere\\share\\x.jsonl'),
+          task('huge', transcript, { answer: { path: transcript, start: 0, end: 2 ** 40 } }),
+        ],
+      }),
+    );
+    const session = (id: string) => ({ id, state: 'running', status: { value: 'working', reason: null, tool: null, error: false, at: 1 }, vendor: 'claude', agents: [], transcripts: [] }) as unknown as SessionInfo;
+    const manager = Object.assign(new EventEmitter(), { get: (id: string) => session(id), links: () => [], compose: async () => ({ sent: false, submitted: false }) }) as unknown as SessionManager;
+    const delegations = new Delegations(manager, delegationsFile(state));
+    try {
+      assert.ok(await waitFor(() => delegations.list().find((d) => d.id === 'ours')?.summary === 'kept answer', 2000), 'its own transcript is read');
+      for (const id of ['outside', 'share', 'huge']) {
+        assert.equal(delegations.list().find((d) => d.id === id)?.summary, null, `${id}: no summary read`);
+        await assert.rejects(delegations.deliver(id, 'h'), /전달할 결과가 없습니다/, `${id}: nothing to hand over`);
+      }
+    } finally {
+      delegations.close();
+      rmSync(state, { recursive: true, force: true });
+    }
+  });
+});
