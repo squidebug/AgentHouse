@@ -41,7 +41,11 @@ export function App() {
     for (const s of sessions) map.set(s.id, s);
     return map;
   }, [sessions, launched]);
-  const sessionById = useCallback((id: string) => byId.get(id), [byId]);
+  // One function for as long as the page lives, reading the newest list: nothing is redrawn just because
+  // the list was replaced. Whoever shows a session is redrawn with it anyway.
+  const byIdRef = useRef(byId);
+  byIdRef.current = byId;
+  const sessionById = useCallback((id: string) => byIdRef.current.get(id), []);
   // Where sessions ran before, the latest first: what the launcher offers for a new one.
   const folders = useMemo(() => [...new Set([...byId.values()].sort((a, b) => b.startedAt - a.startedAt).map((s) => s.cwd))], [byId]);
   const runningIds = [...byId.values()].filter((s) => s.state === 'running').map((s) => s.id);

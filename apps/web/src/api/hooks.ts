@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { AccountLimits, DelegationInfo, EnvReport, EventServerMessage, SessionInfo, SessionLink } from '@agenthouse/protocol';
+import { keepUnchanged } from '../workspace/sessions';
 import { api, openSocket } from './client';
 
 /** Live sessions, plan usage and session links from /ws/events, reconnecting with backoff while the server restarts. */
@@ -33,7 +34,7 @@ export function useSessions(): {
       ws.onmessage = (event) => {
         const message = JSON.parse(String(event.data)) as EventServerMessage;
         if (message.type === 'sessions') {
-          setSessions(message.sessions);
+          setSessions((current) => keepUnchanged(current, message.sessions));
           setLoaded(true);
         } else if (message.type === 'limits') {
           setLimits(message.limits);

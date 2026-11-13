@@ -1,6 +1,6 @@
 import { Box, Button, ButtonBase, CircularProgress, IconButton, Menu, MenuItem, Tooltip, Typography } from '@mui/material';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent } from 'react';
-import type { ConversationEntry, ConversationTurn, DelegationInfo, EntryDetail, SessionInfo, ToolState } from '@agenthouse/protocol';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent } from 'react';
+import type { ConversationEntry, ConversationTurn, DelegationInfo, EntryDetail, ToolState } from '@agenthouse/protocol';
 import { api } from '../api/client';
 import { useConversation } from '../api/conversation';
 import { t } from '../strings';
@@ -31,14 +31,19 @@ const preSx = {
   overflowWrap: 'anywhere',
 } as const;
 
+/** A session delegated under the one whose conversation this is: an answer can be handed to it. */
+export interface DelegateTarget {
+  id: string;
+  title: string;
+}
+
 /** Whose conversation it is: a session's, or one of its sub-agents'. */
 export interface ConversationSource {
   sessionId: string;
   agentId: string | null;
   /** Opens a sub-agent's own conversation, from its block. */
   onOpenAgent?: ((agentId: string) => void) | undefined;
-  /** The sessions delegated under this one: an answer can be handed to them. */
-  delegates?: SessionInfo[] | undefined;
+  delegates?: DelegateTarget[] | undefined;
   onDelegate?: ((childId: string, text: string) => void) | undefined;
   /** Starts dragging a piece of the conversation (to a delegate's chip or pane). */
   onDragText?: ((entryId: string, text: string) => (event: DragEvent) => void) | undefined;
@@ -524,8 +529,12 @@ export interface DelegationView {
   onDeliver?: ((task: DelegationInfo) => void) | undefined;
 }
 
-/** A session's conversation, read-only, from its transcript: the newest turns, following as they happen. */
-export function ConversationView({
+/**
+ * A session's conversation, read-only, from its transcript: the newest turns,
+ * following as they happen. Drawn again only when the conversation or what it
+ * was given changes, not with every status a session reports (its pane is).
+ */
+export const ConversationView = memo(function ConversationView({
   sessionId,
   agentId = null,
   onOpenAgent,
@@ -537,7 +546,7 @@ export function ConversationView({
   sessionId: string;
   agentId?: string | null;
   onOpenAgent?: (agentId: string) => void;
-  delegates?: SessionInfo[];
+  delegates?: DelegateTarget[];
   onDelegate?: (childId: string, text: string) => void;
   onDragText?: (entryId: string, text: string) => (event: DragEvent) => void;
   delegations?: DelegationView;
@@ -602,4 +611,4 @@ export function ConversationView({
       {placed.has(-1) && <Box sx={{ display: 'flex', flexDirection: 'column', gap: '8px', py: '12px' }}>{cardsAfter(-1)}</Box>}
     </Box>
   );
-}
+});

@@ -1,5 +1,5 @@
 import { Box, Button, ButtonBase, IconButton, Tooltip, Typography } from '@mui/material';
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useRef, type DragEvent } from 'react';
 import type { AgentInfo, DelegationInfo, SessionInfo, SessionLink, ThemeMode } from '@agenthouse/protocol';
 import { t } from '../strings';
 import { v } from '../theme/tokens';
@@ -7,7 +7,7 @@ import { childAgents } from '../workspace/agents';
 import type { Dnd } from '../workspace/dnd';
 import type { FlowRow } from '../workspace/flow';
 import { MAX_PANES, paneModes, shownMode, type Action, type Pane, type PaneMode, type WorkspaceState } from '../workspace/state';
-import { ConversationView, type DelegationView } from './ConversationView';
+import { ConversationView, type DelegateTarget, type DelegationView } from './ConversationView';
 import { Boundary } from './Boundary';
 import { AgentSubtitle, agentDetails, agentTitle, Details, SessionSubtitle, sessionDetails } from './Details';
 import { FlowView } from './FlowView';
@@ -244,14 +244,11 @@ function PaneView({ pane, wide, session, state, dispatch, dnd, theme, windowsBui
   const focus = () => dispatch({ type: 'focus', paneId: pane.id });
   // An agent opened from a conversation takes this pane, with the way back.
   const openAgent = useCallback((id: string) => dispatch({ type: 'drill', paneId: pane.id, sessionId: session.id, agentId: id }), [dispatch, pane.id, session.id]);
-  const placed = useMemo(
-    () =>
-      links
-        .filter((l) => l.parentId === session.id)
-        .map((l) => sessionById(l.childId))
-        .filter((s): s is SessionInfo => Boolean(s)),
-    [links, session.id, sessionById],
-  );
+  // As they are now, on every draw: `sessionById` is one function for good, so it cannot say when they changed.
+  const placed = links
+    .filter((l) => l.parentId === session.id)
+    .map((l) => sessionById(l.childId))
+    .filter((s): s is SessionInfo => Boolean(s));
   const openRow = useCallback(
     (row: FlowRow) => {
       if (row.kind === 'agent') dispatch({ type: 'drill', paneId: pane.id, sessionId: row.session.id, agentId: row.agent.id });
@@ -261,18 +258,19 @@ function PaneView({ pane, wide, session, state, dispatch, dnd, theme, windowsBui
   );
   const canGoBack = Boolean(pane.history?.length);
   // A session's pane (not a sub-agent's) hands work to the sessions delegated under it.
-  const delegates = useMemo(
-    () =>
-      agentId
-        ? []
-        : links
-            .filter((l) => l.kind === 'delegate' && l.parentId === session.id)
-            .map((l) => sessionById(l.childId))
-            .filter((s): s is SessionInfo => Boolean(s)),
-    [agentId, links, session.id, sessionById],
-  );
+  const delegates = agentId ? [] : placed.filter((child) => links.some((l) => l.kind === 'delegate' && l.parentId === session.id && l.childId === child.id));
+  // What the conversation needs of them is who they are and what they are called. Kept the same while
+  // that is the same, so the conversation is not drawn again each time one of them reports a status.
+  const delegateKey = delegates.map((child) => `${child.id}\n${child.title}`).join('\n\n');
+  const targets = useMemo<DelegateTarget[]>(() => delegates.map(({ id, title }) => ({ id, title })), [delegateKey]);
   const handOver = useCallback((childId: string, text: string) => onDelegate(session.id, childId, text), [onDelegate, session.id]);
-  const dragText = useCallback((entryId: string, text: string) => dnd.start({ kind: 'item', id: entryId, sessionId: session.id, text }), [dnd, session.id]);
+  // `dnd` is made anew on every draw; the newest one starts the drag.
+  const dndRef = useRef(dnd);
+  dndRef.current = dnd;
+  const dragText = useCallback(
+    (entryId: string, text: string) => (event: DragEvent) => dndRef.current.start({ kind: 'item', id: entryId, sessionId: session.id, text })(event),
+    [session.id],
+  );
   const titleOf = useCallback((id: string) => sessionById(id)?.title ?? id, [sessionById]);
   const handed = useMemo<DelegationView>(
     () => ({
@@ -370,7 +368,7 @@ function PaneView({ pane, wide, session, state, dispatch, dnd, theme, windowsBui
             sessionId={session.id}
             agentId={agentId}
             onOpenAgent={openAgent}
-            delegates={delegates}
+            delegates={targets}
             onDelegate={handOver}
             onDragText={dragText}
             delegations={handed}
