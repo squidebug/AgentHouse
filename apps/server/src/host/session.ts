@@ -289,6 +289,8 @@ export class Session extends EventEmitter {
     this.pty.resize(nextCols, nextRows);
     this.mirror.resize(nextCols, nextRows);
     this.broadcast({ type: 'size', cols: nextCols, rows: nextRows });
+    // The size is part of what the session list shows.
+    this.emit('status', this);
   }
 
   input(data: string, binary = false): boolean {

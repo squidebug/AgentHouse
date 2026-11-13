@@ -120,4 +120,19 @@ describe('a session in the host', () => {
       await client.closeSession(info.id);
     }
   });
+
+  test('a new size shows in the session list without waiting for a status change', async () => {
+    const info = await client.spawn(spec());
+    const terminal = watch(info);
+    try {
+      await terminal.opened;
+      assert.ok(await waitFor(() => plain(screenText(terminal.messages)).includes('fake-agent ready'), 5000));
+      terminal.ws.send(JSON.stringify({ type: 'claim' }));
+      terminal.ws.send(JSON.stringify({ type: 'resize', cols: 90, rows: 25 }));
+      assert.ok(await waitFor(() => client.get(info.id)?.cols === 90 && client.get(info.id)?.rows === 25, 2000));
+    } finally {
+      terminal.ws.close();
+      await client.closeSession(info.id);
+    }
+  });
 });
