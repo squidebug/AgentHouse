@@ -1,5 +1,4 @@
 import { spawn } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { createRequire } from 'node:module';
 import os from 'node:os';
@@ -12,7 +11,6 @@ import { isAlive } from '../shared/kill-tree';
 import {
   HOST_PROTOCOL,
   HostRequestError,
-  validHostProof,
   type CloseResult,
   type ComposeOutcome,
   type HostMessage,
@@ -20,6 +18,7 @@ import {
   type HostState,
   type SpawnSpec,
 } from '../shared/host-protocol';
+import { openControl, probeHost, type ControlLink } from '../shared/host-link';
 import { logFile, readAllStates, readState, runDir } from '../shared/state';
 
 export class HostUnavailableError extends Error {
@@ -38,11 +37,8 @@ export interface ConnectOptions {
   webToken?: string;
 }
 
-type Hello = Extract<HostMessage, { type: 'hello' }>;
-interface Link {
+interface Link extends ControlLink {
   state: HostState;
-  ws: WebSocket;
-  hello: Hello;
 }
 type WithoutId<T> = T extends unknown ? Omit<T, 'id'> : never;
 type RequestBody = WithoutId<HostRequest>;
@@ -72,49 +68,6 @@ function startHost(options: ConnectOptions): void {
   });
   launcher.on('error', () => {});
   launcher.unref();
-}
-
-/**
- * Opens the control channel and waits for the host's hello; null if nothing
- * usable answers. The hello must prove the host knows the token, before
- * anything is sent to it or taken from it.
- */
-function openControl(state: HostState, timeoutMs: number, protocol = HOST_PROTOCOL): Promise<Omit<Link, 'state'> | null> {
-  return new Promise((resolve) => {
-    const nonce = randomBytes(24).toString('base64url');
-    const ws = new WebSocket(`ws://127.0.0.1:${state.port}/control`, {
-      headers: { authorization: `Bearer ${state.token}`, 'x-agenthouse-nonce': nonce },
-    });
-    const fail = () => {
-      clearTimeout(timer);
-      ws.removeAllListeners();
-      ws.on('error', () => {});
-      ws.terminate();
-      resolve(null);
-    };
-    const timer = setTimeout(fail, timeoutMs);
-    ws.once('error', fail);
-    ws.once('message', (raw) => {
-      let message: HostMessage | null = null;
-      try {
-        message = JSON.parse(raw.toString()) as HostMessage;
-      } catch {
-        // not a host
-      }
-      if (message?.type !== 'hello' || message.protocol !== protocol || !validHostProof(state.token, nonce, message.proof)) return fail();
-      clearTimeout(timer);
-      ws.removeAllListeners();
-      ws.on('error', () => {});
-      resolve({ ws, hello: message });
-    });
-  });
-}
-
-/** True when a host answers at this state (used by a starting host to avoid running twice). */
-export async function probeHost(state: HostState): Promise<boolean> {
-  const link = await openControl(state, 1500, state.protocol);
-  link?.ws.close();
-  return Boolean(link);
 }
 
 /** This protocol's host in the state folder, if one answers: the code it started with and how many sessions it runs. */

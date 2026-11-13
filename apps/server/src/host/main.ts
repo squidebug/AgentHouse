@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { isAlive } from '../shared/kill-tree';
-import { probeHost } from '../web/host-client';
+import { probeHost } from '../shared/host-link';
 import { createSessionHost } from './server';
 import { defaultStateDir, hostLogger, readState } from '../shared/state';
 
