@@ -1,8 +1,8 @@
-import { Box, Button, ButtonBase, IconButton, Menu, MenuItem, Tooltip, Typography } from '@mui/material';
+import { Box, Button, ButtonBase, Collapse, IconButton, Menu, MenuItem, Tooltip, Typography } from '@mui/material';
 import { useState } from 'react';
 import { isAgentBusy, type AgentInfo, type LinkKind, type SessionInfo, type SessionLink } from '@agenthouse/protocol';
 import { t } from '../strings';
-import { v } from '../theme/tokens';
+import { motion, v } from '../theme/tokens';
 import { agentRows, SHOWN_FINISHED } from '../workspace/agents';
 import type { Dnd } from '../workspace/dnd';
 import type { Action, WorkspaceState } from '../workspace/state';
@@ -15,6 +15,32 @@ import { AgentStatusIcon, StatusIcon } from './StatusIcon';
 const INDENT = 18;
 
 const smallButton = { minHeight: 28, px: 1.5, fontSize: 12 } as const;
+
+/**
+ * A row. The row of what a pane shows is a card on the page; the others lie flat on it. Under the
+ * pointer every row takes the same veil, laid between its face and what is on it, so it reads the
+ * same on a card as on the page.
+ */
+const rowSx = (card: boolean) =>
+  ({
+    position: 'relative',
+    isolation: 'isolate',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 1,
+    // Apart from the row above: two cards never touch, and a card's shadow has somewhere to fall.
+    mt: '4px',
+    borderRadius: '10px',
+    bgcolor: card ? v.surface : 'transparent',
+    boxShadow: card ? v.shadow1 : 'none',
+    transition: `background-color ${motion.fast}, box-shadow ${motion.base}`,
+    cursor: 'grab',
+    '&::before': { content: '""', position: 'absolute', inset: 0, zIndex: -1, borderRadius: 'inherit', bgcolor: v.hover, opacity: 0, transition: `opacity ${motion.fast}` },
+    '&:hover::before': { opacity: 1 },
+  }) as const;
+
+// A quiet line of the tree that folds rows away or brings them back.
+const foldSx = { borderRadius: '6px', fontSize: 12, color: v.on2, transition: `background-color ${motion.fast}`, '&:hover': { bgcolor: v.hover } } as const;
 
 /** The corner line in front of a nested row. */
 function Connector() {
@@ -31,14 +57,17 @@ interface AgentRowProps {
   session: SessionInfo;
   agent: AgentInfo;
   depth: number;
+  /** A pane shows it. */
   shown: boolean;
+  /** The pane that takes the typing does. */
+  current: boolean;
   state: WorkspaceState;
   dispatch: (action: Action) => void;
   dnd: Dnd;
 }
 
 /** A sub-agent under its session (or under the agent that started it): opens its session's flow, with it pointed out. */
-function AgentRow({ session, agent, depth, shown, state, dispatch, dnd }: AgentRowProps) {
+function AgentRow({ session, agent, depth, shown, current, state, dispatch, dnd }: AgentRowProps) {
   const key = `${session.id}/${agent.id}`;
   const open = Boolean(state.rowOpen[key]);
   const dragged = dnd.dragging?.kind === 'agent' && dnd.dragging.id === agent.id;
@@ -49,17 +78,7 @@ function AgentRow({ session, agent, depth, shown, state, dispatch, dnd }: AgentR
         className="ah-row"
         draggable
         onDragStart={dnd.start({ kind: 'agent', id: agent.id, sessionId: session.id })}
-        sx={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 1,
-          minHeight: 40,
-          p: `2px 4px 2px ${4 + depth * INDENT}px`,
-          borderRadius: '10px',
-          bgcolor: shown ? v.surface : 'transparent',
-          opacity: dragged ? 0.45 : 1,
-          cursor: 'grab',
-        }}
+        sx={{ ...rowSx(shown), minHeight: 40, p: `2px 4px 2px ${4 + depth * INDENT}px`, opacity: dragged ? 0.45 : 1 }}
       >
         <Grip className="ah-grip" />
         <Connector />
@@ -69,7 +88,7 @@ function AgentRow({ session, agent, depth, shown, state, dispatch, dnd }: AgentR
           aria-label={t.open(title)}
           sx={{ flex: 1, minWidth: 0, flexDirection: 'column', alignItems: 'flex-start', textAlign: 'left', py: '2px', borderRadius: '6px' }}
         >
-          <Typography noWrap sx={{ maxWidth: '100%', fontWeight: 500, color: isAgentBusy(agent) ? v.on : v.on2 }}>
+          <Typography noWrap sx={{ maxWidth: '100%', fontWeight: current ? 600 : 500, color: isAgentBusy(agent) ? v.on : v.on2 }}>
             {title}
           </Typography>
           <AgentSubtitle agent={agent} />
@@ -78,28 +97,32 @@ function AgentRow({ session, agent, depth, shown, state, dispatch, dnd }: AgentR
           <ChevronIcon open={open} size={16} />
         </IconButton>
       </Box>
-      {open && <Details items={agentDetails(agent, session.agents, session)} inset={22 + depth * INDENT} />}
+      <Collapse in={open} unmountOnExit>
+        <Details page items={() => agentDetails(agent, session.agents, session)} inset={22 + depth * INDENT} />
+      </Collapse>
     </Box>
   );
 }
 
 /** A session's sub-agents as nested rows below it; finished ones fold away when there are many. */
-function AgentRows({ session, base, state, dispatch, dnd }: Omit<AgentRowProps, 'agent' | 'depth' | 'shown'> & { base: number }) {
+function AgentRows({ session, base, state, dispatch, dnd }: Omit<AgentRowProps, 'agent' | 'depth' | 'shown' | 'current'> & { base: number }) {
   const allKey = `${session.id}#agents`;
   const all = Boolean(state.rowOpen[allKey]);
   const { rows, folded } = agentRows(session.agents, all);
   const finished = session.agents.filter((a) => !isAgentBusy(a)).length;
-  const shown = new Set(state.panes.filter((p) => p.sessionId === session.id && p.agentId).map((p) => p.agentId));
+  const panes = state.panes.filter((p) => p.sessionId === session.id && p.agentId);
+  const shown = new Set(panes.map((p) => p.agentId));
+  const current = panes.find((p) => p.id === state.active)?.agentId;
   return (
     <Box role="group" aria-label={`${session.title} ${t.subagent}`}>
       {rows.map(({ agent, depth }) => (
-        <AgentRow key={agent.id} session={session} agent={agent} depth={base + depth} shown={shown.has(agent.id)} state={state} dispatch={dispatch} dnd={dnd} />
+        <AgentRow key={agent.id} session={session} agent={agent} depth={base + depth} shown={shown.has(agent.id)} current={agent.id === current} state={state} dispatch={dispatch} dnd={dnd} />
       ))}
       {(folded > 0 || (all && finished > SHOWN_FINISHED)) && (
         <ButtonBase
           onClick={() => dispatch({ type: 'toggleRow', id: allKey })}
           aria-expanded={all}
-          sx={{ minHeight: 28, ml: `${30 + (base + 1) * INDENT}px`, px: '6px', borderRadius: '6px', fontSize: 12, color: v.on2, '&:hover': { bgcolor: v.surface2 } }}
+          sx={{ ...foldSx, minHeight: 28, mt: '2px', ml: `${30 + (base + 1) * INDENT}px`, px: '6px' }}
         >
           {folded > 0 ? t.finishedAgents(folded) : t.foldAgents}
         </ButtonBase>
@@ -162,9 +185,14 @@ function SessionBranch(props: BranchProps) {
   const placing = pending ? byId.get(pending.childId) : undefined;
   const candidates = tops.filter((s) => s.id !== session.id);
   const delegated = link?.kind === 'delegate';
-  // Made only for an open row: the list is redrawn with every status any session reports.
-  const details = open ? sessionDetails(session) : [];
-  if (open && parent) details.splice(1, 0, { k: delegated ? t.delegate : t.group, v: parent.title });
+  // The pane that takes the typing shows this session.
+  const current = state.panes.some((p) => p.id === state.active && p.sessionId === session.id && !p.agentId);
+  // Asked for only while the row is open: the list is redrawn with every status any session reports.
+  const details = () => {
+    const list = sessionDetails(session);
+    if (parent) list.splice(1, 0, { k: delegated ? t.delegate : t.group, v: parent.title });
+    return list;
+  };
   return (
     <Box>
       <Box
@@ -174,16 +202,11 @@ function SessionBranch(props: BranchProps) {
         onDragOver={dnd.over(nest)}
         onDrop={dnd.drop(nest)}
         sx={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 1,
+          ...rowSx(shown.has(session.id)),
           minHeight: 44,
           p: `2px 4px 2px ${4 + depth * INDENT}px`,
-          borderRadius: '10px',
-          bgcolor: over ? v.dropBg : shown.has(session.id) ? v.surface : 'transparent',
-          boxShadow: over ? `inset 0 0 0 2px ${v.primary}` : 'none',
+          ...(over && { bgcolor: v.dropBg, boxShadow: `inset 0 0 0 2px ${v.primary}` }),
           opacity: dragged ? 0.45 : 1,
-          cursor: 'grab',
         }}
       >
         <Grip className="ah-grip" />
@@ -194,7 +217,7 @@ function SessionBranch(props: BranchProps) {
           aria-label={t.open(session.title)}
           sx={{ flex: 1, minWidth: 0, flexDirection: 'column', alignItems: 'flex-start', textAlign: 'left', py: '3px', borderRadius: '6px' }}
         >
-          <Typography noWrap sx={{ maxWidth: '100%', fontWeight: 500, color: session.state === 'exited' ? v.on2 : v.on }}>
+          <Typography noWrap sx={{ maxWidth: '100%', fontWeight: current ? 600 : 500, color: session.state === 'exited' ? v.on2 : v.on }}>
             {session.title}
           </Typography>
           <SessionSubtitle session={session} />
@@ -209,8 +232,8 @@ function SessionBranch(props: BranchProps) {
           <ChevronIcon open={open} size={16} />
         </IconButton>
       </Box>
-      {open && (
-        <Details items={details} inset={22 + depth * INDENT}>
+      <Collapse in={open} unmountOnExit>
+        <Details page items={details} inset={22 + depth * INDENT}>
           {link ? (
             <Button size="small" color="inherit" onClick={() => onLink(session.id, null)} sx={smallButton}>
               {t.toTop}
@@ -236,16 +259,17 @@ function SessionBranch(props: BranchProps) {
             </Button>
           )}
         </Details>
-      )}
+      </Collapse>
       {pending && placing && (
-        <Box role="group" aria-label={`${placing.title} → ${session.title}`} sx={{ display: 'flex', alignItems: 'center', gap: '6px', m: `0 4px 6px ${22 + depth * INDENT}px` }}>
+        <Box role="group" aria-label={`${placing.title} → ${session.title}`} sx={{ display: 'flex', alignItems: 'center', gap: '6px', m: `4px 4px 2px ${22 + depth * INDENT}px` }}>
           <Button
             size="small"
             onClick={() => {
               onLink(pending.childId, session.id, 'group');
               dispatch({ type: 'settleLink' });
             }}
-            sx={{ ...smallButton, minHeight: 32, px: 1.75, bgcolor: v.surface2, color: v.on, fontWeight: 500, '&:hover': { bgcolor: v.surface3 } }}
+            // Filled, on the page: a step up under the pointer, like the filled button next to it.
+            sx={{ ...smallButton, minHeight: 32, px: 1.75, bgcolor: v.bg2, color: v.on, fontWeight: 500, transition: `box-shadow ${motion.fast}`, '&:hover': { bgcolor: v.bg2, boxShadow: v.shadow1 } }}
           >
             {t.groupAction}
           </Button>
@@ -310,10 +334,24 @@ export function SessionTree({ sessions, links, state, dispatch, dnd, onNew, onEn
     <Box
       component="aside"
       aria-label={t.sessions}
-      sx={{ flex: '1 1 272px', minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', gap: '2px', overflowY: { md: 'auto' }, scrollbarWidth: 'thin' }}
+      sx={{
+        minWidth: 0,
+        minHeight: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '2px',
+        overflowY: { md: 'auto' },
+        scrollbarWidth: 'thin',
+        // What scrolls cuts off whatever is outside it: the padding is room for the shadows of the rows
+        // that are cards. The margin takes the room back and the basis grows by as much (272 + 2 × 6), so
+        // the tree is where it was and as wide, and so are the panes next to it.
+        flex: { xs: '1 1 272px', md: '1 1 284px' },
+        p: { md: '0 6px 6px' },
+        m: { md: '0 -6px -6px' },
+      }}
     >
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, p: '2px 4px 6px 6px' }}>
-        <Typography component="h2" sx={{ fontSize: 13, fontWeight: 600 }}>
+        <Typography component="h2" sx={{ fontSize: 14, fontWeight: 600 }}>
           {t.sessions}
         </Typography>
         <Typography sx={{ color: v.on2 }}>{sessions.length}</Typography>
@@ -327,8 +365,9 @@ export function SessionTree({ sessions, links, state, dispatch, dnd, onNew, onEn
 
       {listed.map((group) => (
         <Box key={group.cwd} role="group" aria-label={group.label}>
+          {/* The rows keep their own distance from the folder's name; a folder stands further from the one before. */}
           <Tooltip title={group.cwd} placement="right">
-            <Typography sx={{ p: '10px 6px 4px', fontSize: 12, lineHeight: '16px', color: v.on2 }}>{group.label}</Typography>
+            <Typography sx={{ p: '14px 6px 2px', fontSize: 12, lineHeight: '16px', fontWeight: 500, color: v.on2 }}>{group.label}</Typography>
           </Tooltip>
           {group.nodes.map((node) => (
             <SessionBranch key={node.session.id} node={node} depth={0} {...branch} />
@@ -341,7 +380,7 @@ export function SessionTree({ sessions, links, state, dispatch, dnd, onNew, onEn
           <ButtonBase
             onClick={() => dispatch({ type: 'toggleRow', id: ENDED_KEY })}
             aria-expanded={endedOpen}
-            sx={{ minHeight: 32, gap: '6px', px: '6px', borderRadius: '6px', fontSize: 12, color: v.on2, '&:hover': { bgcolor: v.surface2 } }}
+            sx={{ ...foldSx, minHeight: 32, gap: '6px', px: '6px' }}
           >
             <ChevronIcon open={endedOpen} size={14} />
             {t.endedSessions(ended.length)}

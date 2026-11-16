@@ -1,5 +1,5 @@
 import { createTheme, type Overlays, type Shadows } from '@mui/material/styles';
-import { TOKENS, v, type Tokens } from './tokens';
+import { BASE_TIMING, TOKENS, v, type Tokens } from './tokens';
 
 export const FONT_UI = '"IBM Plex Sans KR", system-ui, sans-serif';
 export const FONT_MONO = '"JetBrains Mono", "Nanum Gothic Coding", Consolas, monospace';
@@ -68,6 +68,8 @@ export const theme = createTheme({
       },
     },
     MuiIconButton: { styleOverrides: { root: { borderRadius: 10 } } },
+    // What opens and folds takes as long as the app's own changes of size.
+    MuiCollapse: { defaultProps: BASE_TIMING },
     MuiDialog: { styleOverrides: { paper: { borderRadius: 16 } } },
     MuiPopover: { styleOverrides: { paper: { borderRadius: 12 } } },
     MuiTooltip: { styleOverrides: { tooltip: { fontSize: 12, backgroundColor: v.inverse, color: v.onInverse }, arrow: { color: v.inverse } } },

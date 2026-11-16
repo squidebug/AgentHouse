@@ -122,12 +122,18 @@ const LABEL_PX = 64;
  * column of its own so the values line up, in as many columns as fit (one in
  * the tree, several in a pane). What can be done about it (`children`) sits
  * below a line, apart from what is only read.
+ *
+ * `items` can be a function, asked when this is drawn: a list that folds away
+ * costs nothing while it is shut. `page` is for the tree, where it lies on the
+ * page between two rows: the page's fill, and clear of the row above (a card
+ * has a shadow), with the next row keeping its own distance.
  */
-export function Details({ items, children, inset = 0 }: { items: Detail[]; children?: React.ReactNode; inset?: number }) {
+export function Details({ items, children, inset = 0, page = false }: { items: Detail[] | (() => Detail[]); children?: React.ReactNode; inset?: number; page?: boolean }) {
+  const list = typeof items === 'function' ? items() : items;
   return (
-    <Box sx={{ m: `0 4px 6px ${inset}px`, p: '8px 10px', borderRadius: '10px', bgcolor: v.surface2, fontSize: 12, lineHeight: '18px' }}>
+    <Box sx={{ m: page ? `4px 4px 2px ${inset}px` : `0 4px 6px ${inset}px`, p: '8px 10px', borderRadius: '10px', bgcolor: page ? v.bg2 : v.surface2, fontSize: 12, lineHeight: '18px' }}>
       <Box component="dl" sx={{ m: 0, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))', gap: '2px 20px' }}>
-        {items.map((item) => (
+        {list.map((item) => (
           <Box key={item.k} sx={{ display: 'grid', gridTemplateColumns: `${LABEL_PX}px minmax(0, 1fr)`, columnGap: '8px', gridColumn: item.path ? '1 / -1' : 'auto' }}>
             <Box component="dt" sx={{ color: v.on2 }}>
               {item.k}
