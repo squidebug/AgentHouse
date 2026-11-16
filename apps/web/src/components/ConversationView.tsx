@@ -5,7 +5,7 @@ import { api } from '../api/client';
 import { useConversation } from '../api/conversation';
 import { t } from '../strings';
 import { FONT_MONO } from '../theme/theme';
-import { v } from '../theme/tokens';
+import { motion, v } from '../theme/tokens';
 import { arrange, compactCount, delegationTurns, duration, modelName, summarize, type TurnView, type WorkEntry } from '../workspace/conversation';
 import { BranchIcon, ChatIcon, ChevronIcon, DelegateIcon, ReturnIcon } from './icons';
 import { MarkdownText } from './Markdown';
@@ -16,6 +16,11 @@ const PAGE = 20;
 const STICK_PX = 80;
 
 const STATE_COLOR: Record<ToolState, string> = { running: v.primary, done: v.on2, error: v.error, denied: v.error, interrupted: v.warn };
+
+// Under the pointer: the hover veil, fading in, as everywhere else.
+const hoverSx = { transition: `background-color ${motion.fast}`, '&:hover': { bgcolor: v.hover } } as const;
+// A row that opens on a click. These have no ripple, which keeps a long conversation quiet: pressed, they take the stronger veil.
+const rowSx = { ...hoverSx, '&:active': { bgcolor: v.press } } as const;
 
 const preSx = {
   m: 0,
@@ -109,7 +114,7 @@ function AnswerText({ entry, source }: { entry: Extract<ConversationEntry, { kin
   return (
     <Box
       className="ah-answer"
-      sx={{ position: 'relative', m: '-4px -6px', p: '4px 34px 4px 6px', borderRadius: '8px', '&:hover': { bgcolor: v.surface2 }, '&:hover .ah-hand': { opacity: 1 } }}
+      sx={{ position: 'relative', m: '-4px -6px', p: '4px 34px 4px 6px', borderRadius: '8px', ...hoverSx, '&:hover .ah-hand': { opacity: 1 } }}
     >
       <MarkdownText text={entry.text} />
       {entry.truncated && <Partial />}
@@ -286,7 +291,7 @@ function WorkItem({ entry, source }: { entry: WorkEntry; source: ConversationSou
         disableRipple
         onClick={() => setOpen(!open)}
         aria-expanded={open}
-        sx={{ width: '100%', justifyContent: 'flex-start', gap: '8px', minHeight: 26, px: '4px', borderRadius: '6px', textAlign: 'left', '&:hover': { bgcolor: v.surface2 } }}
+        sx={{ width: '100%', justifyContent: 'flex-start', gap: '8px', minHeight: 26, px: '4px', borderRadius: '6px', textAlign: 'left', ...rowSx }}
       >
         {entry.kind === 'tool' ? <StateDot state={entry.state} /> : <Box component="span" sx={{ flex: 'none', width: 7 }} />}
         <Box component="span" sx={{ flex: 'none', fontFamily: FONT_MONO, fontSize: 12, fontWeight: 500, color: entry.kind === 'tool' ? v.on : v.on2 }}>
@@ -331,7 +336,7 @@ function WorkRow({ entries, source }: { entries: WorkEntry[]; source: Conversati
         disableRipple
         onClick={() => setOpen(!open)}
         aria-expanded={open}
-        sx={{ width: '100%', justifyContent: 'flex-start', gap: '8px', minHeight: 28, px: '4px', borderRadius: '8px', textAlign: 'left', color: v.on2, '&:hover': { bgcolor: v.surface2 } }}
+        sx={{ width: '100%', justifyContent: 'flex-start', gap: '8px', minHeight: 28, px: '4px', borderRadius: '8px', textAlign: 'left', color: v.on2, ...rowSx }}
       >
         <ChevronIcon open={open} size={14} />
         <Box component="span" sx={{ flex: 'none', fontSize: 12, fontWeight: 500 }}>
@@ -459,7 +464,7 @@ function Agent({ entry, source }: { entry: Extract<ConversationEntry, { kind: 'a
         disableRipple
         onClick={() => setOpen(!open)}
         aria-expanded={open}
-        sx={{ width: '100%', justifyContent: 'flex-start', gap: '8px', p: '8px 12px', pr: entry.agentId && onOpenAgent ? '72px' : '36px', textAlign: 'left', '&:hover': { bgcolor: v.surface2 } }}
+        sx={{ width: '100%', justifyContent: 'flex-start', gap: '8px', p: '8px 12px', pr: entry.agentId && onOpenAgent ? '72px' : '36px', textAlign: 'left', ...rowSx }}
       >
         <StateDot state={entry.state} />
         <BranchIcon size={15} style={{ flex: 'none', color: v.on2 }} />
@@ -494,7 +499,7 @@ function Task({ entry, source }: { entry: Extract<ConversationEntry, { kind: 'ta
         disableRipple
         onClick={() => setOpen(!open)}
         aria-expanded={open}
-        sx={{ width: '100%', justifyContent: 'flex-start', gap: '8px', minHeight: 28, px: '4px', borderRadius: '8px', textAlign: 'left', color: v.on2, '&:hover': { bgcolor: v.surface2 } }}
+        sx={{ width: '100%', justifyContent: 'flex-start', gap: '8px', minHeight: 28, px: '4px', borderRadius: '8px', textAlign: 'left', color: v.on2, ...rowSx }}
       >
         <StateDot state={entry.state} />
         <BranchIcon size={14} style={{ flex: 'none' }} />
@@ -543,7 +548,7 @@ function TurnFooter({ turn, source }: { turn: ConversationTurn; source: Conversa
       disableRipple
       onClick={() => setOpen(!open)}
       aria-expanded={open}
-      sx={{ alignSelf: 'flex-start', flexWrap: 'wrap', gap: '2px 0', px: '4px', borderRadius: '6px', fontSize: 12, lineHeight: '18px', color: v.on2, textAlign: 'left', '&:hover': { bgcolor: v.surface2 } }}
+      sx={{ alignSelf: 'flex-start', flexWrap: 'wrap', gap: '2px 0', px: '4px', borderRadius: '6px', fontSize: 12, lineHeight: '18px', color: v.on2, textAlign: 'left', ...rowSx }}
     >
       {[...main, ...(open ? more : [])].filter(Boolean).join(' · ')}
     </ButtonBase>
@@ -552,7 +557,8 @@ function TurnFooter({ turn, source }: { turn: ConversationTurn; source: Conversa
 
 function Turn({ view, source, cards }: { view: TurnView; source: ConversationSource; cards?: React.ReactNode }) {
   return (
-    <Box component="article" aria-label={t.turn(view.turn.index + 1)} sx={{ display: 'flex', flexDirection: 'column', gap: '8px', py: '12px', '& + &': { borderTop: `1px solid ${v.outline}` } }}>
+    // A turn stands 16px from the line between it and the next: twice the distance between its own parts.
+    <Box component="article" aria-label={t.turn(view.turn.index + 1)} sx={{ display: 'flex', flexDirection: 'column', gap: '8px', py: '16px', '& + &': { borderTop: `1px solid ${v.outline}` } }}>
       {view.blocks.map((block) =>
         block.kind === 'work' ? <WorkRow key={block.id} entries={block.entries} source={source} /> : <EntryView key={block.entry.id} entry={block.entry} source={source} />,
       )}
@@ -664,7 +670,7 @@ export const ConversationView = memo(function ConversationView({
       {turns.slice(hidden).map((view) => (
         <Turn key={view.turn.index} view={view} source={source} cards={cardsAfter(view.turn.index)} />
       ))}
-      {placed.has(-1) && <Box sx={{ display: 'flex', flexDirection: 'column', gap: '8px', py: '12px' }}>{cardsAfter(-1)}</Box>}
+      {placed.has(-1) && <Box sx={{ display: 'flex', flexDirection: 'column', gap: '8px', py: '16px' }}>{cardsAfter(-1)}</Box>}
     </Box>
   );
 });

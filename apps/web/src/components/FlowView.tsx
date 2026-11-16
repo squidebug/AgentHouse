@@ -3,11 +3,12 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { isAgentBusy, isAsking, type SessionInfo, type SessionLink } from '@agenthouse/protocol';
 import { useConversation } from '../api/conversation';
 import { t } from '../strings';
-import { v } from '../theme/tokens';
+import { motion, v } from '../theme/tokens';
 import { agentBars, ago, flowRows, labelPlace, place, sessionBars, ticks, timeWindow, type Bar, type BarKind, type FlowFilter, type FlowRow, type TimeWindow } from '../workspace/flow';
 import { agentTitle } from './Details';
 import { DelegateIcon, LinkIcon } from './icons';
 import { AgentStatusIcon, StatusIcon } from './StatusIcon';
+import { switchSide, switchTrack } from './switch';
 
 // The time track sits this far in from a lane's edges; the axis lines up with it.
 const INSET = 8;
@@ -77,7 +78,15 @@ function Lane({ row, bars, window, highlight, onOpen }: { row: FlowRow; bars: Ba
     <ButtonBase
       onClick={() => onOpen(row)}
       aria-label={t.open(title)}
-      sx={{ display: 'block', width: '100%', height: 40, borderRadius: '8px', bgcolor: highlight ? v.dropBg : 'transparent', '&:hover': { bgcolor: highlight ? v.dropBg : v.surface2 } }}
+      sx={{
+        display: 'block',
+        width: '100%',
+        height: 40,
+        borderRadius: '8px',
+        bgcolor: highlight ? v.dropBg : 'transparent',
+        transition: `background-color ${motion.fast}`,
+        '&:hover': { bgcolor: highlight ? v.dropBg : v.hover },
+      }}
     >
       <Box component="span" sx={{ position: 'relative', display: 'block', height: '100%', mx: `${INSET}px` }}>
         <Box
@@ -154,11 +163,7 @@ export function FlowView({ session, placed, links, focusAgent, onOpen }: Props) 
   }, [focusAgent]);
 
   const filterButton = (value: FlowFilter, label: string) => (
-    <ButtonBase
-      aria-pressed={filter === value}
-      onClick={() => setFilter(value)}
-      sx={{ height: 28, px: 1.5, borderRadius: '8px', fontSize: 12, fontWeight: 500, bgcolor: filter === value ? v.surface : 'transparent', color: filter === value ? v.on : v.on2 }}
-    >
+    <ButtonBase aria-pressed={filter === value} onClick={() => setFilter(value)} sx={{ height: 28, px: 1.5, fontSize: 12, fontWeight: 500, ...switchSide(filter === value) }}>
       {label}
     </ButtonBase>
   );
@@ -167,7 +172,7 @@ export function FlowView({ session, placed, links, focusAgent, onOpen }: Props) 
     <Box sx={{ height: '100%', overflowY: 'auto', pr: '8px', color: v.on }}>
       <Box sx={{ position: 'sticky', top: 0, zIndex: 2, bgcolor: v.termBg }}>
         <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px 14px', p: '4px 0 8px' }}>
-          <Box role="group" aria-label={t.flow} sx={{ display: 'inline-flex', p: '2px', borderRadius: '10px', bgcolor: v.surface2 }}>
+          <Box role="group" aria-label={t.flow} sx={switchTrack}>
             {filterButton('all', t.filterAll)}
             {filterButton('running', t.filterRunning)}
           </Box>
