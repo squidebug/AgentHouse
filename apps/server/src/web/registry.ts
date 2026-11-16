@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { isAgentBusy, type SessionInfo } from '@agenthouse/protocol';
+import { isAgentBusy, isTaskRunning, type SessionInfo } from '@agenthouse/protocol';
 import { notSaved, writeFileAtomic } from '../shared/state';
 
 const FILE_VERSION = 1;
@@ -20,9 +20,17 @@ function asEnded(info: SessionInfo): SessionInfo {
     screen: false,
     exit: info.exit ?? { code: null, signal: null, at },
     status: info.status.value === 'exited' ? info.status : { value: 'exited', reason: null, tool: null, error: false, at },
-    // Whatever still ran ended with the session.
+    // Whatever still ran ended with the session, and what it had scheduled went with its process.
     agents: info.agents.map((a) => (isAgentBusy(a) ? { ...a, state: 'stopped', endedAt: a.endedAt ?? at, tool: null, asking: false } : a)),
+    tasks: info.tasks.map((task) => (isTaskRunning(task) ? { ...task, state: 'stopped', endedAt: task.endedAt ?? at } : task)),
+    schedules: [],
   };
+}
+
+/** An entry as it is kept: one written before sub-agents or background work were tracked has none. */
+function withDefaults(entry: SessionInfo): SessionInfo {
+  const list = <T>(value: T[] | undefined): T[] => (Array.isArray(value) ? value : []);
+  return { ...entry, agents: list(entry.agents), tasks: list(entry.tasks), schedules: list(entry.schedules), invoked: list(entry.invoked) };
 }
 
 function isEntry(value: unknown): value is SessionInfo {
@@ -53,8 +61,7 @@ export class SessionRegistry {
     try {
       const data = JSON.parse(readFileSync(file, 'utf8')) as { version?: unknown; sessions?: unknown };
       if (data.version === FILE_VERSION && Array.isArray(data.sessions)) {
-        // Entries written before sub-agents were tracked have none.
-        for (const entry of data.sessions) if (isEntry(entry)) this.sessions.set(entry.id, { ...entry, agents: Array.isArray(entry.agents) ? entry.agents : [] });
+        for (const entry of data.sessions) if (isEntry(entry)) this.sessions.set(entry.id, withDefaults(entry));
       }
     } catch {
       // none yet, or unreadable: start over

@@ -1,8 +1,9 @@
 import { execFile } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { open } from 'node:fs/promises';
-import { isAsking, type AgentInfo, type SessionStatus, type SessionTelemetry, type StatusValue, type TranscriptSegment } from '@agenthouse/protocol';
+import { isAsking, type AgentInfo, type BackgroundTask, type ScheduledPrompt, type SessionStatus, type SessionTelemetry, type StatusValue, type TranscriptSegment } from '@agenthouse/protocol';
 import { AgentTracker, agentTranscript, type AgentAsk } from '../claude/agents';
+import { BackgroundTracker } from '../claude/background';
 import { claudeConfigDir } from '../claude/settings';
 import {
   applyAgents,
@@ -74,6 +75,19 @@ export class Observer extends EventEmitter {
     return [];
   }
 
+  /** What the CLI left running in the background, what it scheduled, and the skills it ran; the same. */
+  get tasks(): BackgroundTask[] {
+    return [];
+  }
+
+  get schedules(): ScheduledPrompt[] {
+    return [];
+  }
+
+  get invoked(): string[] {
+    return [];
+  }
+
   constructor(vendorSessionId: string | null, status: SessionStatus = unobservedStatus()) {
     super();
     this.vendorSessionId = vendorSessionId;
@@ -133,6 +147,7 @@ export class ClaudeObserver extends Observer {
   /** Dialogs of the main conversation, apart from `main`: a call ending next to one that asks must not hide it. */
   private readonly dialogs = new Dialogs();
   private readonly tracker: AgentTracker;
+  private readonly background = new BackgroundTracker();
   private askShown: { ask: AgentAsk; status: SessionStatus } | null = null;
 
   constructor(private readonly options: ClaudeObserverOptions) {
@@ -151,6 +166,18 @@ export class ClaudeObserver extends Observer {
 
   get agents(): AgentInfo[] {
     return this.tracker.list();
+  }
+
+  get tasks(): BackgroundTask[] {
+    return this.background.list();
+  }
+
+  get schedules(): ScheduledPrompt[] {
+    return this.background.schedules();
+  }
+
+  get invoked(): string[] {
+    return this.background.invoked();
   }
 
   /** True when a hook relay presents this session's token. */
@@ -173,6 +200,7 @@ export class ClaudeObserver extends Observer {
       changed = true;
     }
     if (this.tracker.onHook(event, at)) changed = true;
+    if (this.background.onHook(event, at)) changed = true;
     const fromAgent = typeof event.agent_id === 'string' && event.agent_id !== '';
     if (!fromAgent) {
       this.main = applyHook(this.main, event, at);
@@ -272,6 +300,7 @@ export class ClaudeObserver extends Observer {
     this.done = true;
     clearTimeout(this.hookWait);
     this.tracker.stopAll(at);
+    this.background.stopAll(at);
     super.exited(code, at);
     this.main = this.status;
   }

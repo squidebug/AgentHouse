@@ -1,8 +1,12 @@
 import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { AUTH_REQUIRED, LOGIN_EXPIRED, SOCKET_PROTOCOL, type ApiError, type ComposeResult, type EventServerMessage, type LoginResult } from '@agenthouse/protocol';
+import { AUTH_REQUIRED, LOGIN_EXPIRED, SOCKET_PROTOCOL, type ApiError, type ComposeResult, type EventServerMessage, type LoginResult, type TextFile } from '@agenthouse/protocol';
 import { AGENT_ID } from '../../claude/agents';
+import { claudeConfigDir } from '../../claude/settings';
+import { memoryFiles } from '../../claude/memory';
+import { FileError, MAX_FILE_BYTES, readText, writeText } from '../../claude/notes';
+import { skillFile, skillsOf } from '../../claude/skills';
 import { LaunchError } from '../cli/launch';
 import { CliChoiceError, EnvService } from '../doctor';
 import { HostUnavailableError, type HostClient } from '../host-client';
@@ -12,7 +16,7 @@ import { DelegationError, Delegations, delegationsFile } from '../delegations';
 import { LinkError } from '../links';
 import { SessionManager } from '../manager';
 import { AccessControl } from './access';
-import { ChooseCliBody, ComposeBody, DelegateBody, DeliverBody, LaunchBody, LinkBody, LoginBody, ResumeBody, TerminalClient } from './schemas';
+import { ChooseCliBody, ComposeBody, DelegateBody, DeliverBody, LaunchBody, LinkBody, LoginBody, NoteBody, ResumeBody, TerminalClient } from './schemas';
 import { serveStatic } from './static';
 
 export interface ServerOptions {
@@ -64,6 +68,17 @@ const RELAY_LOW_WATER = 256 * 1024;
 // A message or delegated work is 200,000 characters at most (schemas.ts): up to four bytes each in
 // UTF-8, more where JSON escapes them. The default limit refused Korean text from about 85,000 on.
 const TEXT_BODY_BYTES = 1024 * 1024;
+// A note is MAX_FILE_BYTES at most on disk; as JSON every byte of it can take six.
+const NOTE_BODY_BYTES = MAX_FILE_BYTES * 6 + 1024;
+
+/** A part of the address as it was before it was encoded for one; empty when it is not valid. */
+function segment(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return '';
+  }
+}
 
 function send(res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}): void {
   // A reply already under way (it failed halfway) can only be cut off; writing headers again would throw.
@@ -279,6 +294,31 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
         send(res, 200, detail);
         return;
       }
+      // The skills its conversation was given, read from its transcript when asked for.
+      if (parts[3] === 'skills' && parts.length === 4 && req.method === 'GET') {
+        send(res, 200, { skills: await skillsOf(session, claudeConfigDir()) });
+        return;
+      }
+      // One of the project's or the user's own skills, to read and to save.
+      if (parts[3] === 'skills' && parts[4] && parts.length === 5 && (req.method === 'GET' || req.method === 'PUT')) {
+        const file = await skillFile(session.cwd, claudeConfigDir(), segment(parts[4]));
+        if (!file) throw new HttpError(404, '편집할 수 있는 스킬이 아닙니다.');
+        send(res, 200, await note(req, file.path));
+        return;
+      }
+      // What Claude reads into the session by itself: the user's instructions and the project's memory notes.
+      if (parts[3] === 'memory' && parts.length === 4 && req.method === 'GET') {
+        send(res, 200, { files: await memoryFiles(session, claudeConfigDir()) });
+        return;
+      }
+      if (parts[3] === 'memory' && parts[4] && parts.length === 5 && (req.method === 'GET' || req.method === 'PUT')) {
+        // Looked up in the list as it is now: a request names a file of it, never a path.
+        const id = segment(parts[4]);
+        const file = (await memoryFiles(session, claudeConfigDir())).find((entry) => entry.id === id);
+        if (!file) throw new HttpError(404, '찾을 수 없습니다.');
+        send(res, 200, await note(req, file.path));
+        return;
+      }
       // Sends work from this session to the session delegated under it.
       if (parts[3] === 'delegations' && parts.length === 4 && req.method === 'POST') {
         const body = parse(DelegateBody, await readJson(req, TEXT_BODY_BYTES));
@@ -304,6 +344,18 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
       }
     }
     throw new HttpError(404, '찾을 수 없습니다.');
+  }
+
+  /** A note of the user's: read (GET), or saved over the version the page loaded (PUT). */
+  async function note(req: IncomingMessage, file: string): Promise<TextFile> {
+    try {
+      if (req.method === 'GET') return await readText(file);
+      const body = parse(NoteBody, await readJson(req, NOTE_BODY_BYTES));
+      return await writeText(file, body.text, body.version);
+    } catch (error) {
+      if (error instanceof FileError) throw new HttpError({ NOT_FOUND: 404, CHANGED: 409, TOO_LARGE: 413, NOT_TEXT: 415 }[error.code], error.message, error.code);
+      throw error;
+    }
   }
 
   /** A delegation call, its refusals as HTTP errors. */

@@ -43,8 +43,8 @@ interface EntryBase {
 }
 
 export type ConversationEntry =
-  /** What the user typed, or a message another agent sent (`from`). */
-  | (EntryBase & { kind: 'prompt'; text: string; images: number; from: string | null; truncated: boolean })
+  /** What the user typed, a message another agent sent (`from`), or a prompt the CLI gave the session on a schedule (`scheduled`). */
+  | (EntryBase & { kind: 'prompt'; text: string; images: number; from: string | null; truncated: boolean; scheduled?: true })
   | (EntryBase & { kind: 'text'; text: string; truncated: boolean })
   | (EntryBase & { kind: 'thinking'; chars: number })
   | (EntryBase & { kind: 'tool'; name: string; summary: string; state: ToolState })

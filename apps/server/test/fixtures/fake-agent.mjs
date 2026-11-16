@@ -15,9 +15,13 @@
 // background, one of which starts a third, each reporting back), and
 // "agentask" one whose tool waits for approval for a moment. "approval" makes
 // the main conversation's own tool wait for approval until a key is pressed.
+// "background" runs a shell command in the background, "monitor" a Monitor
+// that reads two lines (either ends by itself unless the prompt says "keep"),
+// "schedule" sets a prompt for every minute (with "run" it runs once), and
+// "skill" starts one; the transcript lists three skills.
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 
@@ -67,13 +71,25 @@ if (resumed && transcript()) {
     // nothing written before: Claude Code would refuse to resume it; the double just starts it
   }
 }
+// The skills a conversation is given, as Claude Code lists them near the start of its transcript.
+const SKILLS = [
+  ['ping-pong', 'Replies with the word pong.'],
+  ['loop', 'Run a prompt on a recurring interval.'],
+  ['fake-plugin:review', 'Review the current diff.'],
+];
 function write(record) {
   const file = transcript();
   if (!file) return;
   mkdirSync(path.dirname(file), { recursive: true });
+  const fresh = !existsSync(file);
   const uuid = randomUUID();
-  appendFileSync(file, `${JSON.stringify({ parentUuid: parent, isSidechain: false, cwd: process.cwd(), sessionId, version: 'fake', uuid, timestamp: new Date().toISOString(), ...record })}\n`);
+  const line = (fields) => `${JSON.stringify({ parentUuid: parent, isSidechain: false, cwd: process.cwd(), sessionId, version: 'fake', timestamp: new Date().toISOString(), ...fields })}\n`;
+  appendFileSync(file, line({ uuid, ...record }));
   parent = uuid;
+  if (fresh) {
+    const attachment = { type: 'skill_listing', content: SKILLS.map(([name, about]) => `- ${name}: ${about}`).join('\n'), skillCount: SKILLS.length, isInitial: true, names: SKILLS.map(([name]) => name) };
+    appendFileSync(file, line({ uuid: randomUUID(), type: 'attachment', attachment }));
+  }
 }
 const usage = { input_tokens: 3, cache_read_input_tokens: 1200, cache_creation_input_tokens: 40, output_tokens: 25 };
 const reply = (content, id = `msg_${randomUUID()}`) =>
@@ -139,7 +155,7 @@ function finish(agent, caller) {
   write({ type: 'user', message: { role: 'user', content: text }, origin });
   reply({ type: 'text', text: agent.description + ': ' + agent.report });
   write({ type: 'system', subtype: 'turn_duration', durationMs: 60 });
-  hook('Stop', { background_tasks: [] });
+  stop();
 }
 
 /** The sub-agent status line: what Claude passes it for each sub-agent. */
@@ -150,6 +166,102 @@ const tasks = (list, status) =>
 
 const running = (list) => list.map((a) => ({ id: a.id, type: 'subagent', status: 'running', description: a.description, agent_type: a.type }));
 
+// What runs in the background and what is scheduled: every Stop lists both, as Claude Code's does.
+const shells = new Map();
+const crons = new Map();
+const stop = (agents = []) => hook('Stop', { background_tasks: [...running(agents), ...shells.values()], session_crons: [...crons.values()] });
+const endTurn = (answer, agents) => {
+  reply({ type: 'text', text: answer });
+  write({ type: 'system', subtype: 'turn_duration', durationMs: 120 });
+  stop(agents);
+};
+const asked = (prompt) => {
+  hook('UserPromptSubmit', { prompt });
+  write({ type: 'user', message: { role: 'user', content: prompt }, origin: { kind: 'human' } });
+};
+/** A tool call that needs no approval: its hooks and its records. */
+function call(name, input, response, result) {
+  const use = 'toolu_' + shortId();
+  hook('PreToolUse', { tool_name: name, tool_use_id: use, tool_input: input });
+  reply({ type: 'tool_use', id: use, name, input });
+  write({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: use, content: result }] }, toolUseResult: response });
+  hook('PostToolUse', { tool_name: name, tool_use_id: use, tool_input: input, tool_response: response });
+  return use;
+}
+/** What a background task tells the session: a turn of its own, started by the notification. */
+function notify(lines, answer) {
+  const text = ['<task-notification>', ...lines, '</task-notification>'].join('\n');
+  hook('UserPromptSubmit', { prompt: text });
+  write({ type: 'user', message: { role: 'user', content: text }, origin: { kind: 'task-notification', producer: 'session-task' } });
+  endTurn(answer);
+}
+
+/** A shell command in the background: the turn ends at once; its end starts a turn. With "keep" it runs on. */
+async function runBackground(prompt) {
+  asked(prompt);
+  await pause(60);
+  const task = 'b' + shortId().slice(0, 8);
+  const input = prompt.includes('tests')
+    ? { command: 'pnpm test', description: 'Run the tests', run_in_background: true }
+    : { command: 'sleep 20; echo done', description: 'Wait for the build', run_in_background: true };
+  const use = call('Bash', input, { stdout: '', stderr: '', interrupted: false, backgroundTaskId: task }, `Command running in background with ID: ${task}.`);
+  shells.set(task, { id: task, type: 'shell', status: 'running', description: input.description, command: input.command });
+  endTurn('started');
+  if (prompt.includes('keep')) return;
+  await pause(700);
+  shells.delete(task);
+  const failed = prompt.includes('fail');
+  notify(
+    [`<task-id>${task}</task-id>`, `<tool-use-id>${use}</tool-use-id>`, `<status>${failed ? 'failed' : 'completed'}</status>`, `<summary>Background command "${input.description}" ${failed ? 'failed with exit code 1' : 'completed (exit code 0)'}</summary>`],
+    'The background command ended.',
+  );
+}
+
+/** A Monitor: listed as a shell, and every line it reads starts a turn. With "keep" it runs on after two lines. */
+async function runMonitor(prompt) {
+  asked(prompt);
+  await pause(60);
+  const task = 'b' + shortId().slice(0, 8);
+  const input = { description: 'deploy status', timeout_ms: 60000, command: 'tail -f deploy.log' };
+  const use = call('Monitor', input, { taskId: task, timeoutMs: 60000, persistent: false }, `Monitor started (task ${task}).`);
+  shells.set(task, { id: task, type: 'shell', status: 'running', description: input.description, command: input.command });
+  endTurn('watching');
+  for (const line of ['building', 'deployed 3 of 5']) {
+    await pause(300);
+    notify([`<task-id>${task}</task-id>`, `<summary>Monitor event: "${input.description}"</summary>`, `<event>${line}</event>`], 'ok');
+  }
+  if (prompt.includes('keep')) return;
+  await pause(300);
+  shells.delete(task);
+  notify([`<task-id>${task}</task-id>`, `<tool-use-id>${use}</tool-use-id>`, '<status>completed</status>', `<summary>Monitor "${input.description}" stream ended</summary>`], 'ok');
+}
+
+/** A prompt scheduled for every minute (CronCreate, as /loop 1m does). With "run" it runs once, shortly after. */
+async function runSchedule(prompt) {
+  asked(prompt);
+  await pause(60);
+  const id = shortId().slice(0, 8);
+  const input = { cron: '*/1 * * * *', prompt: 'check the deploy', recurring: true };
+  call('CronCreate', input, { id, humanSchedule: 'Every minute', recurring: true, durable: false, nextFireAt: Date.now() + 45_000 }, `Scheduled recurring job ${id} (Every minute).`);
+  crons.set(id, { id, schedule: input.cron, recurring: true, prompt: input.prompt });
+  endTurn('scheduled');
+  if (!prompt.includes('run')) return;
+  await pause(500);
+  // A scheduled prompt is the CLI's own record (isMeta), after a line that says so.
+  hook('UserPromptSubmit', { prompt: input.prompt });
+  write({ type: 'system', subtype: 'scheduled_task_fire', content: 'Running scheduled task', taskId: id, cron: input.cron });
+  write({ type: 'user', isMeta: true, promptSource: 'system', scheduledTaskId: id, message: { role: 'user', content: input.prompt } });
+  endTurn('the deploy is fine');
+}
+
+/** The model starts a skill by name. */
+async function runSkill(prompt) {
+  asked(prompt);
+  await pause(60);
+  call('Skill', { skill: 'ping-pong' }, { success: true, commandName: 'ping-pong' }, 'Launching skill: ping-pong');
+  endTurn('pong');
+}
+
 async function runAgents(prompt) {
   hook('UserPromptSubmit', { prompt });
   write({ type: 'user', message: { role: 'user', content: prompt }, origin: { kind: 'human' } });
@@ -158,7 +270,7 @@ async function runAgents(prompt) {
   const planner = launch(null, 'general-purpose', 'Plan the change', 'plan ready');
   reply({ type: 'text', text: 'Two agents are running.' });
   write({ type: 'system', subtype: 'turn_duration', durationMs: 90 });
-  hook('Stop', { background_tasks: running([explore, planner]) });
+  stop([explore, planner]);
   tasks([explore, planner], ['running', 'running']);
   await pause(300);
   // While the main conversation waits, the explorer reads and the planner starts an agent of its own.
@@ -187,7 +299,7 @@ async function runAgentAsks(prompt) {
   await pause(60);
   const writer = launch(null, 'general-purpose', 'Write a file', 'file written');
   reply({ type: 'text', text: 'The agent is on it.' });
-  hook('Stop', { background_tasks: running([writer]) });
+  stop([writer]);
   await pause(200);
   const use = 'toolu_' + shortId();
   hook('PreToolUse', { tool_name: 'Write', tool_use_id: use, ...as(writer) });
@@ -217,13 +329,17 @@ async function runAsks(prompt) {
   hook('PostToolUse', { tool_name: 'Write', tool_use_id: use });
   reply({ type: 'text', text: `fake answer: ${prompt}` });
   write({ type: 'system', subtype: 'turn_duration', durationMs: 120 });
-  hook('Stop');
+  stop();
 }
 
 function submit(prompt) {
   if (prompt.includes('agentask')) return void runAgentAsks(prompt);
   if (prompt.includes('agents')) return void runAgents(prompt);
   if (prompt.includes('approval')) return void runAsks(prompt);
+  if (prompt.includes('background')) return void runBackground(prompt);
+  if (prompt.includes('monitor')) return void runMonitor(prompt);
+  if (prompt.includes('schedule')) return void runSchedule(prompt);
+  if (prompt.includes('skill')) return void runSkill(prompt);
   if (prompt === '/clear') {
     hook('SessionEnd', { reason: 'clear' });
     sessionId = randomUUID();
@@ -245,7 +361,7 @@ function submit(prompt) {
     reply({ type: 'text', text: `fake answer: ${prompt}` });
     write({ type: 'system', subtype: 'turn_duration', durationMs: 120 });
     post('/status', { model: { id: 'fake-model', display_name: 'Fake' }, effort: { level: 'low' }, context_window: { used_percentage: 3, context_window_size: 200000 } });
-    hook('Stop');
+    stop();
   }, 100);
 }
 

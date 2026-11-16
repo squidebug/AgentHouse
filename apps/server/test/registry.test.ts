@@ -42,6 +42,9 @@ function info(id: string, extra: Partial<SessionInfo> = {}): SessionInfo {
     telemetry: { level: 'full', model: 'Haiku 5.5', effort: 'low', contextPct: 4, contextWindow: 200000, costUsd: null },
     transcripts: [{ vendorSessionId: `${id}-cli`, path: path.join(os.tmpdir(), `${id}.jsonl`), since: 1500 }],
     agents: [],
+    tasks: [],
+    schedules: [],
+    invoked: [],
     ...extra,
   };
 }

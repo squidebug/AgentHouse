@@ -410,6 +410,9 @@ export class Session extends EventEmitter {
       telemetry: this.observer.telemetry,
       transcripts: this.observer.transcripts,
       agents: this.observer.agents,
+      tasks: this.observer.tasks,
+      schedules: this.observer.schedules,
+      invoked: this.observer.invoked,
     };
   }
 }

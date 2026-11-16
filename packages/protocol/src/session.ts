@@ -134,6 +134,98 @@ export interface AgentInfo {
 export const isAgentBusy = (agent: Pick<AgentInfo, 'state' | 'asking'>): boolean => agent.state === 'running' || agent.asking;
 
 /**
+ * Something a session started that goes on by itself (Claude Code: a shell
+ * command in the background, a Monitor), as the CLI's hooks report it. It
+ * outlives the turn that started it; its end comes back to the session as a
+ * notification.
+ */
+export interface BackgroundTask {
+  /** The CLI's id for it. */
+  id: string;
+  /** `shell`, `monitor`, or whatever else the CLI names (a workflow, an MCP task). */
+  type: string;
+  /** What it is for, in a few words, as the model put it. */
+  description: string | null;
+  /** The command line of a shell or a monitor. */
+  command: string | null;
+  /** `done`: it ended (a shell with exit code 0, when known); `failed`: it ended with an error; `stopped`: it was stopped, or its session ended. */
+  state: 'running' | 'done' | 'failed' | 'stopped';
+  /** A shell command's exit code, when its end reported one. */
+  exitCode: number | null;
+  /** The latest line a monitor reported. */
+  lastEvent: string | null;
+  startedAt: number;
+  endedAt: number | null;
+}
+
+/** Still going. */
+export const isTaskRunning = (task: Pick<BackgroundTask, 'state'>): boolean => task.state === 'running';
+
+/**
+ * A prompt the CLI will give the session by itself later (Claude Code:
+ * CronCreate and /loop on a schedule, a wakeup once). It lives in the CLI's
+ * process and goes with it.
+ */
+export interface ScheduledPrompt {
+  /** The CLI's id for it. */
+  id: string;
+  /** A cron expression of five fields, in local time. A wakeup is the one minute it is set for. */
+  schedule: string;
+  /** Again at every match, until deleted; else once, and then it is gone. */
+  recurring: boolean;
+  prompt: string;
+  /** When it runs next, where the CLI said so (epoch ms); a schedule that has run since does not say. */
+  nextAt: number | null;
+  /** When it last ran, and how often since it was listed. */
+  lastAt: number | null;
+  runs: number;
+  since: number;
+}
+
+/**
+ * A skill a session's conversation was given (Claude Code lists them in its
+ * transcript). `used`: the model started it, or the user typed it as a command.
+ */
+export interface SkillInfo {
+  /** As it is called: `name`, or `plugin:name` for a plugin's. */
+  name: string;
+  /** What it is for, as the listing says. */
+  about: string | null;
+  /** Where it comes from: the session's folder, the user's own, a plugin, or the CLI itself. */
+  source: 'project' | 'user' | 'plugin' | 'builtin';
+  used: boolean;
+  /** Its file can be opened and saved from the page: one of the project's or the user's own. */
+  editable: boolean;
+}
+
+/**
+ * A file Claude Code reads into a session's context by itself: instructions
+ * the user wrote for it (CLAUDE.md, what that imports, rules), or a note of
+ * the memory it keeps for the project.
+ */
+export interface MemoryFile {
+  /** Names it in requests. Made by the server; never a path. */
+  id: string;
+  kind: 'instructions' | 'memory';
+  /** Whose it is: every project of the user's, this project's, or this project's on this machine only. */
+  scope: 'user' | 'project' | 'local';
+  /** The file as the user knows it: its name, with its folder where it has one (`.claude/rules/style.md`). */
+  name: string;
+  /** What a memory note calls itself and says of itself in its header, and its kind (user, feedback, project, reference). */
+  title: string | null;
+  about: string | null;
+  type: string | null;
+  path: string;
+}
+
+/** A text file as the page edits it. `version` stands for its content: a save names the one it started from. */
+export interface TextFile {
+  path: string;
+  text: string;
+  version: string;
+}
+
+/**
  * A session placed under another in the tree. `group` only shows it there;
  * `delegate` also lets the parent hand it work. One level: a parent
  * is never under another session itself.
@@ -191,6 +283,12 @@ export interface SessionInfo {
   transcripts: TranscriptSegment[];
   /** Its sub-agents in the order they started, nested through parentId; the CLI's internal helpers are left out. */
   agents: AgentInfo[];
+  /** What it started in the background, in the order it started them; ended ones stay listed. */
+  tasks: BackgroundTask[];
+  /** The prompts it will be given by itself: gone once deleted, run (when not recurring) or the session ends. */
+  schedules: ScheduledPrompt[];
+  /** Skills the model started and slash commands the user typed, by name, in the order first used. */
+  invoked: string[];
 }
 
 export interface CliInstall {

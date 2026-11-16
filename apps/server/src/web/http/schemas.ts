@@ -41,6 +41,12 @@ export const DeliverBody = z.object({
   header: z.string().min(1).max(200).regex(/^[^\r\n]*$/),
 });
 
+/** A note saved from the page: its text, and the version of the file it was loaded as. */
+export const NoteBody = z.object({
+  text: z.string().max(600_000),
+  version: z.string().min(1).max(64),
+});
+
 export const TerminalClient = z.discriminatedUnion('type', [
   z.object({ type: z.literal('input'), data: z.string().max(1_000_000), binary: z.boolean().optional() }),
   z.object({ type: z.literal('resize'), cols: z.number().int().min(1).max(1000), rows: z.number().int().min(1).max(500) }),

@@ -308,7 +308,8 @@ export class ConversationBuilder {
       const report = taskReport(contentText(content));
       if (report) return this.report(report, r, at, line);
     }
-    if (r.isMeta === true) return;
+    // The CLI's own notes are skipped, but not a prompt it gave itself on a schedule: that is what the turn answers.
+    if (r.isMeta === true && typeof r.scheduledTaskId !== 'string') return;
     if (r.isCompactSummary === true) {
       const notice = this.lastCompact ? this.entries.get(this.lastCompact) : undefined;
       if (notice) this.sources.set(notice.id, this.source(line));
@@ -345,7 +346,8 @@ export class ConversationBuilder {
     const from = origin?.kind === 'peer' ? (str(origin.name) ?? str(origin.from) ?? 'agent') : null;
     this.newTurn(at);
     const shown = cut(text, PROMPT_CHARS);
-    this.put({ kind: 'prompt', id: this.key(str(r.uuid) ?? `prompt-${(this.serial += 1)}`), turn: this.turnIndex(), at, text: shown.text, images, from, truncated: shown.truncated }, this.source(line));
+    const scheduled = typeof r.scheduledTaskId === 'string' ? { scheduled: true as const } : {};
+    this.put({ kind: 'prompt', id: this.key(str(r.uuid) ?? `prompt-${(this.serial += 1)}`), turn: this.turnIndex(), at, text: shown.text, images, from, truncated: shown.truncated, ...scheduled }, this.source(line));
   }
 
   /** A background agent reported back: its block is settled, and the report starts the turn that answers it. */

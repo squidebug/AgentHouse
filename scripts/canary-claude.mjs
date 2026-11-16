@@ -2,7 +2,7 @@
 // Checks the built AgentHouse against the real Claude Code installed on this
 // machine: a session starts, its hooks and status line report in, the screen
 // renders, and it ends cleanly. Uses a throwaway state folder, so it never
-// touches running sessions. Without --turn, --resume or --scenario no prompt is sent.
+// touches running sessions. Without --turn, --resume, --scenario or --background no prompt is sent.
 //   pnpm build && pnpm canary:claude              start, observe, end
 //   pnpm canary:claude -- --turn                  also one short prompt (haiku, low effort)
 //   pnpm canary:claude -- --resume                that prompt, then the session is ended and started
@@ -12,7 +12,10 @@
 //       sub-agents (two in parallel, one nested), /clear, then work delegated to a second session
 //       and its answer handed back; the status and agent tree after each, and the conversation
 //       views read from the real transcripts.
-//       Runs in a folder of its own in the temp folder; the first run tells Claude to trust it.
+//   pnpm canary:claude -- --background            short prompts (haiku, low effort): a shell command in
+//       the background until its end is reported, a prompt scheduled with /loop until it has run once
+//       and is deleted, the skills listed in the transcript, the scheduled prompt in the conversation.
+//       These run in a folder of their own in the temp folder; the first run tells Claude to trust it.
 import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -28,7 +31,8 @@ const WebSocket = serverRequire('ws');
 const { Terminal } = serverRequire('@xterm/headless');
 const scenario = process.argv.includes('--scenario');
 const withResume = !scenario && process.argv.includes('--resume');
-const withTurn = scenario || withResume || process.argv.includes('--turn');
+const background = !scenario && !withResume && process.argv.includes('--background');
+const withTurn = scenario || withResume || background || process.argv.includes('--turn');
 // The long form of the temp folder (Windows may give 8.3 names), as a user's folder would be.
 const tmp = realpathSync.native(os.tmpdir());
 const home = mkdtempSync(path.join(tmp, 'agenthouse-canary-'));
@@ -318,6 +322,47 @@ async function runAgents(id) {
 }
 
 /**
+ * What a session leaves running and sets for later (haiku): a shell command in the background until
+ * its end is reported, a prompt scheduled with /loop until it has run once and is deleted, the skills
+ * its transcript lists, and the scheduled prompt in the conversation view.
+ */
+async function runBackground(id) {
+  const idle = (s) => s.status.value === 'idle';
+  // Each of these turns is followed by one nobody typed: settled once idle for a moment.
+  const rested = (s) => idle(s) && Date.now() - s.status.at > 2000;
+  const view = conversation(id);
+  try {
+    await turn(id, 'background: a command is started in the background and the turn ends', 'Run this exact command with the Bash tool, with run_in_background set to true: sleep 8; echo canary-done    Then reply with exactly: started', idle);
+    let now = await waitFor(id, (s) => s.tasks.length === 1, 5000);
+    const started = now?.tasks[0];
+    check(started?.type === 'shell' && /sleep 8/.test(started.command ?? ''), 'background: it is listed under the session', JSON.stringify(now?.tasks));
+    now = await waitFor(id, (s) => s.tasks.length === 1 && s.tasks[0].state !== 'running' && rested(s), 60_000);
+    check(now?.tasks[0]?.state === 'done' && now.tasks[0].exitCode === 0, 'background: done once its end is reported, with its exit code', JSON.stringify(now?.tasks[0]));
+
+    await turn(id, 'schedule: /loop 1m sets a prompt for every minute', '/loop 1m Reply with exactly the word: tick', idle);
+    now = await waitFor(id, (s) => s.schedules.length === 1, 5000);
+    const job = now?.schedules[0];
+    check(job?.schedule === '*/1 * * * *' && job.recurring === true && job.nextAt > Date.now(), 'schedule: listed with its schedule and its next run', JSON.stringify(job));
+    check(now?.invoked.includes('loop') === true, 'schedule: /loop is remembered as a command the session ran', JSON.stringify(now?.invoked));
+    now = await waitFor(id, (s) => s.schedules[0]?.runs >= 1 && rested(s), 120_000);
+    check(now?.schedules[0]?.runs >= 1 && now.schedules[0].lastAt !== null, 'schedule: its run is counted', JSON.stringify(now?.schedules[0]));
+    await turn(id, 'schedule: a turn that deletes it', `Delete the scheduled job with CronDelete (its id is ${job?.id}), then reply with exactly: deleted`, idle);
+    now = await waitFor(id, (s) => s.schedules.length === 0, 10_000);
+    check(now?.schedules.length === 0, 'schedule: gone once deleted', JSON.stringify(now?.schedules));
+
+    const skills = (await api('GET', `/api/sessions/${id}/skills`)).json?.skills ?? [];
+    const sources = [...new Set(skills.map((skill) => skill.source))].join(', ');
+    check(skills.some((skill) => skill.name === 'loop' && skill.used), 'skills: listed from the transcript, with /loop marked as used', `${skills.length} skills (${sources})`);
+
+    await sleep(2000);
+    const prompts = view.entries().filter((e) => e.kind === 'prompt');
+    check(prompts.some((e) => e.scheduled === true && /tick/.test(e.text)), 'conversation: the scheduled prompt shows as what its turn answers', prompts.map((e) => `${e.scheduled ? 'scheduled:' : ''}${JSON.stringify(e.text.slice(0, 30))}`).join(' '));
+  } finally {
+    view.close();
+  }
+}
+
+/**
  * An ended session started again: Claude goes on with the conversation under the id it had, in the
  * same transcript, and knows what was said before. The session's one reply so far is "pong".
  */
@@ -350,7 +395,7 @@ async function runResume(id) {
 let session = null;
 try {
   // The scenario and the resumed conversation stay out of this repository's own Claude history.
-  const apart = scenario || withResume;
+  const apart = scenario || withResume || background;
   if (apart) mkdirSync(work, { recursive: true });
   if (scenario) for (const name of readdirSync(work)) rmSync(path.join(work, name), { recursive: true, force: true });
   const options = {
@@ -419,6 +464,8 @@ try {
     }
     console.log(`INFO  conversation: ${turns.length} turns, ${JSON.stringify(kinds)}`);
     view.close();
+  } else if (background) {
+    await runBackground(id);
   } else if (withTurn) {
     await turn(id, 'a prompt: working, then idle', 'Reply with exactly the word: pong', (s) => s.status.value === 'idle');
   }

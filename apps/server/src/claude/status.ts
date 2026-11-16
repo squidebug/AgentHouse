@@ -21,8 +21,12 @@ export interface HookEvent {
   agent_id?: unknown;
   agent_type?: unknown;
   agent_transcript_path?: unknown;
-  /** Stop: the sub-agents still running, `{ id, type, status, description, agent_type }`. */
+  /** Stop: what still runs in the background, `{ id, type, status, description }` plus `agent_type` (a sub-agent) or `command` (a shell). */
   background_tasks?: unknown;
+  /** Stop: the prompts scheduled for later, `{ id, schedule, recurring, prompt }`. */
+  session_crons?: unknown;
+  /** UserPromptSubmit: what was typed, or what the CLI gave itself (a task's notification, a scheduled prompt). */
+  prompt?: unknown;
 }
 
 // A tool name, an error kind, an id: short by nature. Whatever holds a session's hook token can
