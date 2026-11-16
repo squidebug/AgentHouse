@@ -52,6 +52,8 @@ AgentHouse is three programs plus a browser app. Know which one a file runs in b
 - Start programs by absolute path, or after a PATH search that skips empty and relative entries: Windows runs a same-named program from the current folder first.
 - Security problems that plain CLI use also has are environment facts, not AgentHouse bugs; AgentHouse must just not make them worse.
 - UI text lives in `apps/web/src/strings.ts`: short Korean labels, no explanatory or self-referential sentences. Show status, title and model by default; everything else behind the expand toggle.
+- Looks come from `apps/web/src/theme/tokens.ts`. Height is a tone and a shadow: the page (`bg`; the bar and the tree lie on it), a card (`surface`, `shadow1`: a pane, the row of what a pane shows), a card in use (`shadow2`: the active pane, the open composer), what floats (`raised`, `shadow3`: menus, popovers, dialogs); what is set into a card (a terminal, a conversation) has an inset edge (`well`). Under the pointer: the `hover` veil on what has no fill, the stronger fill on a chip, a step up for a filled button. What is shown or chosen is told by its face and height, not by a tint: color is kept for status. Changes are timed by `motion`, which stands still when the system asks for less of it. Type is 12, 13, 14 or 18, in 400, 500 or 600.
+- A change of looks never changes the size of a pane or its terminal, which would resize the PTY: height is a shadow, not a border. `pnpm ui:check` prints the pane's box and the terminal's size to compare.
 - Dependencies must pass `pnpm licenses:check`; never copy code from AGPL projects.
 - No real transcripts, company data or personal paths in the repository.
 - Commits: one logical change each; no `Co-Authored-By` trailers.
