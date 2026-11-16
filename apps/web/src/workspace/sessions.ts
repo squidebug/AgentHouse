@@ -3,6 +3,13 @@
 import type { SessionInfo } from '@agenthouse/protocol';
 
 /**
+ * An ended session its CLI can start again where the conversation stopped: Claude Code keeps a
+ * conversation under an id (`--resume`). Codex has a way of its own, not looked into yet.
+ */
+export const canResume = (session: Pick<SessionInfo, 'state' | 'vendor' | 'transcripts'>): boolean =>
+  session.state === 'exited' && session.vendor !== 'codex' && Boolean(session.transcripts.at(-1)?.vendorSessionId);
+
+/**
  * The new list, with every session that did not change as the object it was
  * before (and the list itself, when none did): what draws one session, or
  * depends on it, can then tell at a glance that it has nothing to do.

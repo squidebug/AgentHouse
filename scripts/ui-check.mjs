@@ -3,7 +3,8 @@
 // with the fake agent: the login, a session in a pane, a message through the
 // composer and its turn in the pane's conversation view, an ended session that
 // an earlier session host left in sessions.json (ui-sample.mjs), sub-agents,
-// groups and delegation. Light and dark screenshots go to the output folder.
+// groups, delegation, and a session ended and started again where it stopped.
+// Light and dark screenshots go to the output folder.
 // Uses throwaway state and Claude config folders, so it never touches real
 // sessions or ~/.claude.
 //   pnpm build && pnpm ui:check [-- --out <folder>] [-- --headed]
@@ -442,6 +443,20 @@ try {
   await page.getByRole('dialog').getByRole('button', { name: '세션 종료' }).click();
   await row('ui-helper').getByRole('img', { name: /^종료/ }).waitFor({ timeout: 10_000 });
   check(true, 'a session ended from AgentHouse stays listed, ended');
+
+  // And starts again from there: the same row, running, with the conversation it had.
+  const again = tree.getByRole('button', { name: '이어서 열기' });
+  await again.waitFor({ timeout: 5000 });
+  await settle();
+  await page.screenshot({ path: path.join(out, 'resume-light.png') });
+  await again.click();
+  await ready('ui-helper');
+  const helper = page.getByRole('region', { name: 'ui-helper', exact: true });
+  await helper.locator('.xterm-screen').waitFor({ timeout: 10_000 });
+  check((await tree.getByRole('button', { name: 'ui-helper 열기', exact: true }).count()) === 1, 'an ended session starts again in its own row, and its terminal shows in a pane');
+  await helper.getByRole('button', { name: '대화', exact: true }).click();
+  await helper.getByText('fake answer: fake answer: please outline the plan', { exact: true }).first().waitFor({ timeout: 10_000 });
+  check(true, 'with the conversation it had before it ended');
 
   check(errors.length === 0, 'no errors in the browser console', errors.join(' | '));
   console.log(`INFO  screenshots: ${out}`);

@@ -5,6 +5,7 @@ import { t } from '../strings';
 import { motion, v } from '../theme/tokens';
 import { agentRows, SHOWN_FINISHED } from '../workspace/agents';
 import type { Dnd } from '../workspace/dnd';
+import { canResume } from '../workspace/sessions';
 import type { Action, WorkspaceState } from '../workspace/state';
 import { sessionTree, type SessionNode } from '../workspace/tree';
 import { AgentSubtitle, agentDetails, agentTitle, Details, SessionSubtitle, sessionDetails } from './Details';
@@ -168,13 +169,14 @@ interface BranchProps {
   dispatch: (action: Action) => void;
   dnd: Dnd;
   onEnd: (id: string) => void;
+  onResume: (id: string) => void;
   onRemove: (id: string) => void;
   onLink: Props['onLink'];
 }
 
 /** A session row, what is under it (its sub-agents, the sessions placed under it), and the choice when one is dropped on it. */
 function SessionBranch(props: BranchProps) {
-  const { node, depth, tops, shown, byId, state, dispatch, dnd, onEnd, onRemove, onLink } = props;
+  const { node, depth, tops, shown, byId, state, dispatch, dnd, onEnd, onResume, onRemove, onLink } = props;
   const { session, link } = node;
   const open = Boolean(state.rowOpen[session.id]);
   const dragged = dnd.dragging?.kind === 'session' && dnd.dragging.id === session.id;
@@ -234,6 +236,11 @@ function SessionBranch(props: BranchProps) {
       </Box>
       <Collapse in={open} unmountOnExit>
         <Details page items={details} inset={22 + depth * INDENT}>
+          {canResume(session) && (
+            <Button size="small" color="inherit" onClick={() => onResume(session.id)} sx={smallButton}>
+              {t.resumeSession}
+            </Button>
+          )}
           {link ? (
             <Button size="small" color="inherit" onClick={() => onLink(session.id, null)} sx={smallButton}>
               {t.toTop}
@@ -247,14 +254,13 @@ function SessionBranch(props: BranchProps) {
               </>
             )
           )}
-          {/* What ends or removes the session stands apart, at the other end of the line. */}
-          <Box sx={{ flex: 1 }} />
+          {/* What ends or removes the session stands apart, at the other end of the line: of a line of its own when the others fill one. */}
           {session.state === 'running' ? (
-            <Button size="small" color="inherit" onClick={() => onEnd(session.id)} sx={{ ...smallButton, color: v.error }}>
+            <Button size="small" color="inherit" onClick={() => onEnd(session.id)} sx={{ ...smallButton, ml: 'auto', color: v.error }}>
               {t.endSession}
             </Button>
           ) : (
-            <Button size="small" color="inherit" onClick={() => onRemove(session.id)} sx={smallButton}>
+            <Button size="small" color="inherit" onClick={() => onRemove(session.id)} sx={{ ...smallButton, ml: 'auto' }}>
               {t.removeSession}
             </Button>
           )}
@@ -305,6 +311,8 @@ interface Props {
   dnd: Dnd;
   onNew: () => void;
   onEnd: (id: string) => void;
+  /** Starts an ended session again where its conversation stopped. */
+  onResume: (id: string) => void;
   onRemove: (id: string) => void;
   /** Takes these ended sessions off the list at once (after asking). */
   onRemoveEnded: (sessions: SessionInfo[]) => void;
@@ -315,14 +323,14 @@ interface Props {
 // The row that folds the ended sessions away, in `rowOpen`.
 const ENDED_KEY = '#ended';
 
-export function SessionTree({ sessions, links, state, dispatch, dnd, onNew, onEnd, onRemove, onRemoveEnded, onLink }: Props) {
+export function SessionTree({ sessions, links, state, dispatch, dnd, onNew, onEnd, onResume, onRemove, onRemoveEnded, onLink }: Props) {
   const groups = sessionTree(sessions, links);
   const shown = new Set(state.panes.filter((p) => !p.agentId).map((p) => p.sessionId));
   const byId = new Map(sessions.map((s) => [s.id, s]));
   const tops = groups.flatMap((g) => g.nodes.map((n) => n.session));
   const root = { type: 'root' as const };
   const toTop = dnd.canDrop(root);
-  const branch = { tops, shown, byId, state, dispatch, dnd, onEnd, onRemove, onLink };
+  const branch = { tops, shown, byId, state, dispatch, dnd, onEnd, onResume, onRemove, onLink };
   // Ended sessions stay listed until removed and would bury the running ones: those at the top with
   // nothing under them and no pane showing them fold into one row, like finished sub-agents.
   const folds = (node: SessionNode) => node.session.state === 'exited' && !node.children.length && !shown.has(node.session.id);

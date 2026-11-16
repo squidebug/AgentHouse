@@ -152,6 +152,13 @@ export function App() {
           dnd={dnd}
           onNew={() => setLaunchOpen(true)}
           onEnd={(id) => setEnding(byId.get(id) ?? null)}
+          // The same session comes back, shown like one just started: in the pane that has it, else in a new one.
+          onResume={(id) =>
+            api
+              .resume(id, resolved)
+              .then(() => dispatch({ type: 'openNew', sessionId: id }))
+              .catch(failed(t.failure.resume))
+          }
           onRemove={(id) => api.remove(id).catch(failed(t.failure.remove))}
           onRemoveEnded={(list) => setRemoving({ open: true, list })}
         />

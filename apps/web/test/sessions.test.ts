@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { SessionInfo } from '@agenthouse/protocol';
-import { keepUnchanged } from '../src/workspace/sessions';
+import { canResume, keepUnchanged } from '../src/workspace/sessions';
 
 const session = (id: string, extra: object = {}) =>
   ({ id, title: id, state: 'running', status: { value: 'idle', reason: null, tool: null, error: false, at: 1 }, telemetry: { costUsd: 0.1 }, agents: [], ...extra }) as unknown as SessionInfo;
@@ -21,6 +21,16 @@ test('only the session that changed is a new object', () => {
   assert.notEqual(next[1], before[1]);
   assert.equal(next[1]?.telemetry.costUsd, 0.2);
   assert.equal(next[2], before[2]);
+});
+
+test('an ended Claude session with a conversation can be started again; a running one, Codex or one without cannot', () => {
+  const talk = [{ vendorSessionId: 'first', path: 'a.jsonl', since: 1 }, { vendorSessionId: 'after-clear', path: 'b.jsonl', since: 2 }];
+  assert.equal(canResume({ state: 'exited', vendor: 'claude', transcripts: talk }), true);
+  assert.equal(canResume({ state: 'running', vendor: 'claude', transcripts: talk }), false);
+  assert.equal(canResume({ state: 'exited', vendor: 'codex', transcripts: talk }), false);
+  assert.equal(canResume({ state: 'exited', vendor: 'claude', transcripts: [] }), false);
+  // The conversation it ended in is the one that counts.
+  assert.equal(canResume({ state: 'exited', vendor: 'claude', transcripts: [...talk, { vendorSessionId: null, path: 'c.jsonl', since: 3 }] }), false);
 });
 
 test('sessions added, removed or in another order make a new list of the same objects', () => {

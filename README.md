@@ -50,6 +50,7 @@ pnpm dev:stop     # ends the dev sessions and the dev session host
 - **Terminal keys**: as in Windows Terminal, `Ctrl+C` copies a selection (without one it interrupts, as always) and `Ctrl+V` pastes; `Ctrl+Shift+C`/`V` too.
 - **Details**: the chevron on a row or pane shows CLI version, model, effort, context use, folder and PID.
 - **Ending**: 세션 종료 in a session's details ends its CLI; the session stays listed, ended, with its conversation, like one that quit by itself. Ended sessions fold into one row at the end of the tree ("종료 N"; one shown in a pane or with sessions under it stays where it is). Open the row to see them, 목록에서 제거 in a session's details takes it off the list, and 모두 제거 takes all the folded ones off at once.
+- **Resuming**: 이어서 열기 in an ended Claude Code session's details starts it again in its folder, where the conversation stopped (`claude --resume`). It comes back as the same session: its place in the tree, its links and the panes showing it stay. Sessions that ended with the session host (a reboot, `pnpm stop`) are resumed the same way. A session whose conversation was never saved, or whose folder is gone, cannot be resumed.
 
 ## Checks
 

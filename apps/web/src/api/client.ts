@@ -13,6 +13,7 @@ import {
   type LinkKind,
   type SessionInfo,
   type SessionLink,
+  type ThemeMode,
   type Vendor,
 } from '@agenthouse/protocol';
 import { authToken, requireLogin } from './auth';
@@ -57,6 +58,8 @@ export const api = {
   launch: (opts: LaunchOptions) => call<SessionInfo>('POST', '/api/sessions', opts),
   /** Ends the CLI; the session stays listed, ended. */
   end: (id: string) => call<unknown>('POST', `/api/sessions/${encodeURIComponent(id)}/end`),
+  /** Starts an ended session again where its conversation stopped: the same session, running, in the app's theme now. */
+  resume: (id: string, theme: ThemeMode) => call<SessionInfo>('POST', `/api/sessions/${encodeURIComponent(id)}/resume`, { theme }),
   remove: (id: string) => call<unknown>('DELETE', `/api/sessions/${encodeURIComponent(id)}`),
   compose: (id: string, req: ComposeRequest) => call<ComposeResult>('POST', `/api/sessions/${encodeURIComponent(id)}/compose`, req),
   /** Places a session under another one (grouping), or back at the top with null. */
