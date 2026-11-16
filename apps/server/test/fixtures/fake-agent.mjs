@@ -13,7 +13,8 @@
 // starts over.
 // "agents" starts sub-agents the way Claude Code 2.1.322 does (two in the
 // background, one of which starts a third, each reporting back), and
-// "agentask" one whose tool waits for approval for a moment.
+// "agentask" one whose tool waits for approval for a moment. "approval" makes
+// the main conversation's own tool wait for approval until a key is pressed.
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
@@ -197,9 +198,32 @@ async function runAgentAsks(prompt) {
   finish(writer, null);
 }
 
+// The dialog that is up: whatever is typed next answers it.
+let answered = null;
+
+async function runAsks(prompt) {
+  hook('UserPromptSubmit', { prompt });
+  write({ type: 'user', message: { role: 'user', content: prompt }, origin: { kind: 'human' } });
+  await pause(60);
+  const use = 'toolu_' + shortId();
+  const input = { file_path: path.join(process.cwd(), 'notes.txt'), content: 'fake notes' };
+  hook('PreToolUse', { tool_name: 'Write', tool_use_id: use });
+  reply({ type: 'tool_use', id: use, name: 'Write', input });
+  hook('PermissionRequest', { tool_name: 'Write' });
+  await new Promise((resolve) => {
+    answered = resolve;
+  });
+  write({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: use, content: 'File created', is_error: false }] }, toolUseResult: { type: 'create', filePath: input.file_path, content: input.content } });
+  hook('PostToolUse', { tool_name: 'Write', tool_use_id: use });
+  reply({ type: 'text', text: `fake answer: ${prompt}` });
+  write({ type: 'system', subtype: 'turn_duration', durationMs: 120 });
+  hook('Stop');
+}
+
 function submit(prompt) {
   if (prompt.includes('agentask')) return void runAgentAsks(prompt);
   if (prompt.includes('agents')) return void runAgents(prompt);
+  if (prompt.includes('approval')) return void runAsks(prompt);
   if (prompt === '/clear') {
     hook('SessionEnd', { reason: 'clear' });
     sessionId = randomUUID();
@@ -265,15 +289,22 @@ process.stdin.on('data', (chunk) => {
   });
   if (!rest) return;
   out(`IN ${JSON.stringify(rest)}\r\n`);
-  // Enter is a \r outside a paste: a pasted line break arrives as \r too. A long paste may reach us
-  // in pieces, its end marker split between two reads, and the Enter after it in the same read.
-  typed += rest;
-  const pasting = typed.lastIndexOf('\x1b[200~') > typed.lastIndexOf('\x1b[201~');
-  if (!pasting && typed.endsWith('\r')) {
-    // Claude Code keeps a pasted line break as \n.
-    const prompt = typed.slice(0, -1).replace(/\x1b\[20[01]~/g, '').replace(/\r/g, '\n').trim();
-    typed = '';
-    if (prompt) submit(prompt);
+  if (answered) {
+    // A dialog takes the keys: they answer it, and are no prompt.
+    const go = answered;
+    answered = null;
+    go();
+  } else {
+    // Enter is a \r outside a paste: a pasted line break arrives as \r too. A long paste may reach us
+    // in pieces, its end marker split between two reads, and the Enter after it in the same read.
+    typed += rest;
+    const pasting = typed.lastIndexOf('\x1b[200~') > typed.lastIndexOf('\x1b[201~');
+    if (!pasting && typed.endsWith('\r')) {
+      // Claude Code keeps a pasted line break as \n.
+      const prompt = typed.slice(0, -1).replace(/\x1b\[20[01]~/g, '').replace(/\r/g, '\n').trim();
+      typed = '';
+      if (prompt) submit(prompt);
+    }
   }
   // A burst far larger than any viewer may fall behind by.
   if (rest.includes('flood')) {

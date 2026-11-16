@@ -66,6 +66,12 @@ export const PulseIcon = (p: IconProps) => (
   </Svg>
 );
 
+export const BellIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M12 3.5 V5.5 M6.5 17.5 V11 A5.5 5.5 0 0 1 17.5 11 V17.5 M4.5 17.5 H19.5 M10.3 20.3 A2 2 0 0 0 13.7 20.3" />
+  </Svg>
+);
+
 export const CopyIcon = (p: IconProps) => (
   <Svg {...p}>
     <rect x="8" y="8" width="12" height="12" rx="2.5" />

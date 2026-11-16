@@ -1,7 +1,7 @@
 import { Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, Snackbar, Typography } from '@mui/material';
 import { useColorScheme } from '@mui/material/styles';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import { isAsking, type DelegationInfo, type SessionInfo, type ThemeMode } from '@agenthouse/protocol';
+import { isAsking, type DelegationInfo, type SessionInfo, type StatusValue, type ThemeMode } from '@agenthouse/protocol';
 import { api, RequestError } from './api/client';
 import { useEnv, useSessions } from './api/hooks';
 import { Composer } from './components/Composer';
@@ -14,6 +14,7 @@ import { TopBar } from './components/TopBar';
 import { t } from './strings';
 import { v } from './theme/tokens';
 import { makeDnd } from './workspace/dnd';
+import { finished, loadNotifyDone, saveNotifyDone, statusesOf } from './workspace/notify';
 import { delegatesOf, parentsOf } from './workspace/tree';
 import { isModeShortcut, loadWorkspace, paneModes, reducer, saveWorkspace, shownMode, switchedMode, type Action, type DropContext, type WorkspaceState } from './workspace/state';
 
@@ -21,7 +22,9 @@ export function App() {
   const { mode, systemMode, setMode } = useColorScheme();
   const resolved: ThemeMode = (mode === 'system' ? systemMode : mode) === 'dark' ? 'dark' : 'light';
   const { env, loading: envLoading, refresh: refreshEnv } = useEnv();
-  const { sessions, limits, links, delegations, connected, loaded } = useSessions();
+  // What to do with every session list as it arrives; set further down, once what it needs is there.
+  const arrived = useRef<(list: SessionInfo[]) => void>(() => {});
+  const { sessions, limits, links, delegations, connected, loaded } = useSessions((list) => arrived.current(list));
 
   // Sessions launched from this tab, until the live list includes them.
   const [launched, setLaunched] = useState<Record<string, SessionInfo>>({});
@@ -66,26 +69,45 @@ export function App() {
     dispatch({ type: 'sync', sessionIds: [...byId.keys()], runningIds: [...byId.values()].filter((s) => s.state === 'running').map((s) => s.id) });
   }, [byId, loaded]);
 
-  // Sessions waiting for an approval or an answer: counted in the tab title, and
+  // Sessions waiting for an approval or an answer: counted in the tab title and on the bell, and
   // announced by a notification while the tab is in the background.
   const asking = useMemo(() => sessions.filter((s) => isAsking(s.status.value)), [sessions]);
   useEffect(() => {
     document.title = asking.length ? `(${asking.length}) ${t.appName}` : t.appName;
   }, [asking.length]);
+  // One notification per session: the next takes the place of the last one, closed first so that it shows again.
+  const notes = useRef(new Map<string, Notification>());
+  const announce = useCallback((session: SessionInfo, body: string) => {
+    if (document.visibilityState === 'visible' || typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+    notes.current.get(session.id)?.close();
+    const note = new Notification(session.title, { body, tag: session.id });
+    notes.current.set(session.id, note);
+    note.onclick = () => {
+      window.focus();
+      dispatch({ type: 'open', sessionId: session.id });
+      note.close();
+    };
+  }, []);
   const announced = useRef(new Map<string, number>());
   useEffect(() => {
     for (const session of asking) {
       if (announced.current.get(session.id) === session.status.at) continue;
       announced.current.set(session.id, session.status.at);
-      if (document.visibilityState === 'visible' || typeof Notification === 'undefined' || Notification.permission !== 'granted') continue;
-      const note = new Notification(session.title, { body: statusText(session.status), tag: session.id });
-      note.onclick = () => {
-        window.focus();
-        dispatch({ type: 'open', sessionId: session.id });
-        note.close();
-      };
+      announce(session, statusText(session.status));
     }
-  }, [asking]);
+  }, [asking, announce]);
+
+  // Finished work is announced the same way, for a user who asked for that (the bell's switch). Told
+  // from one list to the next as they arrive, not from what is drawn, which may skip a list.
+  const [notifyDone, setNotifyDone] = useState(() => loadNotifyDone());
+  const statuses = useRef(new Map<string, StatusValue>());
+  arrived.current = (list) => {
+    const done = finished(statuses.current, list);
+    statuses.current = statusesOf(list);
+    if (!notifyDone) return;
+    // How it ended, when not simply done: 오류 · rate_limit, 대기 · 중단됨.
+    for (const session of done) announce(session, session.status.error || session.status.reason ? statusText(session.status) : t.workDone);
+  };
 
   // Ctrl+`: the active pane between its terminal and its conversation, from anywhere on the page.
   // Taken before the terminal sees it, so it never reaches the CLI.
@@ -134,7 +156,21 @@ export function App() {
       // own, so a long tree never takes the panes off the screen. Narrower, it is a page that scrolls.
       sx={{ minHeight: '100vh', height: { md: '100vh' }, overflow: { md: 'hidden' }, display: 'flex', flexDirection: 'column', bgcolor: v.bg, color: v.on }}
     >
-      <TopBar limits={limits} env={env} envLoading={envLoading} refreshEnv={() => refreshEnv().catch(() => {})} mode={resolved} onToggleMode={() => setMode(resolved === 'dark' ? 'light' : 'dark')} />
+      <TopBar
+        limits={limits}
+        env={env}
+        envLoading={envLoading}
+        refreshEnv={() => refreshEnv().catch(() => {})}
+        mode={resolved}
+        onToggleMode={() => setMode(resolved === 'dark' ? 'light' : 'dark')}
+        waiting={asking}
+        onOpenSession={(sessionId) => dispatch({ type: 'open', sessionId })}
+        notifyDone={notifyDone}
+        onNotifyDone={(on) => {
+          setNotifyDone(on);
+          saveNotifyDone(on);
+        }}
+      />
 
       {(!connected || noCli) && (
         <Box role="status" sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1.5, m: '12px 16px 0', p: '10px 14px', borderRadius: '12px', bgcolor: v.warnContainer, color: v.onWarnContainer }}>

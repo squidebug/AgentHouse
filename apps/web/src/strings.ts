@@ -34,6 +34,14 @@ export const t = {
   exited: '종료',
   lightMode: '라이트 모드',
   darkMode: '다크 모드',
+  notifications: '알림',
+  // Sessions that wait for an approval or an answer, as the bell counts and lists them.
+  waiting: '승인·입력 대기',
+  waitingCount: (n: number) => `승인·입력 대기 ${n}`,
+  notifyDone: '완료 알림',
+  notifyBlocked: '브라우저 알림 차단됨',
+  // What a notification says of a session whose work ended.
+  workDone: '작업 완료',
   environment: '환경 점검',
   recheck: '다시 확인',
   copy: '복사',

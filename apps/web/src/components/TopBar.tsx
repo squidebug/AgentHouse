@@ -1,12 +1,13 @@
 import { Badge, Box, Button, IconButton, Popover, Tooltip, Typography } from '@mui/material';
 import { useState } from 'react';
-import type { AccountLimits, EnvReport, ThemeMode, Vendor } from '@agenthouse/protocol';
+import type { AccountLimits, EnvReport, SessionInfo, ThemeMode, Vendor } from '@agenthouse/protocol';
 import { t } from '../strings';
 import { v } from '../theme/tokens';
 import { CliDialog, CliRows } from './CliChoice';
 import { CopyCommand } from './CopyCommand';
 import { MoonIcon, PulseIcon, SunIcon } from './icons';
 import { LimitsChip } from './LimitsChip';
+import { Notifications } from './Notifications';
 
 interface Props {
   limits: AccountLimits[];
@@ -15,11 +16,16 @@ interface Props {
   refreshEnv: () => void;
   mode: ThemeMode;
   onToggleMode: () => void;
+  /** Sessions waiting for an approval or an answer, and how to show one. */
+  waiting: SessionInfo[];
+  onOpenSession: (sessionId: string) => void;
+  notifyDone: boolean;
+  onNotifyDone: (on: boolean) => void;
 }
 
 const LEVEL_COLOR = { error: v.error, warn: v.warn, info: v.on2 } as const;
 
-export function TopBar({ limits, env, envLoading, refreshEnv, mode, onToggleMode }: Props) {
+export function TopBar({ limits, env, envLoading, refreshEnv, mode, onToggleMode, waiting, onOpenSession, notifyDone, onNotifyDone }: Props) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const [choosing, setChoosing] = useState<Vendor | null>(null);
   const messages = env?.messages ?? [];
@@ -33,6 +39,7 @@ export function TopBar({ limits, env, envLoading, refreshEnv, mode, onToggleMode
       </Typography>
       <Box sx={{ flex: 1 }} />
       <LimitsChip limits={limits} />
+      <Notifications waiting={waiting} onOpen={onOpenSession} notifyDone={notifyDone} onNotifyDone={onNotifyDone} />
       <Tooltip title={t.environment}>
         <IconButton aria-label={t.environment} onClick={(event) => setAnchor(event.currentTarget)} sx={{ width: 40, height: 40 }}>
           <Badge variant="dot" color="warning" invisible={!attention}>

@@ -1,10 +1,14 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AccountLimits, DelegationInfo, EnvReport, EventServerMessage, SessionInfo, SessionLink } from '@agenthouse/protocol';
 import { keepUnchanged } from '../workspace/sessions';
 import { api, openSocket } from './client';
 
-/** Live sessions, plan usage and session links from /ws/events, reconnecting with backoff while the server restarts. */
-export function useSessions(): {
+/**
+ * Live sessions, plan usage and session links from /ws/events, reconnecting with backoff while the server restarts.
+ * `onSessions` is given every list as it arrives, in order: lists that arrive together are drawn as
+ * one, so what is drawn can skip a state a session was in for a moment.
+ */
+export function useSessions(onSessions?: (sessions: SessionInfo[]) => void): {
   sessions: SessionInfo[];
   limits: AccountLimits[];
   links: SessionLink[];
@@ -12,6 +16,8 @@ export function useSessions(): {
   connected: boolean;
   loaded: boolean;
 } {
+  const arrived = useRef(onSessions);
+  arrived.current = onSessions;
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [limits, setLimits] = useState<AccountLimits[]>([]);
   const [links, setLinks] = useState<SessionLink[]>([]);
@@ -34,6 +40,7 @@ export function useSessions(): {
       ws.onmessage = (event) => {
         const message = JSON.parse(String(event.data)) as EventServerMessage;
         if (message.type === 'sessions') {
+          arrived.current?.(message.sessions);
           setSessions((current) => keepUnchanged(current, message.sessions));
           setLoaded(true);
         } else if (message.type === 'limits') {

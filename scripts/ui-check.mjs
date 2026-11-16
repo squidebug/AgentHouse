@@ -377,6 +377,71 @@ try {
   await page.getByRole('button', { name: '최상위로' }).click();
   await row('ui-agents').getByRole('img', { name: '묶음' }).waitFor({ state: 'detached', timeout: 5000 });
 
+  // The bell at the top: how many sessions wait for the user, with the list of them, and whether
+  // finished work is announced too. A stand-in records what the page hands the browser's
+  // notifications, and the tab passes for one in the background.
+  await page.evaluate(() => {
+    window.__notes = [];
+    window.Notification = class {
+      static permission = 'granted';
+      static requestPermission = async () => 'granted';
+      constructor(title, options) {
+        window.__notes.push({ title, body: options?.body });
+      }
+      close() {}
+    };
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+  });
+  const announced = (body) => page.evaluate((text) => window.__notes.filter((note) => note.body === text).map((note) => note.title), body);
+  const authed = { authorization: `Bearer ${key}`, origin, 'content-type': 'application/json' };
+  const named = async (title) => (await (await fetch(`${origin}/api/sessions`, { headers: authed })).json()).find((session) => session.title === title);
+  // To a session no pane shows, as the composer would send it.
+  const tell = async (title, text) => fetch(`${origin}/api/sessions/${(await named(title)).id}/compose`, { method: 'POST', headers: authed, body: JSON.stringify({ text }) });
+  const turnEnded = async (title, since) => {
+    for (let tries = 0; tries < 100; tries += 1) {
+      const { status } = await named(title);
+      if (status.value === 'idle' && status.at >= since) return true;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    return false;
+  };
+  const asked = Date.now();
+  await tell('ui-check', 'one more answer');
+  await turnEnded('ui-check', asked);
+  await page.waitForTimeout(500);
+  check((await announced('작업 완료')).length === 0, 'finished work is not announced unless asked for');
+  const bell = page.getByRole('button', { name: /^알림/ });
+  await bell.click();
+  const doneSwitch = page.getByRole('switch', { name: '완료 알림' });
+  check((await page.getByText('없음', { exact: true }).isVisible()) && !(await doneSwitch.isChecked()), 'the bell opens on nobody waiting, and the switch for finished work off');
+  await doneSwitch.check();
+  await page.keyboard.press('Escape');
+  await tell('ui-check', 'this needs approval');
+  await page.getByRole('button', { name: '알림 · 승인·입력 대기 1' }).waitFor({ timeout: 10_000 });
+  await bell.click();
+  const waitingRow = page.getByRole('menuitem', { name: /ui-check/ });
+  check(await waitingRow.getByText('승인 대기 · Write', { exact: false }).isVisible(), 'the bell counts a session that waits for approval, and lists it');
+  await settle();
+  await page.screenshot({ path: path.join(out, 'notifications-dark.png') });
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: '라이트 모드' }).click();
+  await bell.click();
+  await settle();
+  await page.screenshot({ path: path.join(out, 'notifications-light.png') });
+  await waitingRow.click();
+  const asker = page.getByRole('region', { name: 'ui-check', exact: true });
+  await asker.locator('.xterm-screen').waitFor({ timeout: 10_000 });
+  check(true, 'a click on it shows that session');
+  await page.getByRole('button', { name: '다크 모드' }).click();
+  // Answered in its terminal, the turn goes on and ends.
+  await asker.locator('.xterm-screen').click();
+  await page.keyboard.press('Enter');
+  await page.getByRole('button', { name: '알림', exact: true }).waitFor({ timeout: 10_000 });
+  await page.waitForFunction(() => window.__notes.some((note) => note.body === '작업 완료'), null, { timeout: 10_000 }).catch(() => {});
+  check((await announced('승인 대기 · Write')).includes('ui-check'), 'a session that asks is announced while the tab is in the background');
+  check((await announced('작업 완료')).includes('ui-check'), 'and its finished work too, with the switch on', JSON.stringify(await page.evaluate(() => window.__notes)));
+  await page.evaluate(() => delete document.visibilityState);
+
   // Delegation: a session works for another; a piece of the lead's conversation goes to it, and its answer comes back.
   for (const title of ['ui-lead', 'ui-helper']) {
     await fetch(`${origin}/api/sessions`, {
