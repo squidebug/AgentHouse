@@ -5,9 +5,9 @@ import { api } from '../api/client';
 import { t } from '../strings';
 import { motion, v } from '../theme/tokens';
 import type { Dnd } from '../workspace/dnd';
-import { composerOpen, summarizeSend } from '../workspace/compose';
+import { composerOpen, summarizeSend, type SendResult } from '../workspace/compose';
 import { paneModes, shownMode, type Action, type WorkspaceState } from '../workspace/state';
-import { CloseIcon, SendIcon } from './icons';
+import { CloseIcon, DelegateIcon, SendIcon } from './icons';
 import { StatusIcon } from './StatusIcon';
 
 // Folding and opening.
@@ -39,9 +39,11 @@ interface Props {
   sessionById: (id: string) => SessionInfo | undefined;
   /** Receives the message when nothing was dropped on the composer. */
   activeSession: SessionInfo | undefined;
+  /** The session each delegated session works for: such a recipient can get the text as work from it. */
+  delegates: Record<string, string>;
 }
 
-export function Composer({ state, dispatch, dnd, sessionById, activeSession }: Props) {
+export function Composer({ state, dispatch, dnd, sessionById, activeSession, delegates }: Props) {
   const [draft, setDraft] = useState('');
   // Sessions that have this text already (sent, or left in their input): a resend skips them, the active one too.
   const [got, setGot] = useState<string[]>([]);
@@ -64,17 +66,30 @@ export function Composer({ state, dispatch, dnd, sessionById, activeSession }: P
   const activePane = state.panes.find((p) => p.id === state.active);
   const terminal = !activePane || !activeSession || shownMode(state.paneMode[activePane.id], paneModes(activePane, activeSession)) === 'terminal';
   const open = composerOpen({ focused, draft, recipients: explicit.length, dropping: acceptsDrop, terminal, canSend: Boolean(implicit) });
+  // A recipient delegated under another session can take the text as work from that session.
+  const canDelegate = recipients.some((s) => delegates[s.id]);
+  const showDelegate = open && canDelegate;
 
-  const send = async () => {
+  /** `asWork`: the delegates among the recipients get it as work from the session each works for; the rest, as a message. */
+  const send = async (asWork = false) => {
     const text = draft.trim();
     if (!text || !recipients.length || sending) return;
     setSending(true);
-    const results = await Promise.allSettled(recipients.map((s) => api.compose(s.id, { text })));
-    const { sent, pasted, held, failed, delivered } = summarizeSend(
+    const results = await Promise.allSettled(
+      recipients.map((s): Promise<SendResult> => {
+        const parent = asWork ? delegates[s.id] : undefined;
+        return parent ? api.delegate(parent, s.id, text) : api.compose(s.id, { text });
+      }),
+    );
+    const { sent, handed, pasted, held, failed, delivered } = summarizeSend(
       recipients.map((s) => s.id),
       results,
     );
-    setNotice([sent ? t.sentTo(sent) : '', pasted ? t.pastedFor(pasted) : '', held ? t.heldFor(held) : '', failed ? t.failedFor(failed) : ''].filter(Boolean).join(' · '));
+    setNotice(
+      [sent ? t.sentTo(sent) : '', handed ? t.delegatedTo(handed) : '', pasted ? t.pastedFor(pasted) : '', held ? t.heldFor(held) : '', failed ? t.failedFor(failed) : '']
+        .filter(Boolean)
+        .join(' · '),
+    );
     if (!held && !failed) {
       setDraft('');
       setGot([]);
@@ -132,6 +147,7 @@ export function Composer({ state, dispatch, dnd, sessionById, activeSession }: P
               }}
             >
               <StatusIcon status={session.status} size={12} />
+              {delegates[session.id] && <DelegateIcon role="img" aria-label={t.delegate} size={13} style={{ flex: 'none', color: v.primary }} />}
               <Box component="span" sx={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {session.title}
               </Box>
@@ -170,7 +186,8 @@ export function Composer({ state, dispatch, dnd, sessionById, activeSession }: P
             if (event.nativeEvent.isComposing) return;
             if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
               event.preventDefault();
-              send().catch(() => {});
+              // With Shift, as work for the delegates among the recipients.
+              send(event.shiftKey && canDelegate).catch(() => {});
             }
           }}
           placeholder={t.message}
@@ -189,6 +206,21 @@ export function Composer({ state, dispatch, dnd, sessionById, activeSession }: P
             '&.Mui-focused': { boxShadow: `inset 0 0 0 2px ${v.primary}` },
           }}
         />
+        <Box component="span" aria-hidden={showDelegate ? undefined : true} sx={reveal(showDelegate, 'ml')}>
+          <Tooltip title={t.delegateShortcut}>
+            <Box component="span" sx={{ display: 'inline-flex' }}>
+              <IconButton
+                aria-label={t.delegateAction}
+                tabIndex={showDelegate ? 0 : -1}
+                disabled={!draft.trim() || sending}
+                onClick={() => send(true).catch(() => {})}
+                sx={{ width: 40, height: 40, color: v.primary }}
+              >
+                <DelegateIcon />
+              </IconButton>
+            </Box>
+          </Tooltip>
+        </Box>
         <Box component="span" aria-hidden={open ? undefined : true} sx={reveal(open, 'ml')}>
           <Tooltip title={t.sendShortcut}>
             {/* A disabled button takes no pointer events; the span is what the tooltip hangs on. */}

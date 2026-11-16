@@ -425,6 +425,32 @@ try {
   await settle();
   await page.screenshot({ path: path.join(out, 'delegate-light.png') });
 
+  // Work in the user's own words: with the delegate among the composer's recipients, 위임 hands the
+  // text over from the session it works for, and a card follows it like any other work.
+  const composer = page.getByRole('region', { name: '입력', exact: true });
+  const handOver = composer.getByRole('button', { name: '위임', exact: true });
+  check((await handOver.count()) === 0, 'the composer only sends while no recipient is a delegate');
+  await row('ui-helper').dragTo(composer);
+  await composer.getByRole('img', { name: '위임' }).waitFor({ timeout: 5000 });
+  await box.fill('summarize the risks');
+  await handOver.click();
+  await page.getByText('1개 세션에 위임').waitFor({ timeout: 10_000 });
+  const cards = lead.getByRole('group', { name: '위임 · ui-helper' });
+  await cards.nth(2).waitFor({ timeout: 10_000 });
+  check(await cards.nth(2).getByText('fake answer: summarize the risks').isVisible(), 'the composer hands its text to a delegate as work, and the card follows it');
+  await box.fill('list the open questions');
+  await settle();
+  await page.screenshot({ path: path.join(out, 'composer-delegate-light.png') });
+  await page.getByRole('button', { name: '다크 모드' }).click();
+  await settle();
+  await page.screenshot({ path: path.join(out, 'composer-delegate-dark.png') });
+  await page.getByRole('button', { name: '라이트 모드' }).click();
+  await box.press('Control+Shift+Enter');
+  await cards.nth(3).waitFor({ timeout: 10_000 });
+  check(await cards.nth(3).getByText('fake answer: list the open questions').isVisible(), 'and from the keyboard, with Ctrl+Shift+Enter');
+  await composer.getByRole('button', { name: 'ui-helper 빼기' }).click();
+  await handOver.waitFor({ state: 'detached', timeout: 5000 });
+
   // An answer nested too deep for the markdown parser shows as plain text, and the rest of the app stays.
   await box.fill(`deep\n${'- '.repeat(5000)}end`);
   await box.press('Control+Enter');

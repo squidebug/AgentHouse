@@ -49,7 +49,8 @@ export function App() {
   // Where sessions ran before, the latest first: what the launcher offers for a new one.
   const folders = useMemo(() => [...new Set([...byId.values()].sort((a, b) => b.startedAt - a.startedAt).map((s) => s.cwd))], [byId]);
   const runningIds = [...byId.values()].filter((s) => s.state === 'running').map((s) => s.id);
-  ctxRef.current = { runningIds, parents: parentsOf([...byId.values()], links), delegates: delegatesOf([...byId.values()], links) };
+  const delegates = delegatesOf([...byId.values()], links);
+  ctxRef.current = { runningIds, parents: parentsOf([...byId.values()], links), delegates };
 
   useEffect(() => {
     const listed = new Set(sessions.map((s) => s.id));
@@ -196,7 +197,7 @@ export function App() {
             onDelegate={onDelegate}
             onDeliver={onDeliver}
           />
-          <Composer state={state} dispatch={dispatch} dnd={dnd} sessionById={sessionById} activeSession={activeSession} />
+          <Composer state={state} dispatch={dispatch} dnd={dnd} sessionById={sessionById} activeSession={activeSession} delegates={delegates} />
         </Box>
       </Box>
 
