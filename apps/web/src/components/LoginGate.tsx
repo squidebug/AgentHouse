@@ -30,7 +30,7 @@ export function LoginGate({ children }: { children: ReactNode }) {
 function LoginPage({ needed }: { needed: LoginNeeded | null }) {
   return (
     <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', p: 2 }}>
-      <Box sx={{ width: 'min(420px, 100%)', display: 'flex', flexDirection: 'column', gap: 1.5, p: 3, borderRadius: '16px', bgcolor: v.surface }}>
+      <Box sx={{ width: 'min(420px, 100%)', display: 'flex', flexDirection: 'column', gap: 1.5, p: 3, borderRadius: '16px', bgcolor: v.surface, boxShadow: v.shadow1 }}>
         <Typography sx={{ fontSize: 18, fontWeight: 600 }}>{t.appName}</Typography>
         <Typography sx={{ fontSize: 14 }}>{needed?.expired ? t.loginExpired : t.loginNeeded}</Typography>
         {needed?.command && <CopyCommand command={needed.command} />}

@@ -4,7 +4,7 @@ import type { EnvMessage, EnvReport, Vendor } from '@agenthouse/protocol';
 import { api, RequestError } from '../api/client';
 import { describeIssue, issueKey, startupIssues, stopsStartup } from '../cli-choice';
 import { t } from '../strings';
-import { v } from '../theme/tokens';
+import { motion, v } from '../theme/tokens';
 import { CliDialog } from './CliChoice';
 import { CopyCommand } from './CopyCommand';
 
@@ -55,23 +55,11 @@ function rememberPassed(messages: EnvMessage[]): void {
   }
 }
 
-/** An issue in one line, a block like a copyable command's: what is wrong, and on the right what fixes it. */
+/** An issue in one line, a card with the corners of a copyable command's block: what is wrong, and on the right what fixes it. */
 function IssueLine({ message, onChange }: { message: EnvMessage; onChange: (vendor: Vendor) => void }) {
   const { label, vendor, change } = describeIssue(message);
   return (
-    <Box
-      sx={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 1.5,
-        minHeight: 48,
-        pl: 2,
-        pr: 1,
-        borderRadius: '8px',
-        border: `1px solid ${v.outline}`,
-        bgcolor: v.surface,
-      }}
-    >
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, minHeight: 48, pl: 2, pr: 1, borderRadius: '8px', bgcolor: v.surface, boxShadow: v.shadow1 }}>
       <Box component="span" aria-hidden sx={{ flex: 'none', width: 8, height: 8, borderRadius: '50%', bgcolor: LEVEL_COLOR[message.level] }} />
       <Tooltip title={message.text} placement="top">
         <Typography sx={{ flex: 1, minWidth: 0, fontSize: 14, py: 1.25 }}>{label}</Typography>
@@ -91,13 +79,12 @@ function IssueLine({ message, onChange }: { message: EnvMessage; onChange: (vend
   );
 }
 
-/** The buttons under the issues: quiet grey, or in the primary tone for the one that goes on. */
+/** The buttons under the issues: quiet grey, or in the primary tone for the one that goes on. Filled, so a step up under the pointer. */
 function QuietButton({ children, onClick, primary = false }: { children: ReactNode; onClick: () => void; primary?: boolean }) {
-  const [bg, fg] = primary ? [v.primaryContainer, v.onPrimaryContainer] : [v.surface2, v.on];
+  const [bg, fg] = primary ? [v.primaryContainer, v.onPrimaryContainer] : [v.bg2, v.on];
   return (
     <Button
       onClick={onClick}
-      disableElevation
       sx={{
         height: 36,
         px: 2,
@@ -106,8 +93,8 @@ function QuietButton({ children, onClick, primary = false }: { children: ReactNo
         fontWeight: 500,
         color: fg,
         bgcolor: bg,
-        border: '1px solid transparent',
-        '&:hover': { bgcolor: bg, borderColor: v.outline },
+        transition: `box-shadow ${motion.fast}`,
+        '&:hover': { bgcolor: bg, boxShadow: v.shadow1 },
       }}
     >
       {children}
