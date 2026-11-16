@@ -105,8 +105,9 @@ export function Composer({ state, dispatch, dnd, sessionById, activeSession }: P
           rowGap: 1,
           p: open ? 1 : 0,
           borderRadius: '16px',
+          // Open, it is a card in use, as high as the pane that takes the typing; folded, only its field is left, on the page.
           bgcolor: open ? v.surface : 'transparent',
-          boxShadow: dnd.isOver(target) ? `0 0 0 2px ${v.primary}` : 'none',
+          boxShadow: `0 0 0 2px ${dnd.isOver(target) ? v.primary : 'transparent'}${open ? `, ${v.shadow2}` : ''}`,
           transition: `padding ${EASE}, background-color ${EASE}, box-shadow ${EASE}`,
         }}
       >
@@ -181,9 +182,11 @@ export function Composer({ state, dispatch, dnd, sessionById, activeSession }: P
             px: '12px',
             py: open ? '6px' : '3px',
             borderRadius: '10px',
-            bgcolor: v.surface2,
+            bgcolor: open ? v.surface2 : v.bg2,
             fontSize: 13,
-            transition: `min-height ${EASE}, padding ${EASE}`,
+            transition: `min-height ${EASE}, padding ${EASE}, background-color ${EASE}, box-shadow ${motion.fast}`,
+            // Where the typing goes: the line a text field has around it while it has the keyboard.
+            '&.Mui-focused': { boxShadow: `inset 0 0 0 2px ${v.primary}` },
           }}
         />
         <Box component="span" aria-hidden={open ? undefined : true} sx={reveal(open, 'ml')}>
@@ -195,7 +198,16 @@ export function Composer({ state, dispatch, dnd, sessionById, activeSession }: P
                 tabIndex={open ? 0 : -1}
                 disabled={!draft.trim() || !recipients.length || sending}
                 onClick={() => send().catch(() => {})}
-                sx={{ width: 40, height: 40, bgcolor: v.primary, color: v.onPrimary, '&:hover': { bgcolor: v.primary, opacity: 0.9 }, '&.Mui-disabled': { bgcolor: v.surface2, color: v.on2 } }}
+                // Filled, like the theme's filled buttons: darker and a step up under the pointer.
+                sx={{
+                  width: 40,
+                  height: 40,
+                  bgcolor: v.primary,
+                  color: v.onPrimary,
+                  transition: `background-color ${motion.fast}, box-shadow ${motion.fast}`,
+                  '&:hover': { bgcolor: 'primary.dark', boxShadow: v.shadow1 },
+                  '&.Mui-disabled': { bgcolor: v.surface2, color: v.on2 },
+                }}
               >
                 <SendIcon />
               </IconButton>
