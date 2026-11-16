@@ -15,15 +15,19 @@ import { createAgentHouseServer } from '../src/web/http/server';
 import { isAlive, killTree } from '../src/shared/kill-tree';
 import { fakeAgentPath, fakeSpec, login, openSocket, plain, request, screenText, sleep, tempStateDir, waitFor, type Socket } from './helpers';
 
+/** A web server on the host of `stateDir`. Stopping it twice is fine: a test stops it where it means to, and again when it ends. */
 async function webServer(stateDir: string, port = 0) {
   const client = await HostClient.connect({ stateDir, spawn: false });
   const app = await createAgentHouseServer({ port, fakeAgentPath, host: client });
   const authorization = await login(app);
+  let stopped = false;
   return {
     app,
     authorization,
     headers: { authorization, origin: `http://127.0.0.1:${app.port}` },
     async stop() {
+      if (stopped) return;
+      stopped = true;
       await app.close();
       client.close();
     },
@@ -34,8 +38,12 @@ describe('session host', () => {
   test('sessions keep running while the web server restarts', async () => {
     const stateDir = await tempStateDir();
     const host = await createSessionHost({ stateDir, idleExitMs: null });
+    // Stopped at the end whatever happened. One left listening after a failed check kept this file's
+    // process alive, and the whole run waiting for it.
+    const servers: Array<Awaited<ReturnType<typeof webServer>>> = [];
     try {
       const first = await webServer(stateDir);
+      servers.push(first);
       const created = await request(first.app.port, 'POST', '/api/sessions', { headers: first.headers, body: { vendor: 'fake', title: '재시작' } });
       assert.equal(created.status, 201);
       const session = created.json as SessionInfo;
@@ -50,6 +58,7 @@ describe('session host', () => {
 
       // Logins are bound to the port and to the host's secret: back on the same port, they still hold.
       const second = await webServer(stateDir, first.app.port);
+      servers.push(second);
       assert.equal(second.app.key, first.app.key, 'the key comes from the host and the port');
       const listed = await request(second.app.port, 'GET', '/api/sessions', { headers: { authorization: first.authorization } });
       assert.equal(listed.status, 200, 'the browser stays logged in');
@@ -68,6 +77,7 @@ describe('session host', () => {
       assert.ok(await waitFor(() => !isAlive(session.pid), 3000), 'removing it ends the CLI');
       await second.stop();
     } finally {
+      for (const server of servers) await server.stop().catch(() => {});
       await host.close();
       await rm(stateDir, { recursive: true, force: true });
     }
