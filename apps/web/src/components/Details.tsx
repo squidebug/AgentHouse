@@ -1,8 +1,9 @@
 import { Box, Typography } from '@mui/material';
-import { isAsking, type AgentInfo, type SessionInfo, type SessionStatus } from '@agenthouse/protocol';
+import { isAsking, type AgentInfo, type BackgroundTask, type ScheduledPrompt, type SessionInfo, type SessionStatus } from '@agenthouse/protocol';
 import { t } from '../strings';
 import { v } from '../theme/tokens';
 import { elapsedMs } from '../workspace/agents';
+import { clock, scheduleText, taskElapsedMs, taskStatusText, taskType } from '../workspace/background';
 import { compactCount, duration, modelName } from '../workspace/conversation';
 import { PathText } from './PathText';
 
@@ -11,6 +12,8 @@ export interface Detail {
   v: string;
   /** A path: on a line of its own, cut at its start when it does not fit. */
   path?: boolean;
+  /** Long text as it was written (a command line, a prompt): on lines of its own, wrapped. */
+  wide?: boolean;
 }
 
 /** Collapsed views show only the model; everything else lives behind the expand toggle. */
@@ -88,6 +91,27 @@ export function agentDetails(agent: AgentInfo, agents: AgentInfo[], session: Ses
   return list;
 }
 
+export function taskDetails(task: BackgroundTask, now = Date.now()): Detail[] {
+  const list: Detail[] = [
+    { k: t.statusLabel, v: taskStatusText(task) },
+    { k: t.agentType, v: taskType(task) },
+    { k: t.elapsed, v: duration(taskElapsedMs(task, now)) },
+  ];
+  if (task.lastEvent) list.push({ k: t.lastEvent, v: task.lastEvent, wide: true });
+  if (task.command) list.push({ k: t.command, v: task.command, wide: true });
+  return list;
+}
+
+export function scheduleDetails(job: ScheduledPrompt, now = Date.now()): Detail[] {
+  const words = scheduleText(job, now);
+  // In words, with the expression itself next to it when the words are not it.
+  const list: Detail[] = [{ k: t.schedule, v: words === job.schedule || !job.recurring ? words : `${words} · ${job.schedule}` }];
+  if (job.recurring && job.nextAt !== null && job.nextAt > now) list.push({ k: t.nextRun, v: clock(job.nextAt, now) });
+  if (job.lastAt !== null) list.push({ k: t.lastRun, v: `${clock(job.lastAt, now)} · ${t.runCount(job.runs)}` });
+  list.push({ k: t.prompt, v: job.prompt, wide: true });
+  return list;
+}
+
 const compact = (n: number) => (n >= 1_000_000 ? `${n / 1_000_000}M` : n >= 1000 ? `${Math.round(n / 1000)}K` : String(n));
 
 export function sessionDetails(session: SessionInfo): Detail[] {
@@ -131,20 +155,32 @@ const LABEL_PX = 64;
 export function Details({ items, children, inset = 0, page = false }: { items: Detail[] | (() => Detail[]); children?: React.ReactNode; inset?: number; page?: boolean }) {
   const list = typeof items === 'function' ? items() : items;
   return (
-    <Box sx={{ m: page ? `4px 4px 2px ${inset}px` : `0 4px 6px ${inset}px`, p: '8px 10px', borderRadius: '10px', bgcolor: page ? v.bg2 : v.surface2, fontSize: 12, lineHeight: '18px' }}>
+    <Box
+      sx={{
+        m: page ? `6px 4px 4px ${inset}px` : `0 4px 6px ${inset}px`,
+        p: '8px 10px',
+        borderRadius: '10px',
+        bgcolor: page ? v.bg2 : v.surface2,
+        // In the tree it is a tray set into the page, with a line around it: the rows around it lie flat or are cards.
+        boxShadow: page ? `inset 0 0 0 1px ${v.outline}` : 'none',
+        fontSize: 12,
+        lineHeight: '18px',
+      }}
+    >
       <Box component="dl" sx={{ m: 0, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))', gap: '2px 20px' }}>
         {list.map((item) => (
-          <Box key={item.k} sx={{ display: 'grid', gridTemplateColumns: `${LABEL_PX}px minmax(0, 1fr)`, columnGap: '8px', gridColumn: item.path ? '1 / -1' : 'auto' }}>
+          <Box key={item.k} sx={{ display: 'grid', gridTemplateColumns: `${LABEL_PX}px minmax(0, 1fr)`, columnGap: '8px', gridColumn: item.path || item.wide ? '1 / -1' : 'auto' }}>
             <Box component="dt" sx={{ color: v.on2 }}>
               {item.k}
             </Box>
-            <Box component="dd" sx={{ m: 0, minWidth: 0, overflowWrap: 'anywhere' }}>
+            {/* Long text keeps its line breaks and scrolls past a few lines, so one command cannot push the tree away. */}
+            <Box component="dd" sx={{ m: 0, minWidth: 0, overflowWrap: 'anywhere', ...(item.wide && { whiteSpace: 'pre-wrap', maxHeight: 108, overflowY: 'auto', scrollbarWidth: 'thin' }) }}>
               {item.path ? <PathText path={item.v} /> : item.v}
             </Box>
           </Box>
         ))}
       </Box>
-      {children && <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '2px', mt: '6px', mx: '-6px', pt: '4px', borderTop: `1px solid ${v.outline}` }}>{children}</Box>}
+      {children && <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px', mt: '8px', pt: '8px', borderTop: `1px solid ${v.outline}` }}>{children}</Box>}
     </Box>
   );
 }

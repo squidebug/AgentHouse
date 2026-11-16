@@ -7,7 +7,7 @@ import { t } from '../strings';
 import { FONT_MONO } from '../theme/theme';
 import { motion, v } from '../theme/tokens';
 import { arrange, compactCount, delegationTurns, duration, modelName, summarize, type TurnView, type WorkEntry } from '../workspace/conversation';
-import { BranchIcon, ChatIcon, ChevronIcon, DelegateIcon, ReturnIcon } from './icons';
+import { BranchIcon, ChatIcon, ChevronIcon, ClockIcon, DelegateIcon, ReturnIcon } from './icons';
 import { MarkdownText } from './Markdown';
 
 // The newest turns first; older ones a page at a time.
@@ -368,12 +368,14 @@ function WorkRow({ entries, source }: { entries: WorkEntry[]; source: Conversati
 function Prompt({ entry, source }: { entry: Extract<ConversationEntry, { kind: 'prompt' }>; source: ConversationSource }) {
   const [full, setFull] = useOpen(source, `full:${entry.id}`);
   const { detail } = useDetail(source, entry, full);
+  // Not typed by the user: another agent's message, or a prompt the CLI gave the session on a schedule.
+  const sender = entry.from ?? (entry.scheduled ? t.scheduledPrompt : null);
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start' }}>
-      {entry.from && (
+      {sender && (
         <Typography sx={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: 12, color: v.on2 }}>
-          <BranchIcon size={13} />
-          {entry.from}
+          {entry.from ? <BranchIcon size={13} /> : <ClockIcon size={13} />}
+          {sender}
         </Typography>
       )}
       <Box
@@ -381,8 +383,8 @@ function Prompt({ entry, source }: { entry: Extract<ConversationEntry, { kind: '
           maxWidth: '100%',
           p: '8px 12px',
           borderRadius: '12px',
-          bgcolor: entry.from ? 'transparent' : v.surface3,
-          border: entry.from ? `1px solid ${v.outline}` : 'none',
+          bgcolor: sender ? 'transparent' : v.surface3,
+          border: sender ? `1px solid ${v.outline}` : 'none',
           fontSize: 13,
           lineHeight: '20px',
           whiteSpace: 'pre-wrap',

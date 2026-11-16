@@ -16,7 +16,7 @@ export interface Tokens {
   /** A fill on a card or on what floats, and a stronger one for any of the three. */
   surface2: string;
   surface3: string;
-  /** The chosen side of a switch, standing out of its track. */
+  /** What stands out of a fill it lies in: the chosen side of a switch in its track, a button in the tray of an opened row. */
   thumb: string;
   /** Veils of the text color: under the pointer, and pressed. */
   hover: string;

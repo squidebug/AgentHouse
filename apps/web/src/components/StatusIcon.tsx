@@ -1,5 +1,6 @@
-import { isAgentBusy, isAsking, type AgentInfo, type SessionStatus } from '@agenthouse/protocol';
+import { isAgentBusy, isAsking, type AgentInfo, type BackgroundTask, type SessionStatus } from '@agenthouse/protocol';
 import { v } from '../theme/tokens';
+import { taskStatusText } from '../workspace/background';
 import { agentStatusText, statusText } from './Details';
 
 /**
@@ -26,6 +27,19 @@ export function StatusIcon({ status, size = 14 }: { status: SessionStatus; size?
       ) : (
         <circle className={value === 'working' ? 'ah-working' : undefined} cx="8" cy="8" r="4.5" style={{ fill: color }} />
       )}
+    </svg>
+  );
+}
+
+/** A background task: running (pulsing), done (a check), failed (a red cross) or stopped (a ring). */
+export function TaskStatusIcon({ task, size = 14 }: { task: Pick<BackgroundTask, 'state' | 'exitCode'>; size?: number }) {
+  const line = { fill: 'none', strokeWidth: 2.2, strokeLinecap: 'round', strokeLinejoin: 'round' } as const;
+  return (
+    <svg role="img" aria-label={taskStatusText(task)} width={size} height={size} viewBox="0 0 16 16" style={{ flex: 'none' }}>
+      {task.state === 'running' && <circle className="ah-working" cx="8" cy="8" r="4.5" style={{ fill: v.primary }} />}
+      {task.state === 'done' && <path d="M3.6 8.4 L6.6 11.2 L12.4 4.8" style={{ ...line, stroke: v.done }} />}
+      {task.state === 'failed' && <path d="M4.5 4.5 L11.5 11.5 M11.5 4.5 L4.5 11.5" style={{ ...line, stroke: v.error }} />}
+      {task.state === 'stopped' && <circle cx="8" cy="8" r="4.5" style={{ fill: 'none', stroke: v.on2, strokeWidth: 1.8 }} />}
     </svg>
   );
 }

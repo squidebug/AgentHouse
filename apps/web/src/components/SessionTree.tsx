@@ -1,21 +1,30 @@
 import { Box, Button, ButtonBase, Collapse, IconButton, Menu, MenuItem, Tooltip, Typography } from '@mui/material';
 import { useState } from 'react';
-import { isAgentBusy, type AgentInfo, type LinkKind, type SessionInfo, type SessionLink } from '@agenthouse/protocol';
+import { isAgentBusy, isTaskRunning, type AgentInfo, type LinkKind, type SessionInfo, type SessionLink } from '@agenthouse/protocol';
 import { t } from '../strings';
 import { motion, v } from '../theme/tokens';
 import { agentRows, SHOWN_FINISHED } from '../workspace/agents';
+import { scheduleText, scheduleTitle, SHOWN_ENDED, taskNote, taskRows, taskTitle, taskType } from '../workspace/background';
 import type { Dnd } from '../workspace/dnd';
 import { canResume } from '../workspace/sessions';
 import type { Action, WorkspaceState } from '../workspace/state';
 import { sessionTree, type SessionNode } from '../workspace/tree';
-import { AgentSubtitle, agentDetails, agentTitle, Details, SessionSubtitle, sessionDetails } from './Details';
-import { ChevronIcon, DelegateIcon, Grip, LinkIcon, PlusIcon } from './icons';
-import { AgentStatusIcon, StatusIcon } from './StatusIcon';
+import { AgentSubtitle, agentDetails, agentTitle, Details, scheduleDetails, SessionSubtitle, sessionDetails, taskDetails, type Detail } from './Details';
+import { ChevronIcon, ClockIcon, DelegateIcon, Grip, LinkIcon, PlusIcon } from './icons';
+import { keySx } from './key';
+import { LibraryButtons } from './Library';
+import { AgentStatusIcon, StatusIcon, TaskStatusIcon } from './StatusIcon';
 
 // Each level of nesting moves a row this far in.
 const INDENT = 18;
 
 const smallButton = { minHeight: 28, px: 1.5, fontSize: 12 } as const;
+
+/**
+ * What can be done about a session, in its opened details: keys that stand out of the tray they lie
+ * in, with a face and a shadow of their own, and a step up under the pointer.
+ */
+const actionButton = { ...smallButton, fontWeight: 500, ...keySx } as const;
 
 /**
  * A row. The row of what a pane shows is a card on the page; the others lie flat on it. Under the
@@ -132,27 +141,138 @@ function AgentRows({ session, base, state, dispatch, dnd }: Omit<AgentRowProps, 
   );
 }
 
-/** "묶기" or "위임" without dragging: the sessions at the top this one can go under. */
-function LinkMenu({ session, candidates, kind, onLink }: { session: SessionInfo; candidates: SessionInfo[]; kind: LinkKind; onLink: Props['onLink'] }) {
+interface WorkRowProps {
+  /** Its key among the opened rows. */
+  id: string;
+  depth: number;
+  icon: React.ReactNode;
+  title: string;
+  subtitle: string;
+  /** Over: its title steps back, like an ended session's. */
+  quiet: boolean;
+  details: () => Detail[];
+  state: WorkspaceState;
+  dispatch: (action: Action) => void;
+}
+
+/**
+ * Something a session left running or set for later, under it like a sub-agent. There is nothing of
+ * its own to show in a pane, so the row neither drags nor opens one: it opens its details.
+ */
+function WorkRow({ id, depth, icon, title, subtitle, quiet, details, state, dispatch }: WorkRowProps) {
+  const open = Boolean(state.rowOpen[id]);
+  return (
+    <Box>
+      <Box className="ah-row" sx={{ ...rowSx(false), cursor: 'default', minHeight: 40, p: `2px 4px 2px ${4 + depth * INDENT}px` }}>
+        {/* Where a row that drags has its grip. */}
+        <Box component="span" aria-hidden sx={{ flex: 'none', width: 8 }} />
+        <Connector />
+        {icon}
+        <ButtonBase
+          onClick={() => dispatch({ type: 'toggleRow', id })}
+          aria-label={`${title} ${t.details}`}
+          aria-expanded={open}
+          sx={{ flex: 1, minWidth: 0, justifyContent: 'flex-start', gap: 1, textAlign: 'left', py: '2px', borderRadius: '6px' }}
+        >
+          <Box sx={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+            <Typography noWrap sx={{ maxWidth: '100%', fontWeight: 500, color: quiet ? v.on2 : v.on }}>
+              {title}
+            </Typography>
+            <Typography noWrap sx={{ maxWidth: '100%', fontSize: 12, lineHeight: '16px', color: v.on2 }}>
+              {subtitle}
+            </Typography>
+          </Box>
+          <Box component="span" sx={{ flex: 'none', width: 36, height: 36, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: v.on2 }}>
+            <ChevronIcon open={open} size={16} />
+          </Box>
+        </ButtonBase>
+      </Box>
+      <Collapse in={open} unmountOnExit>
+        <Details page items={details} inset={22 + depth * INDENT} />
+      </Collapse>
+    </Box>
+  );
+}
+
+/** A session's background tasks (ended ones fold away when there are many) and the prompts scheduled for it. */
+function WorkRows({ session, depth, state, dispatch }: { session: SessionInfo; depth: number; state: WorkspaceState; dispatch: (action: Action) => void }) {
+  const allKey = `${session.id}#tasks`;
+  const all = Boolean(state.rowOpen[allKey]);
+  const { rows, folded } = taskRows(session.tasks, all);
+  const ended = session.tasks.filter((task) => !isTaskRunning(task)).length;
+  const now = Date.now();
+  const common = { depth, state, dispatch };
+  return (
+    <Box role="group" aria-label={`${session.title} ${t.backgroundWork}`}>
+      {rows.map((task) => (
+        <WorkRow
+          key={task.id}
+          id={`${session.id}/task/${task.id}`}
+          icon={<TaskStatusIcon task={task} />}
+          title={taskTitle(task)}
+          subtitle={[taskType(task), taskNote(task)].filter(Boolean).join(' · ')}
+          quiet={!isTaskRunning(task)}
+          details={() => taskDetails(task)}
+          {...common}
+        />
+      ))}
+      {(folded > 0 || (all && ended > SHOWN_ENDED)) && (
+        <ButtonBase onClick={() => dispatch({ type: 'toggleRow', id: allKey })} aria-expanded={all} sx={{ ...foldSx, minHeight: 28, mt: '2px', ml: `${30 + depth * INDENT}px`, px: '6px' }}>
+          {folded > 0 ? t.finishedAgents(folded) : t.foldAgents}
+        </ButtonBase>
+      )}
+      {session.schedules.map((job) => (
+        <WorkRow
+          key={job.id}
+          id={`${session.id}/schedule/${job.id}`}
+          icon={<ClockIcon role="img" aria-label={t.scheduled} size={14} style={{ flex: 'none', color: v.on2 }} />}
+          title={scheduleTitle(job)}
+          subtitle={[scheduleText(job, now), job.runs ? t.runCount(job.runs) : null].filter(Boolean).join(' · ')}
+          quiet={false}
+          details={() => scheduleDetails(job)}
+          {...common}
+        />
+      ))}
+    </Box>
+  );
+}
+
+/**
+ * "아래로 넣기" without dragging: the session at the top to go under, then how, as after a drop: grouped
+ * with it, or delegated to. One menu after the other, each with the keyboard on its first line.
+ */
+function NestMenu({ session, candidates, onLink }: { session: SessionInfo; candidates: SessionInfo[]; onLink: Props['onLink'] }) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
+  const [parent, setParent] = useState<SessionInfo | null>(null);
+  const close = () => {
+    setAnchor(null);
+    setParent(null);
+  };
+  const place = (kind: LinkKind) => {
+    if (parent) onLink(session.id, parent.id, kind);
+    close();
+  };
   return (
     <>
-      <Button size="small" color="inherit" aria-haspopup="menu" onClick={(event) => setAnchor(event.currentTarget)} sx={smallButton}>
-        {kind === 'delegate' ? t.delegateAction : t.groupAction}
+      <Button size="small" color="inherit" aria-haspopup="menu" onClick={(event) => setAnchor(event.currentTarget)} sx={actionButton}>
+        {t.nest}
       </Button>
-      <Menu anchorEl={anchor} open={Boolean(anchor)} onClose={() => setAnchor(null)}>
-        {candidates.map((parent) => (
-          <MenuItem
-            key={parent.id}
-            onClick={() => {
-              setAnchor(null);
-              onLink(session.id, parent.id, kind);
-            }}
-            sx={{ fontSize: 13 }}
-          >
-            {parent.title}
+      <Menu anchorEl={anchor} open={Boolean(anchor) && !parent} onClose={close} slotProps={{ list: { 'aria-label': t.nestUnder } }}>
+        {candidates.map((candidate) => (
+          <MenuItem key={candidate.id} onClick={() => setParent(candidate)} sx={{ fontSize: 13 }}>
+            {candidate.title}
           </MenuItem>
         ))}
+      </Menu>
+      <Menu anchorEl={anchor} open={Boolean(anchor) && Boolean(parent)} onClose={close} slotProps={{ list: { 'aria-label': `${session.title} → ${parent?.title ?? ''}` } }}>
+        <MenuItem onClick={() => place('group')} sx={{ gap: 1, fontSize: 13 }}>
+          <LinkIcon size={14} style={{ flex: 'none', color: v.on2 }} />
+          {t.groupAction}
+        </MenuItem>
+        <MenuItem onClick={() => place('delegate')} sx={{ gap: 1, fontSize: 13 }}>
+          <DelegateIcon size={14} style={{ flex: 'none', color: v.primary }} />
+          {t.delegateAction}
+        </MenuItem>
       </Menu>
     </>
   );
@@ -237,30 +357,27 @@ function SessionBranch(props: BranchProps) {
       <Collapse in={open} unmountOnExit>
         <Details page items={details} inset={22 + depth * INDENT}>
           {canResume(session) && (
-            <Button size="small" color="inherit" onClick={() => onResume(session.id)} sx={smallButton}>
+            <Button size="small" color="inherit" onClick={() => onResume(session.id)} sx={actionButton}>
               {t.resumeSession}
             </Button>
           )}
           {link ? (
-            <Button size="small" color="inherit" onClick={() => onLink(session.id, null)} sx={smallButton}>
+            <Button size="small" color="inherit" onClick={() => onLink(session.id, null)} sx={actionButton}>
               {t.toTop}
             </Button>
           ) : (
             !node.children.length &&
             candidates.length > 0 && (
-              <>
-                <LinkMenu session={session} candidates={candidates} kind="delegate" onLink={onLink} />
-                <LinkMenu session={session} candidates={candidates} kind="group" onLink={onLink} />
-              </>
+              <NestMenu session={session} candidates={candidates} onLink={onLink} />
             )
           )}
           {/* What ends or removes the session stands apart, at the other end of the line: of a line of its own when the others fill one. */}
           {session.state === 'running' ? (
-            <Button size="small" color="inherit" onClick={() => onEnd(session.id)} sx={{ ...smallButton, ml: 'auto', color: v.error }}>
+            <Button size="small" color="inherit" onClick={() => onEnd(session.id)} sx={{ ...actionButton, ml: 'auto', color: v.error }}>
               {t.endSession}
             </Button>
           ) : (
-            <Button size="small" color="inherit" onClick={() => onRemove(session.id)} sx={{ ...smallButton, ml: 'auto' }}>
+            <Button size="small" color="inherit" onClick={() => onRemove(session.id)} sx={{ ...actionButton, ml: 'auto' }}>
               {t.removeSession}
             </Button>
           )}
@@ -296,6 +413,7 @@ function SessionBranch(props: BranchProps) {
         </Box>
       )}
       {session.agents.length > 0 && <AgentRows session={session} base={depth} state={state} dispatch={dispatch} dnd={dnd} />}
+      {(session.tasks.length > 0 || session.schedules.length > 0) && <WorkRows session={session} depth={depth + 1} state={state} dispatch={dispatch} />}
       {node.children.map((child) => (
         <SessionBranch key={child.session.id} {...props} node={child} depth={depth + 1} />
       ))}
@@ -347,84 +465,85 @@ export function SessionTree({ sessions, links, state, dispatch, dnd, onNew, onEn
         minHeight: 0,
         display: 'flex',
         flexDirection: 'column',
-        gap: '2px',
-        overflowY: { md: 'auto' },
-        scrollbarWidth: 'thin',
-        // What scrolls cuts off whatever is outside it: the padding is room for the shadows of the rows
-        // that are cards. The margin takes the room back and the basis grows by as much (272 + 2 × 6), so
-        // the tree is where it was and as wide, and so are the panes next to it.
+        // The padding is room for the shadows of the rows that are cards, which what scrolls would cut
+        // off. The margin takes the room back and the basis grows by as much (272 + 2 × 6), so the tree
+        // is where it was and as wide, and so are the panes next to it.
         flex: { xs: '1 1 272px', md: '1 1 284px' },
         p: { md: '0 6px 6px' },
         m: { md: '0 -6px -6px' },
       }}
     >
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, p: '2px 4px 6px 6px' }}>
-        <Typography component="h2" sx={{ fontSize: 14, fontWeight: 600 }}>
-          {t.sessions}
-        </Typography>
-        <Typography sx={{ color: v.on2 }}>{sessions.length}</Typography>
-        <Box sx={{ flex: 1 }} />
-        <Tooltip title={t.newSession}>
-          <IconButton aria-label={t.newSession} onClick={onNew} size="small" sx={{ width: 36, height: 36 }}>
-            <PlusIcon />
-          </IconButton>
-        </Tooltip>
-      </Box>
-
-      {listed.map((group) => (
-        <Box key={group.cwd} role="group" aria-label={group.label}>
-          {/* The rows keep their own distance from the folder's name; a folder stands further from the one before. */}
-          <Tooltip title={group.cwd} placement="right">
-            <Typography sx={{ p: '14px 6px 2px', fontSize: 12, lineHeight: '16px', fontWeight: 500, color: v.on2 }}>{group.label}</Typography>
-          </Tooltip>
-          {group.nodes.map((node) => (
-            <SessionBranch key={node.session.id} node={node} depth={0} {...branch} />
-          ))}
-        </Box>
-      ))}
-
-      {ended.length > 0 && (
-        <Box sx={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 1, mt: '6px', pl: '2px' }}>
-          <ButtonBase
-            onClick={() => dispatch({ type: 'toggleRow', id: ENDED_KEY })}
-            aria-expanded={endedOpen}
-            sx={{ ...foldSx, minHeight: 32, gap: '6px', px: '6px' }}
-          >
-            <ChevronIcon open={endedOpen} size={14} />
-            {t.endedSessions(ended.length)}
-          </ButtonBase>
+      {/* The rows scroll; what is at the foot of the tree stays where it is. The scrolling part reaches into the room for the shadows. */}
+      <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: '2px', overflowY: { md: 'auto' }, scrollbarWidth: 'thin', mx: { md: '-6px' }, px: { md: '6px' }, pb: { md: '6px' } }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, p: '2px 4px 6px 6px' }}>
+          <Typography component="h2" sx={{ fontSize: 14, fontWeight: 600 }}>
+            {t.sessions}
+          </Typography>
+          <Typography sx={{ color: v.on2 }}>{sessions.length}</Typography>
           <Box sx={{ flex: 1 }} />
-          <Button size="small" color="inherit" onClick={() => onRemoveEnded(ended.map((node) => node.session))} sx={{ ...smallButton, color: v.on2 }}>
-            {t.removeAll}
-          </Button>
+          <Tooltip title={t.newSession}>
+            <IconButton aria-label={t.newSession} onClick={onNew} size="small" sx={{ width: 36, height: 36 }}>
+              <PlusIcon />
+            </IconButton>
+          </Tooltip>
         </Box>
-      )}
 
-      {toTop && (
-        // While a placed session is dragged: drop it here to bring it back to the top.
-        <Box
-          onDragOver={dnd.over(root)}
-          onDrop={(event) => {
-            const moving = dnd.dragging;
-            dnd.drop(root)(event);
-            if (moving?.kind === 'session') onLink(moving.id, null);
-          }}
-          sx={{
-            mt: '6px',
-            minHeight: 44,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            borderRadius: '10px',
-            border: '1.5px dashed',
-            borderColor: dnd.isOver(root) ? v.primary : v.outline,
-            bgcolor: dnd.isOver(root) ? v.dropBg : 'transparent',
-            color: v.on2,
-          }}
-        >
-          {t.toTop}
-        </Box>
-      )}
+        {listed.map((group) => (
+          <Box key={group.cwd} role="group" aria-label={group.label}>
+            {/* The rows keep their own distance from the folder's name; a folder stands further from the one before. */}
+            <Tooltip title={group.cwd} placement="right">
+              <Typography sx={{ p: '14px 6px 2px', fontSize: 12, lineHeight: '16px', fontWeight: 500, color: v.on2 }}>{group.label}</Typography>
+            </Tooltip>
+            {group.nodes.map((node) => (
+              <SessionBranch key={node.session.id} node={node} depth={0} {...branch} />
+            ))}
+          </Box>
+        ))}
+
+        {ended.length > 0 && (
+          <Box sx={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 1, mt: '6px', pl: '2px' }}>
+            <ButtonBase
+              onClick={() => dispatch({ type: 'toggleRow', id: ENDED_KEY })}
+              aria-expanded={endedOpen}
+              sx={{ ...foldSx, minHeight: 32, gap: '6px', px: '6px' }}
+            >
+              <ChevronIcon open={endedOpen} size={14} />
+              {t.endedSessions(ended.length)}
+            </ButtonBase>
+            <Box sx={{ flex: 1 }} />
+            <Button size="small" color="inherit" onClick={() => onRemoveEnded(ended.map((node) => node.session))} sx={{ ...smallButton, color: v.on2 }}>
+              {t.removeAll}
+            </Button>
+          </Box>
+        )}
+
+        {toTop && (
+          // While a placed session is dragged: drop it here to bring it back to the top.
+          <Box
+            onDragOver={dnd.over(root)}
+            onDrop={(event) => {
+              const moving = dnd.dragging;
+              dnd.drop(root)(event);
+              if (moving?.kind === 'session') onLink(moving.id, null);
+            }}
+            sx={{
+              mt: '6px',
+              minHeight: 44,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: '10px',
+              border: '1.5px dashed',
+              borderColor: dnd.isOver(root) ? v.primary : v.outline,
+              bgcolor: dnd.isOver(root) ? v.dropBg : 'transparent',
+              color: v.on2,
+            }}
+          >
+            {t.toTop}
+          </Box>
+        )}
+      </Box>
+      <LibraryButtons sessions={sessions} activeCwd={sessions.find((session) => session.id === state.panes.find((pane) => pane.id === state.active)?.sessionId)?.cwd} />
     </Box>
   );
 }

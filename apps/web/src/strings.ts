@@ -1,4 +1,4 @@
-import { VENDOR_NAMES, type DelegationInfo, type NoticeKind, type StatusValue, type ToolState } from '@agenthouse/protocol';
+import { VENDOR_NAMES, type BackgroundTask, type DelegationInfo, type MemoryFile, type NoticeKind, type SkillInfo, type StatusValue, type ToolState } from '@agenthouse/protocol';
 
 // UI text in one place so an English catalog can be added later. A map of labels
 // is checked against the values it names (`satisfies`): a value added to the
@@ -29,7 +29,7 @@ export const t = {
   noScreen: '터미널 화면 없음',
   cannotShow: '표시할 수 없음',
   reload: '새로고침',
-  failure: { delegate: '위임 실패', deliver: '전달 실패', end: '종료 실패', resume: '이어서 열기 실패', remove: '제거 실패', link: '옮기기 실패' },
+  failure: { delegate: '위임 실패', deliver: '전달 실패', end: '종료 실패', resume: '이어서 열기 실패', remove: '제거 실패', link: '옮기기 실패', save: '저장 실패', load: '불러오기 실패' },
   running: '실행 중',
   exited: '종료',
   lightMode: '라이트 모드',
@@ -156,11 +156,47 @@ export const t = {
   agentType: '유형',
   tokens: '토큰',
   elapsed: '경과',
+  // What a session left running in the background, and the prompts set for later; any other kind of task shows as the CLI names it.
+  backgroundWork: '백그라운드 작업',
+  taskType: { shell: '셸', monitor: '모니터' } as Record<string, string>,
+  taskState: { running: '실행 중', done: '완료', failed: '실패', stopped: '중단됨' } satisfies Record<BackgroundTask['state'], string>,
+  command: '명령',
+  lastEvent: '마지막 출력',
+  scheduled: '예약',
+  scheduledPrompt: '예약 실행',
+  schedule: '일정',
+  everyMinutes: (n: number) => `${n}분마다`,
+  everyHours: (n: number) => `${n}시간마다`,
+  hourlyAt: (minute: number) => `매시 ${minute}분`,
+  dailyAt: (time: string) => `매일 ${time}`,
+  onceAt: (time: string) => `${time} 한 번`,
+  monthDay: (month: number, day: number) => `${month}월 ${day}일`,
+  nextRun: '다음 실행',
+  lastRun: '마지막 실행',
+  runCount: (n: number) => `${n}회`,
+  prompt: '프롬프트',
+  // Skills and memory are the user's and a folder's: at the foot of the tree, a window each.
+  library: '스킬·메모리',
+  skills: '스킬',
+  skillSource: { project: '프로젝트', user: '사용자', plugin: '플러그인', builtin: '기본' } satisfies Record<SkillInfo['source'], string>,
+  skillUsed: '사용함',
+  noSkills: '스킬 목록 없음',
+  // What Claude reads into a session by itself: the user's instructions, and the notes it keeps for the project.
+  memory: '메모리',
+  memoryKind: { instructions: '지침', memory: '자동 메모리' } satisfies Record<MemoryFile['kind'], string>,
+  memoryScope: { user: '사용자', project: '프로젝트', local: '로컬' } satisfies Record<MemoryFile['scope'], string>,
+  edit: (name: string) => `${name} 편집`,
+  changedOnDisk: '디스크에서 바뀜',
+  reloadNote: '다시 불러오기',
+  loading: '불러오는 중',
   parentAgent: '상위',
   session: '세션',
   group: '묶음',
   groupAction: '묶기',
   toTop: '최상위로',
+  // Under another session without dragging: the session to go under, then how.
+  nest: '아래로 넣기',
+  nestUnder: '넣을 세션',
   delegate: '위임',
   delegateAction: '위임',
   delegateShortcut: '위임 · Ctrl+Shift+Enter',

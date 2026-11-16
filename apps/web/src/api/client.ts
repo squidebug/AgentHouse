@@ -11,8 +11,11 @@ import {
   type EnvReport,
   type LaunchOptions,
   type LinkKind,
+  type MemoryFile,
   type SessionInfo,
   type SessionLink,
+  type SkillInfo,
+  type TextFile,
   type ThemeMode,
   type Vendor,
 } from '@agenthouse/protocol';
@@ -70,6 +73,17 @@ export const api = {
     call<DelegationInfo>('POST', `/api/sessions/${encodeURIComponent(parentId)}/delegations`, { childId, text }),
   /** Hands a delegate's answer back to its parent, now or once the parent is idle. */
   deliver: (id: string, header: string) => call<DelegationInfo>('POST', `/api/delegations/${encodeURIComponent(id)}/deliver`, { header }),
+  /** The skills a session's conversation was given, with the ones it ran marked. */
+  skills: (id: string) => call<{ skills: SkillInfo[] }>('GET', `/api/sessions/${encodeURIComponent(id)}/skills`),
+  /** One of the project's or the user's own skills, as text to edit; saved over the version it was loaded as. */
+  skillFile: (id: string, name: string) => call<TextFile>('GET', `/api/sessions/${encodeURIComponent(id)}/skills/${encodeURIComponent(name)}`),
+  saveSkill: (id: string, name: string, text: string, version: string) =>
+    call<TextFile>('PUT', `/api/sessions/${encodeURIComponent(id)}/skills/${encodeURIComponent(name)}`, { text, version }),
+  /** What Claude reads into the session by itself: the user's instructions and the project's memory notes. */
+  memory: (id: string) => call<{ files: MemoryFile[] }>('GET', `/api/sessions/${encodeURIComponent(id)}/memory`),
+  memoryFile: (id: string, fileId: string) => call<TextFile>('GET', `/api/sessions/${encodeURIComponent(id)}/memory/${encodeURIComponent(fileId)}`),
+  saveMemory: (id: string, fileId: string, text: string, version: string) =>
+    call<TextFile>('PUT', `/api/sessions/${encodeURIComponent(id)}/memory/${encodeURIComponent(fileId)}`, { text, version }),
   /** An entry of a session's conversation, or of one of its sub-agents'. */
   entry: (id: string, entryId: string, agentId: string | null = null) =>
     call<EntryDetail>('GET', `/api/sessions/${encodeURIComponent(id)}/conversation/${encodeURIComponent(entryId)}${agentId ? `?agent=${encodeURIComponent(agentId)}` : ''}`),

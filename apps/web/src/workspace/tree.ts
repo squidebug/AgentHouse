@@ -16,7 +16,7 @@ export interface FolderGroup {
   nodes: SessionNode[];
 }
 
-function folderName(cwd: string): string {
+export function folderName(cwd: string): string {
   return cwd.split(/[\\/]/).filter(Boolean).pop() ?? cwd;
 }
 

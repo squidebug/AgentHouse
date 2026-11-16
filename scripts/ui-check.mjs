@@ -9,7 +9,7 @@
 // sessions or ~/.claude.
 //   pnpm build && pnpm ui:check [-- --out <folder>] [-- --headed]
 import { execFileSync, spawn } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
@@ -32,6 +32,11 @@ const work = path.join(scratch, 'work');
 mkdirSync(work, { recursive: true });
 const env = { ...process.env, AGENTHOUSE_HOME: home, CLAUDE_CONFIG_DIR: config };
 writeSampleSession({ home, config, cwd: work });
+// The user's own notes for Claude in the session folder: a skill of the project, and its instructions.
+const skillPath = path.join(work, '.claude', 'skills', 'ping-pong', 'SKILL.md');
+mkdirSync(path.dirname(skillPath), { recursive: true });
+writeFileSync(skillPath, '---\nname: ping-pong\ndescription: Replies with the word pong.\n---\n\nReply with exactly the word: pong\n');
+writeFileSync(path.join(work, 'CLAUDE.md'), '# ui-check\n\nAnswer in one line.\n');
 
 /** A stand-in Claude Code that answers --version like the real one, installed as npm would; the file to choose. */
 function installFakeClaude(bin, version) {
@@ -370,8 +375,9 @@ try {
   await page.getByRole('button', { name: '최상위로' }).click();
   await row('ui-agents').getByRole('img', { name: '묶음' }).waitFor({ state: 'detached', timeout: 5000 });
   check((await left('ui-agents')) === (await left('ui-check')), 'and back at the top from its details');
-  await page.getByRole('button', { name: '묶기', exact: true }).click();
+  await page.getByRole('button', { name: '아래로 넣기' }).click();
   await page.getByRole('menuitem', { name: 'ui-check' }).click();
+  await page.getByRole('menuitem', { name: '묶기' }).click();
   await row('ui-agents').getByRole('img', { name: '묶음' }).waitFor({ timeout: 5000 });
   check(true, 'grouped without dragging, from the menu');
   await page.getByRole('button', { name: '최상위로' }).click();
@@ -441,6 +447,83 @@ try {
   check((await announced('승인 대기 · Write')).includes('ui-check'), 'a session that asks is announced while the tab is in the background');
   check((await announced('작업 완료')).includes('ui-check'), 'and its finished work too, with the switch on', JSON.stringify(await page.evaluate(() => window.__notes)));
   await page.evaluate(() => delete document.visibilityState);
+
+  // What a session leaves running in the background and sets for later shows under it in the tree;
+  // the skills its conversation was given, in its details.
+  const background = tree.getByRole('group', { name: 'ui-check 백그라운드 작업' });
+  const workRow = (title) => background.locator('.ah-row', { hasText: title });
+  await tell('ui-check', 'run it in the background and keep it');
+  await workRow('Wait for the build').getByRole('img', { name: '실행 중' }).waitFor({ timeout: 10_000 });
+  await tell('ui-check', 'run the tests in the background');
+  await workRow('Run the tests').getByRole('img', { name: '완료' }).waitFor({ timeout: 10_000 });
+  check(await workRow('Wait for the build').getByRole('img', { name: '실행 중' }).isVisible(), 'a command in the background is a row under its session: running, then done');
+  await tell('ui-check', 'monitor the deploy and keep it');
+  await workRow('deploy status').getByText('모니터 · deployed 3 of 5').waitFor({ timeout: 10_000 });
+  check(true, 'a monitor shows the latest line it read');
+  await tell('ui-check', 'schedule a check and run it');
+  await workRow('check the deploy').getByText('1분마다 · 1회').waitFor({ timeout: 10_000 });
+  check(await workRow('check the deploy').getByRole('img', { name: '예약' }).isVisible(), 'a scheduled prompt is a row too, with its schedule in words and its runs');
+  await background.getByRole('button', { name: 'Wait for the build 세부 정보' }).click();
+  await tree.getByText('sleep 20; echo done').waitFor({ timeout: 5000 });
+  check(true, 'opened, a task shows its command');
+  await tell('ui-check', 'use a skill');
+  await page.waitForFunction(async ([address, token]) => (await (await fetch(`${address}/api/sessions`, { headers: { authorization: `Bearer ${token}` } })).json()).some((s) => s.title === 'ui-check' && s.invoked.includes('ping-pong')), [origin, key], { timeout: 10_000 });
+  await settle();
+  await page.screenshot({ path: path.join(out, 'background-dark.png') });
+  await page.getByRole('button', { name: '라이트 모드' }).click();
+  await settle();
+  await page.screenshot({ path: path.join(out, 'background-light.png') });
+  // Skills and memory are the user's and the folder's, shared by its sessions and their sub-agents:
+  // two buttons at the foot of the tree, a window each. The project's memory is next to its transcripts.
+  const memoryDir = path.join(path.dirname((await named('ui-check')).transcripts[0].path), 'memory');
+  mkdirSync(memoryDir, { recursive: true });
+  writeFileSync(path.join(memoryDir, 'MEMORY.md'), '- [Role](user-role.md) — who the user is\n');
+  writeFileSync(path.join(memoryDir, 'user-role.md'), '---\nname: user-role\ndescription: who the user is and how they work\nmetadata:\n  type: user\n---\n\nA developer who reviews every change.\n');
+  const library = tree.getByRole('group', { name: '스킬·메모리' });
+  await library.getByRole('button', { name: '스킬' }).click();
+  const skillWindow = page.getByRole('dialog', { name: '스킬', exact: true });
+  await skillWindow.getByRole('group', { name: '기본' }).getByText('loop').waitFor({ timeout: 10_000 });
+  check(await skillWindow.getByLabel('ping-pong 사용함').isVisible(), "the folder's skills open in a window of their own, the one a session ran marked");
+  check(await skillWindow.getByRole('group', { name: '플러그인' }).getByText('fake-plugin:review').isVisible(), 'by where they come from');
+  await settle();
+  await page.screenshot({ path: path.join(out, 'skills-light.png') });
+  // One of the project's own opens as the text it is, and is saved to its file.
+  await skillWindow.getByRole('group', { name: '프로젝트' }).getByRole('button', { name: /ping-pong/ }).click();
+  const skillEditor = page.getByRole('dialog', { name: 'ping-pong 편집' });
+  const skillText = skillEditor.getByRole('textbox', { name: 'ping-pong' });
+  await skillText.waitFor({ timeout: 10_000 });
+  await page.waitForFunction((box) => box.value.includes('Reply with exactly the word: pong'), await skillText.elementHandle(), { timeout: 10_000 });
+  check(await skillEditor.getByRole('button', { name: '저장' }).isDisabled(), "a skill of the project opens with its file's text, with nothing to save until that changes");
+  await skillText.fill((await skillText.inputValue()).replace('word: pong\n', 'word: pong, and nothing else\n'));
+  await settle();
+  await page.screenshot({ path: path.join(out, 'note-editor-light.png') });
+  await skillEditor.getByRole('button', { name: '저장' }).click();
+  await skillEditor.waitFor({ state: 'detached', timeout: 10_000 });
+  check(readFileSync(skillPath, 'utf8').endsWith('Reply with exactly the word: pong, and nothing else\n'), 'saved, the file has the new text', JSON.stringify(readFileSync(skillPath, 'utf8').slice(-40)));
+  await skillWindow.getByRole('button', { name: '닫기' }).click();
+  await skillWindow.waitFor({ state: 'detached', timeout: 5000 });
+  await page.getByRole('button', { name: '다크 모드' }).click();
+  await library.getByRole('button', { name: '메모리' }).click();
+  const memoryWindow = page.getByRole('dialog', { name: '메모리', exact: true });
+  await memoryWindow.getByRole('menu', { name: '자동 메모리' }).getByText('who the user is and how they work').waitFor({ timeout: 10_000 });
+  check(await memoryWindow.getByRole('menu', { name: '지침' }).getByText('CLAUDE.md').isVisible(), "and what Claude reads by itself: the project's instructions, then its memory notes by their own titles");
+  await settle();
+  await page.screenshot({ path: path.join(out, 'memory-dark.png') });
+  await memoryWindow.getByRole('menuitem', { name: 'user-role 편집' }).click();
+  const noteEditor = page.getByRole('dialog', { name: 'user-role 편집' });
+  const noteText = noteEditor.getByRole('textbox', { name: 'user-role' });
+  await noteText.waitFor({ timeout: 10_000 });
+  await page.waitForFunction((box) => box.value.includes('A developer'), await noteText.elementHandle(), { timeout: 10_000 });
+  await noteText.fill((await noteText.inputValue()).replace('who the user is and how they work', 'the user, in one line'));
+  await settle();
+  await page.screenshot({ path: path.join(out, 'note-editor-dark.png') });
+  await noteText.press('Control+s');
+  await noteEditor.waitFor({ state: 'detached', timeout: 10_000 });
+  await memoryWindow.getByText('the user, in one line').waitFor({ timeout: 10_000 });
+  check(readFileSync(path.join(memoryDir, 'user-role.md'), 'utf8').includes('description: the user, in one line'), 'a memory note is edited the same way, saved with Ctrl+S, and the list says what it says now');
+  await memoryWindow.getByRole('button', { name: '닫기' }).click();
+  await memoryWindow.waitFor({ state: 'detached', timeout: 5000 });
+  await background.getByRole('button', { name: 'Wait for the build 세부 정보' }).click();
 
   // Delegation: a session works for another; a piece of the lead's conversation goes to it, and its answer comes back.
   for (const title of ['ui-lead', 'ui-helper']) {

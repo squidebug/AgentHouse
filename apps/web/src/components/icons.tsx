@@ -72,6 +72,14 @@ export const BellIcon = (p: IconProps) => (
   </Svg>
 );
 
+/** A prompt set for later: on a schedule, or once. */
+export const ClockIcon = (p: IconProps) => (
+  <Svg aria-hidden={p.role === 'img' ? undefined : true} {...p}>
+    <circle cx="12" cy="12" r="8.5" />
+    <path d="M12 7.5 V12 L15 14" />
+  </Svg>
+);
+
 export const CopyIcon = (p: IconProps) => (
   <Svg {...p}>
     <rect x="8" y="8" width="12" height="12" rx="2.5" />
