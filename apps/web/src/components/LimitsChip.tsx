@@ -2,7 +2,7 @@ import { Box, ButtonBase, Popover, Typography } from '@mui/material';
 import { useEffect, useState } from 'react';
 import type { AccountLimits, RateWindow } from '@agenthouse/protocol';
 import { t } from '../strings';
-import { v } from '../theme/tokens';
+import { motion, v } from '../theme/tokens';
 
 /** A window whose reset time has passed no longer tells the usage. */
 const fresh = (window: RateWindow | null, now: number) => (window && (window.resetsAt === null || window.resetsAt > now) ? window : null);
@@ -68,7 +68,7 @@ export function LimitsChip({ limits }: { limits: AccountLimits[] }) {
       <ButtonBase
         onClick={(event) => setAnchor(event.currentTarget)}
         aria-label={`${t.usage} ${top.label} ${pct}%`}
-        sx={{ height: 32, px: 1.25, gap: 0.75, borderRadius: '8px', fontSize: 12, color: v.on2, '&:hover': { bgcolor: v.surface2 } }}
+        sx={{ height: 32, px: 1.25, gap: 0.75, borderRadius: '8px', fontSize: 12, color: v.on2, transition: `background-color ${motion.fast}`, '&:hover': { bgcolor: v.hover } }}
       >
         <span>{top.label}</span>
         <Box component="span" sx={{ fontWeight: 600, color: tone(pct) }}>

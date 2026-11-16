@@ -26,8 +26,9 @@ export function TopBar({ limits, env, envLoading, refreshEnv, mode, onToggleMode
   const attention = messages.some((m) => m.level !== 'info');
 
   return (
-    <Box component="header" sx={{ display: 'flex', alignItems: 'center', gap: 1, minHeight: 56, px: 2, bgcolor: v.surface, borderBottom: `1px solid ${v.outline}` }}>
-      <Typography component="h1" sx={{ fontSize: 14, fontWeight: 600 }}>
+    // Part of the page, like the tree below it: no face of its own and no line under it.
+    <Box component="header" sx={{ display: 'flex', alignItems: 'center', gap: 1, minHeight: 56, px: 2 }}>
+      <Typography component="h1" variant="h6">
         {t.appName}
       </Typography>
       <Box sx={{ flex: 1 }} />
