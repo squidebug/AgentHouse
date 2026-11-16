@@ -93,6 +93,15 @@ test("a claude session's file tools are kept out of AgentHouse's state folder", 
   }
 });
 
+test('a conversation to go on with is resumed under its own id, with the name Claude has for it', async () => {
+  const id = '0b9f2c1e-4a7d-4e55-9c3a-6f1d2b8e7a90';
+  const spec = await buildLaunch({ vendor: 'claude', title: '이어서', model: 'opus', effort: 'high', permissionMode: 'plan' }, install, cwd, { resume: id });
+  assert.deepEqual(spec.args, ['--resume', id, '--model', 'opus', '--effort', 'high', '--permission-mode', 'plan'], 'no new session id and no name; what it was launched with');
+  assert.deepEqual([spec.vendorSessionId, spec.title], [id, '이어서'], 'the transcript is the one it had; the title is still the session\'s');
+  // It becomes an argument of the CLI: only what Claude's ids look like.
+  for (const bad of ['--dangerously-skip-permissions', 'latest', '']) await assert.rejects(buildLaunch({ vendor: 'claude' }, install, cwd, { resume: bad }), LaunchError);
+});
+
 test('codex options map to its flags', async () => {
   const spec = await buildLaunch({ vendor: 'codex', model: 'gpt-6.1-sol', effort: 'high' }, { file: 'codex.exe', args: [] }, cwd);
   assert.deepEqual(spec.args, ['-m', 'gpt-6.1-sol', '-c', 'model_reasoning_effort="high"']);

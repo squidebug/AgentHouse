@@ -76,6 +76,8 @@ export class SessionManager extends EventEmitter {
   private readonly logged: AccountLimits[];
   private readonly onChange: () => void;
   private readonly onLimits: () => void;
+  /** Ended sessions being started again right now. */
+  private readonly resuming = new Set<string>();
 
   constructor(private readonly options: ManagerOptions) {
     super();
@@ -109,7 +111,52 @@ export class SessionManager extends EventEmitter {
     return [...newest.values()].map((entry) => stillValid(entry)).filter((entry): entry is AccountLimits => entry !== null);
   }
 
-  async create(opts: LaunchOptions): Promise<SessionInfo> {
+  create(opts: LaunchOptions): Promise<SessionInfo> {
+    return this.start(opts, randomUUID());
+  }
+
+  /**
+   * Starts an ended session again where its conversation stopped (`claude --resume`), in its
+   * folder and with what it was launched with. It is the same session to AgentHouse: the id stays,
+   * and with it the row in the tree, the panes showing it and the work delegated to or from it.
+   */
+  async resume(id: string, theme?: LaunchOptions['theme']): Promise<SessionInfo> {
+    const ended = this.get(id);
+    if (!ended) throw new LaunchError('세션을 찾을 수 없습니다.', 'NOT_FOUND', 404);
+    if (ended.state !== 'exited') throw new LaunchError('실행 중인 세션입니다.', 'SESSION_RUNNING', 409);
+    // Codex has its own way (`codex resume`), not looked into yet.
+    if (ended.vendor === 'codex') throw new LaunchError(`${VENDOR_NAMES[ended.vendor]} 세션은 이어서 열 수 없습니다.`, 'RESUME_UNSUPPORTED');
+    // The conversation it ended in: after /clear, the one that came last.
+    const last = ended.transcripts.at(-1);
+    if (!last?.vendorSessionId || !existsSync(last.path)) throw new LaunchError('이어서 열 대화가 없습니다.', 'NO_CONVERSATION', 409);
+    // Asked twice in a row (a double click): the first is still on its way.
+    if (this.resuming.has(id)) throw new LaunchError('이미 여는 중입니다.', 'RESUME_IN_PROGRESS', 409);
+    this.resuming.add(id);
+    try {
+      // A host that saw it end still holds it, for its last screen; it takes the id again once it let go.
+      if (this.options.host.get(id)) await this.options.host.closeSession(id);
+      return await this.start(
+        {
+          vendor: ended.vendor,
+          title: ended.title,
+          cwd: ended.cwd,
+          cols: ended.cols,
+          rows: ended.rows,
+          ...(ended.model ? { model: ended.model } : {}),
+          ...(ended.effort ? { effort: ended.effort } : {}),
+          ...(ended.permissionMode ? { permissionMode: ended.permissionMode } : {}),
+          ...(theme ? { theme } : {}),
+        },
+        id,
+        last.vendorSessionId,
+      );
+    } finally {
+      this.resuming.delete(id);
+    }
+  }
+
+  /** Prepares the launch and hands it to the host: a new conversation, or `resume`, the CLI's id of one to go on with. */
+  private async start(opts: LaunchOptions, id: string, resume?: string): Promise<SessionInfo> {
     const cwd = await resolveCwd(opts.cwd, this.options.defaultCwd);
     let install: { file: string; args: string[]; version: string | null };
     if (opts.vendor === 'fake') {
@@ -135,10 +182,11 @@ export class SessionManager extends EventEmitter {
       tempRoot: this.options.host.runDir,
       titles: this.list().map((session) => session.title),
       guard: this.options.host.stateDir,
+      ...(resume ? { resume } : {}),
     });
     try {
       return await this.options.host.spawn({
-        id: randomUUID(),
+        id,
         vendor: opts.vendor,
         title: spec.title,
         file: spec.file,

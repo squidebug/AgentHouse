@@ -57,7 +57,7 @@ pnpm dev:stop     # ends the dev sessions and the dev session host
 pnpm typecheck
 pnpm test             # protocol, web, server (a fake agent stands in for the CLIs; no login needed)
 pnpm licenses:check   # dependency license allowlist
-pnpm canary:claude    # the built app against your installed Claude Code; sends no prompt (-- --turn: one short haiku prompt; -- --scenario: approve, deny, interrupt, sub-agents, /clear)
+pnpm canary:claude    # the built app against your installed Claude Code; sends no prompt (-- --turn: one short haiku prompt; -- --resume: one, then the session is ended, resumed and asked one more; -- --scenario: approve, deny, interrupt, sub-agents, /clear)
 pnpm ui:check         # the built app in your installed Chrome with the fake agent (headless; -- --out <folder> keeps screenshots)
 ```
 

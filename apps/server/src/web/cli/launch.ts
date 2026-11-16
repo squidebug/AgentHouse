@@ -36,6 +36,8 @@ export interface LaunchSpec {
 
 // Aliases (opus), full ids (claude-opus-5-5, gpt-6.1-sol) and variants like [1m].
 const MODEL_NAME = /^[A-Za-z0-9][\w.:\-[\]]{0,79}$/;
+// Claude Code's own session ids.
+const SESSION_ID = /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 
 function pick<T extends string>(value: string | undefined, allowed: readonly T[], label: string): T | undefined {
   if (!value) return undefined;
@@ -144,6 +146,7 @@ export async function buildLaunch(
     tempRoot = os.tmpdir(),
     titles = [],
     guard,
+    resume,
   }: {
     observe?: ObserveTarget;
     tempRoot?: string;
@@ -151,6 +154,8 @@ export async function buildLaunch(
     titles?: readonly string[];
     /** AgentHouse's state folder, which the session's file tools are kept out of. */
     guard?: string;
+    /** The CLI's own id of a conversation to go on with (Claude `--resume`), instead of starting a new one. */
+    resume?: string;
   } = {},
 ): Promise<LaunchSpec> {
   const title = sessionTitle(opts.title, cwd, titles);
@@ -158,12 +163,14 @@ export async function buildLaunch(
 
   // The test double takes the same flags and reports the way Claude Code does.
   if (opts.vendor === 'claude' || opts.vendor === 'fake') {
-    // A pre-chosen id makes the transcript path known before the CLI writes it.
-    const vendorSessionId = randomUUID();
-    args.push('--session-id', vendorSessionId);
+    if (resume !== undefined && !SESSION_ID.test(resume)) throw new LaunchError(`세션 id가 올바르지 않습니다: ${resume}`, 'INVALID_OPTION');
+    // A pre-chosen id makes the transcript path known before the CLI writes it. A conversation
+    // resumed keeps the id it has (and the name Claude has for it), and its transcript goes on.
+    const vendorSessionId = resume ?? randomUUID();
+    args.push(resume ? '--resume' : '--session-id', vendorSessionId);
     // On Windows node-pty passes an argument already wrapped in quotes as it is: a title like
     // `"a" "b"` would turn into two arguments, the second a prompt or a flag. The name keeps none.
-    if (opts.title) args.push('--name', title.replace(/"/g, "'"));
+    if (opts.title && !resume) args.push('--name', title.replace(/"/g, "'"));
     const chosenModel = model(opts.model);
     if (chosenModel) args.push('--model', chosenModel);
     const effort = pick(opts.effort, CLAUDE_EFFORTS, 'effort');

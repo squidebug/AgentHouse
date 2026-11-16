@@ -16,6 +16,9 @@ export const LaunchBody = z.object({
   theme: z.enum(['light', 'dark']).optional(),
 });
 
+/** Starting an ended session again takes everything from that session, but the app's theme now. */
+export const ResumeBody = z.object({ theme: z.enum(['light', 'dark']).optional() });
+
 // What a browser may ask for; enterOnly and verify are the web server's own (unknown keys are dropped).
 export const ComposeBody = z.object({
   text: z.string().min(1).max(200_000),

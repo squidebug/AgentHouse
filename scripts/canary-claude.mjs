@@ -2,9 +2,11 @@
 // Checks the built AgentHouse against the real Claude Code installed on this
 // machine: a session starts, its hooks and status line report in, the screen
 // renders, and it ends cleanly. Uses a throwaway state folder, so it never
-// touches running sessions. Without --turn or --scenario no prompt is sent.
+// touches running sessions. Without --turn, --resume or --scenario no prompt is sent.
 //   pnpm build && pnpm canary:claude              start, observe, end
 //   pnpm canary:claude -- --turn                  also one short prompt (haiku, low effort)
+//   pnpm canary:claude -- --resume                that prompt, then the session is ended and started
+//       again where it stopped (`claude --resume`), and a second prompt asks for what the first got
 //   pnpm canary:claude -- --scenario              short prompts (haiku, low effort): a reply,
 //       a permission approved, a permission denied with Esc, a turn cut short with Esc, three
 //       sub-agents (two in parallel, one nested), /clear, then work delegated to a second session
@@ -25,7 +27,8 @@ const serverRequire = createRequire(path.join(root, 'apps/server/package.json'))
 const WebSocket = serverRequire('ws');
 const { Terminal } = serverRequire('@xterm/headless');
 const scenario = process.argv.includes('--scenario');
-const withTurn = scenario || process.argv.includes('--turn');
+const withResume = !scenario && process.argv.includes('--resume');
+const withTurn = scenario || withResume || process.argv.includes('--turn');
 // The long form of the temp folder (Windows may give 8.3 names), as a user's folder would be.
 const tmp = realpathSync.native(os.tmpdir());
 const home = mkdtempSync(path.join(tmp, 'agenthouse-canary-'));
@@ -314,26 +317,56 @@ async function runAgents(id) {
   return agents;
 }
 
+/**
+ * An ended session started again: Claude goes on with the conversation under the id it had, in the
+ * same transcript, and knows what was said before. The session's one reply so far is "pong".
+ */
+async function runResume(id) {
+  const before = await sessionNow(id);
+  const transcript = before?.transcripts.at(-1);
+  const ended = await api('POST', `/api/sessions/${id}/end`);
+  if (!check(ended.json?.exited === true && ended.json?.stillAlive === false, 'resume: the session ends first', JSON.stringify(ended.json))) return;
+  const resumed = await api('POST', `/api/sessions/${id}/resume`, { theme: 'dark' });
+  if (!check(resumed.status === 201 && resumed.json?.id === id, 'resume: the same session starts again', `HTTP ${resumed.status} ${resumed.json?.error ?? ''}`)) return;
+  const term = terminal(id);
+  let view = null;
+  try {
+    const ready = await waitFor(id, (s) => s.state === 'running' && s.status.value === 'idle' && s.transcripts.length > 0, 30_000);
+    if (!check(ready?.state === 'running' && ready.status.value === 'idle', 'resume: hooks report in (idle after SessionStart)', describe(ready))) console.log(await term.text());
+    const now = ready?.transcripts.at(-1);
+    check(Boolean(transcript) && now?.path === transcript.path && now?.vendorSessionId === transcript.vendorSessionId, 'resume: under the id and in the transcript it had', `${now?.vendorSessionId} / ${transcript?.vendorSessionId}`);
+    // Its conversation can be read again once its first hook has named the transcript.
+    view = conversation(id);
+    await turn(id, 'resume: a prompt in the conversation resumed', 'Which word did you reply with before? Reply with exactly that word.', (s) => s.status.value === 'idle');
+    await sleep(2000);
+    const replies = view.entries().filter((e) => e.kind === 'text');
+    check(replies.length >= 2 && replies.every((e) => /pong/i.test(e.text)), 'resume: it knows what was said, and the view shows both turns', replies.map((e) => JSON.stringify(e.text.slice(0, 40))).join(' '));
+  } finally {
+    view?.close();
+    term.close();
+  }
+}
+
 let session = null;
 try {
-  if (scenario) {
-    mkdirSync(work, { recursive: true });
-    for (const name of readdirSync(work)) rmSync(path.join(work, name), { recursive: true, force: true });
-  }
+  // The scenario and the resumed conversation stay out of this repository's own Claude history.
+  const apart = scenario || withResume;
+  if (apart) mkdirSync(work, { recursive: true });
+  if (scenario) for (const name of readdirSync(work)) rmSync(path.join(work, name), { recursive: true, force: true });
   const options = {
     vendor: 'claude',
     title: 'canary',
     theme: 'dark',
     // manual, not the user's default mode: in plan mode Claude answers with a larger model than haiku.
     ...(withTurn ? { model: 'haiku', effort: 'low', permissionMode: 'manual' } : {}),
-    ...(scenario ? { cwd: work } : {}),
+    ...(apart ? { cwd: work } : {}),
   };
   const created = await api('POST', '/api/sessions', options);
   if (!check(created.status === 201, 'session starts', `HTTP ${created.status}`)) throw new Error(created.json?.error ?? 'not created');
   session = created.json.id;
   const id = session;
   const term = terminal(id);
-  if (scenario) await trustFolder(id, term);
+  if (apart) await trustFolder(id, term);
 
   const ready = await waitFor(id, (s) => s.status.value === 'idle', 30_000);
   if (!check(ready?.status.value === 'idle', 'hooks report in (idle after SessionStart)', describe(ready))) console.log(await term.text());
@@ -397,6 +430,7 @@ try {
   }
   events.close();
   term.close();
+  if (withResume) await runResume(id);
 
   const ended = await api('DELETE', `/api/sessions/${id}`);
   session = null;

@@ -7,8 +7,10 @@
 // Launched like Claude Code (--session-id, --settings with AgentHouse's relay
 // hooks), it also reports like it: hook events to the session host, and, only
 // when CLAUDE_CONFIG_DIR is set (tests point it at a temporary folder), a
-// transcript in Claude's format. An Enter on its own submits what was typed or
-// pasted as a prompt; "tool" in it adds a tool call, "/clear" starts over.
+// transcript in Claude's format. With --resume <id> it goes on with that
+// conversation: the same id, the same transcript. An Enter on its own submits
+// what was typed or pasted as a prompt; "tool" in it adds a tool call, "/clear"
+// starts over.
 // "agents" starts sub-agents the way Claude Code 2.1.322 does (two in the
 // background, one of which starts a third, each reporting back), and
 // "agentask" one whose tool waits for approval for a moment.
@@ -30,7 +32,8 @@ try {
 } catch {
   // not launched with AgentHouse's hooks
 }
-let sessionId = flag('--session-id') ?? randomUUID();
+const resumed = flag('--resume');
+let sessionId = resumed ?? flag('--session-id') ?? randomUUID();
 const projects = process.env.CLAUDE_CONFIG_DIR ? path.join(process.env.CLAUDE_CONFIG_DIR, 'projects', process.cwd().replace(/[^A-Za-z0-9]/g, '-')) : null;
 const transcript = () => (projects ? path.join(projects, `${sessionId}.jsonl`) : null);
 
@@ -55,6 +58,14 @@ function post(route, body) {
 const hook = (name, extra = {}) => post('/hook', { hook_event_name: name, session_id: sessionId, cwd: process.cwd(), ...(transcript() ? { transcript_path: transcript() } : {}), ...extra });
 
 let parent = null;
+if (resumed && transcript()) {
+  // The next record follows the last one of the conversation it goes on with.
+  try {
+    parent = JSON.parse(readFileSync(transcript(), 'utf8').trimEnd().split('\n').at(-1)).uuid ?? null;
+  } catch {
+    // nothing written before: Claude Code would refuse to resume it; the double just starts it
+  }
+}
 function write(record) {
   const file = transcript();
   if (!file) return;
@@ -221,8 +232,9 @@ const grandchild = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)']
 
 out('fake-agent ready\r\n');
 out(`REPORT child=${grandchild.pid}\r\n`);
+if (resumed) out(`REPORT resumed=${resumed}\r\n`);
 out('\x1b[?2004h'); // ask for bracketed paste, like Claude Code and Codex do
-hook('SessionStart', { source: 'startup' });
+hook('SessionStart', { source: resumed ? 'resume' : 'startup' });
 
 const waiting = { cpr: true, osc11: true };
 out('\x1b[6n');

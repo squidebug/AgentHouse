@@ -12,7 +12,7 @@ import { DelegationError, Delegations, delegationsFile } from '../delegations';
 import { LinkError } from '../links';
 import { SessionManager } from '../manager';
 import { AccessControl } from './access';
-import { ChooseCliBody, ComposeBody, DelegateBody, DeliverBody, LaunchBody, LinkBody, LoginBody, TerminalClient } from './schemas';
+import { ChooseCliBody, ComposeBody, DelegateBody, DeliverBody, LaunchBody, LinkBody, LoginBody, ResumeBody, TerminalClient } from './schemas';
 import { serveStatic } from './static';
 
 export interface ServerOptions {
@@ -264,6 +264,12 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
       // Ends the CLI; the session stays listed, ended.
       if (parts[3] === 'end' && parts.length === 4 && req.method === 'POST') {
         send(res, 200, await manager.end(session.id));
+        return;
+      }
+      // Starts an ended session again where its conversation stopped.
+      if (parts[3] === 'resume' && parts.length === 4 && req.method === 'POST') {
+        const body = parse(ResumeBody, await readJson(req));
+        send(res, 201, await manager.resume(session.id, body.theme));
         return;
       }
       if (parts[3] === 'conversation' && parts[4] && parts.length === 5 && req.method === 'GET') {
