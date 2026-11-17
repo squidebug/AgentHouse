@@ -18,7 +18,7 @@ import {
   type HostState,
   type SpawnSpec,
 } from '../shared/host-protocol';
-import { openControl, probeHost, type ControlLink } from '../shared/host-link';
+import { hostAuth, openControl, probeHost, type ControlLink } from '../shared/host-link';
 import { logFile, readAllStates, readState, runDir } from '../shared/state';
 
 export class HostUnavailableError extends Error {
@@ -234,8 +234,8 @@ export class HostClient extends EventEmitter {
 
   /** A socket to one session's terminal on the host, for the web server to relay to a browser. */
   openTerminal(sessionId: string): WebSocket {
-    const { port, token } = this.link.state;
-    return new WebSocket(`ws://127.0.0.1:${port}/terminal?id=${encodeURIComponent(sessionId)}`, { headers: { authorization: `Bearer ${token}` } });
+    const { state } = this.link;
+    return new WebSocket(`ws://127.0.0.1:${state.port}/terminal?id=${encodeURIComponent(sessionId)}`, { headers: hostAuth(state).headers });
   }
 
   /** Disconnects; the host and its sessions keep running. */

@@ -4,8 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { TERMINAL_COLORS, type AccountLimits, type SessionInfo, type TerminalClientMessage, type Vendor } from '@agenthouse/protocol';
 import { hostBuildId } from '../shared/build';
-import { sameSecret } from '../shared/compare';
-import { HOST_PROTOCOL, HostRequestError, hostProof, type HostMessage, type HostRequest, type SpawnSpec } from '../shared/host-protocol';
+import { HOST_PROTOCOL, HostRequestError, hostProof, validWebProof, type HostMessage, type HostRequest, type SpawnSpec } from '../shared/host-protocol';
 import { clearState, removeTree, runDir, writeState } from '../shared/state';
 import { receiveFromRelay } from './hooks';
 import { ClaudeObserver, Observer } from './observer';
@@ -228,13 +227,13 @@ export async function createSessionHost(options: HostOptions): Promise<SessionHo
       socket.write(`HTTP/1.1 ${status} ${http.STATUS_CODES[status]}\r\nConnection: close\r\n\r\n`);
       socket.destroy();
     };
-    // A browser always sends Origin; a web server on this machine never does, and holds the token.
+    // A browser always sends Origin; a web server on this machine never does. It holds the token and
+    // shows so with a nonce of its own, on every connection, without sending the token.
     const bearer = req.headers.authorization?.match(/^Bearer (.+)$/)?.[1] ?? '';
-    if (req.headers.origin !== undefined || !sameSecret(bearer, token)) return reject(401);
+    const nonce = req.headers['x-agenthouse-nonce'];
+    if (req.headers.origin !== undefined || typeof nonce !== 'string' || nonce.length < 16 || nonce.length > 128 || !validWebProof(token, nonce, bearer)) return reject(401);
     const url = new URL(req.url ?? '/', 'http://localhost');
     if (url.pathname === '/control') {
-      const nonce = req.headers['x-agenthouse-nonce'];
-      if (typeof nonce !== 'string' || nonce.length < 16 || nonce.length > 128) return reject(400);
       wss.handleUpgrade(req, socket, head, (ws) => attachControl(ws, nonce));
       return;
     }

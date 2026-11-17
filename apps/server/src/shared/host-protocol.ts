@@ -8,19 +8,42 @@ import { sameSecret } from './compare';
  * stay the same in every version, so `--stop` can end a host of any version:
  * the hello's `protocol`, `pid` and `proof`, and the `shutdown` request.
  */
-export const HOST_PROTOCOL = 7;
+export const HOST_PROTOCOL = 8;
 
 /**
- * The host's answer to a web server's nonce. A process squatting on a dead
- * host's port (left in a stale state file) cannot produce it, so the web
- * server sends nothing to it and adopts nothing from it.
+ * Hosts from this protocol on are shown that a web server holds their token
+ * without being sent it (`webProof`). An older one takes the token itself,
+ * which is how `--stop` still reaches it.
+ */
+export const WEB_PROOF_SINCE = 8;
+
+const proof = (token: string, side: 'host' | 'web', nonce: string) => createHmac('sha256', token).update(`agenthouse-${side}:${nonce}`).digest('base64url');
+
+/**
+ * The host's answer to a web server's nonce: it holds the token. A process
+ * squatting on a dead host's port (left in a stale state file) cannot produce
+ * it, so the web server adopts nothing from it and sends it nothing more.
  */
 export function hostProof(token: string, nonce: string): string {
-  return createHmac('sha256', token).update(`agenthouse-host:${nonce}`).digest('base64url');
+  return proof(token, 'host', nonce);
 }
 
-export function validHostProof(token: string, nonce: string, proof: unknown): boolean {
-  return typeof proof === 'string' && sameSecret(proof, hostProof(token, nonce));
+export function validHostProof(token: string, nonce: string, presented: unknown): boolean {
+  return typeof presented === 'string' && sameSecret(presented, hostProof(token, nonce));
+}
+
+/**
+ * What a web server presents on every connection to the host, with a nonce of
+ * its own: it holds the token too. The token itself never goes over the
+ * connection, so whatever listens on that port learns nothing it could prove
+ * itself with, to this web server or to the next.
+ */
+export function webProof(token: string, nonce: string): string {
+  return proof(token, 'web', nonce);
+}
+
+export function validWebProof(token: string, nonce: string, presented: unknown): boolean {
+  return typeof presented === 'string' && sameSecret(presented, webProof(token, nonce));
 }
 
 /** Written by the host once it listens: how web servers find it and prove they may use it. */

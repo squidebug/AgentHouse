@@ -8,7 +8,7 @@ import { describe, test } from 'node:test';
 import { WebSocketServer } from 'ws';
 import type { SessionInfo } from '@agenthouse/protocol';
 import { HostClient, HostUnavailableError } from '../src/web/host-client';
-import { HOST_PROTOCOL, hostProof } from '../src/shared/host-protocol';
+import { HOST_PROTOCOL, hostProof, validWebProof, webProof } from '../src/shared/host-protocol';
 import { createSessionHost } from '../src/host/server';
 import { readState, runDir, writeState } from '../src/shared/state';
 import { createAgentHouseServer } from '../src/web/http/server';
@@ -92,10 +92,17 @@ describe('session host', () => {
       const state = readState(stateDir);
       assert.ok(state);
       const nonce = 'a-nonce-from-the-web-server';
-      const auth = { authorization: `Bearer ${state.token}`, 'x-agenthouse-nonce': nonce };
-      assert.equal((await openSocket(state.port, '/control', { 'x-agenthouse-nonce': nonce })).status, 401, 'no token');
-      assert.equal((await openSocket(state.port, '/control', { ...auth, authorization: 'Bearer wrong' })).status, 401, 'wrong token');
-      assert.equal((await openSocket(state.port, '/control', { ...auth, origin: 'http://127.0.0.1:7357' })).status, 401, 'never a browser, even one with the token');
+      // The web server shows that it holds the token, for a nonce of its own; the token itself is not sent.
+      const auth = { authorization: `Bearer ${webProof(state.token, nonce)}`, 'x-agenthouse-nonce': nonce };
+      assert.equal((await openSocket(state.port, '/control', { 'x-agenthouse-nonce': nonce })).status, 401, 'no proof');
+      assert.equal((await openSocket(state.port, '/control', { ...auth, authorization: 'Bearer wrong' })).status, 401, 'a wrong one');
+      assert.equal((await openSocket(state.port, '/control', { ...auth, authorization: `Bearer ${state.token}` })).status, 401, 'the token itself is not what is presented');
+      assert.equal((await openSocket(state.port, '/control', { ...auth, 'x-agenthouse-nonce': 'another-nonce-than-proven' })).status, 401, 'a proof is good for its nonce only');
+      assert.equal((await openSocket(state.port, '/control', { authorization: auth.authorization })).status, 401, 'no nonce');
+      assert.equal((await openSocket(state.port, '/control', { ...auth, origin: 'http://127.0.0.1:7357' })).status, 401, 'never a browser, even one with the proof');
+      // A terminal is opened the same way: with the proof it gets as far as asking for the session.
+      assert.equal((await openSocket(state.port, '/terminal?id=none', { authorization: `Bearer ${state.token}` })).status, 401);
+      assert.equal((await openSocket(state.port, '/terminal?id=none', auth)).status, 404);
       const allowed = await openSocket(state.port, '/control', auth);
       assert.equal(allowed.status, 101);
       assert.ok(await waitFor(() => allowed.messages.length > 0, 2000));
@@ -108,15 +115,25 @@ describe('session host', () => {
     }
   });
 
-  test("a web server ignores something squatting on a dead host's port", async () => {
+  test("a web server ignores something squatting on a dead host's port, and tells it nothing it could use", async () => {
     const stateDir = await tempStateDir();
-    // Whatever now listens where a host used to: it answers like a host but cannot prove the token.
+    // Whatever now listens where a host used to. It answers like a host, with a proof made of everything it was sent.
     const impostor = new WebSocketServer({ port: 0, host: '127.0.0.1' });
-    impostor.on('connection', (ws) => ws.send(JSON.stringify({ type: 'hello', protocol: HOST_PROTOCOL, pid: 1, proof: 'forged', webToken: 'chosen-by-them', sessions: [], limits: [] })));
+    const heard: string[] = [];
+    impostor.on('connection', (ws, req) => {
+      const presented = req.headers.authorization?.replace(/^Bearer /, '') ?? '';
+      heard.push(presented);
+      const proof = hostProof(presented, String(req.headers['x-agenthouse-nonce']));
+      ws.send(JSON.stringify({ type: 'hello', protocol: HOST_PROTOCOL, pid: 1, proof, webToken: 'chosen-by-them', sessions: [], limits: [] }));
+    });
     try {
       await new Promise<void>((resolve) => impostor.once('listening', resolve));
       writeState(stateDir, { protocol: HOST_PROTOCOL, pid: process.pid, port: (impostor.address() as AddressInfo).port, token: 'the-real-token', startedAt: 1 });
       await assert.rejects(HostClient.connect({ stateDir, spawn: false }), HostUnavailableError);
+      assert.equal(heard.length, 1);
+      assert.notEqual(heard[0], 'the-real-token', 'the token is not sent to whatever listens there');
+      // What it heard proves nothing elsewhere: a proof for a nonce of its own choosing takes the token.
+      assert.equal(validWebProof('the-real-token', 'a-nonce-of-its-own', heard[0]), false);
     } finally {
       impostor.close();
       await rm(stateDir, { recursive: true, force: true });

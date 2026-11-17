@@ -20,6 +20,8 @@ async function olderHost(stateDir: string, protocol: number, sessions: number) {
   await new Promise<void>((resolve) => server.once('listening', resolve));
   const received: unknown[] = [];
   server.on('connection', (ws, req) => {
+    // A host from before web servers proved themselves knows nothing but its token: anything else it turns away.
+    if (req.headers.authorization !== `Bearer ${token}`) return ws.close();
     const nonce = String(req.headers['x-agenthouse-nonce']);
     ws.send(JSON.stringify({ type: 'hello', protocol, pid: process.pid, proof: hostProof(token, nonce), webToken: 'w', sessions: [], limits: [] }));
     ws.on('message', (raw) => {
