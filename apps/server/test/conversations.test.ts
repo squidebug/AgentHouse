@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, describe, test } from 'node:test';
@@ -169,6 +169,58 @@ describe('conversations', () => {
       view.unsubscribe?.();
     } finally {
       conversations.close();
+    }
+  });
+
+  test('what a session was last asked and said is read from the end of its latest transcript', async () => {
+    const manager = new FakeManager();
+    const outside = mkdtempSync(path.join(os.tmpdir(), 'agenthouse-elsewhere-'));
+    const conversations = new Conversations(manager as unknown as SessionManager);
+    const words = async (id: string) => {
+      const { prompt: asked, answer } = await conversations.latest(id);
+      return [asked, answer];
+    };
+    try {
+      // Many turns before it: only the end is read, and the last turn is in it.
+      const many = session(manager, [...Array.from({ length: 200 }, (_, i) => turnRecords(i)).flat(), prompt('The last question'), assistant('msg_last', text('The last answer.'))]);
+      assert.ok(statSync(many.file).size > 1024 * 1024, 'more than is read at first');
+      assert.deepEqual(await words(many.info.id), ['The last question', 'The last answer.']);
+
+      // A turn that wrote more than that since its prompt: the read goes further back for the prompt.
+      const big = session(manager, [
+        ...turnRecords(1),
+        prompt('Read everything'),
+        ...Array.from({ length: 12 }, (_, i) => [assistant(`msg_big_${i}`, toolUse(`toolu_big_${i}`, 'Read', { file_path: `/work/shop/file-${i}.ts` })), toolResult(`toolu_big_${i}`, 'c'.repeat(50_000))]).flat(),
+        assistant('msg_big', text('Read them all.')),
+      ]);
+      assert.deepEqual(await words(big.info.id), ['Read everything', 'Read them all.']);
+
+      // After /clear the new conversation starts with neither, then has its own.
+      const cleared = session(manager, [prompt('Before'), assistant('msg_1', text('Old'))]);
+      const second = path.join(projects, 'after-clear.jsonl');
+      writeFileSync(second, '');
+      cleared.info.transcripts.push({ vendorSessionId: 'cli-2', path: second, since: 2 });
+      assert.deepEqual(await words(cleared.info.id), [null, null]);
+      const line = JSON.stringify(assistant('msg_2', text('New')));
+      appendFileSync(second, `${jsonl([prompt('After')])}${line.slice(0, 30)}`);
+      assert.deepEqual(await words(cleared.info.id), ['After', null], 'a line still being written is not read');
+      appendFileSync(second, `${line.slice(30)}\n`);
+      assert.deepEqual(await words(cleared.info.id), ['After', 'New']);
+
+      // Nothing to read: no session, no transcript, a file that is gone, a path outside Claude's projects folder.
+      const none = { prompt: null, promptAt: null, answer: null };
+      assert.deepEqual(await conversations.latest('nobody'), none);
+      const bare = { id: 'bare', transcripts: [] } as unknown as SessionInfo;
+      manager.sessions.set(bare.id, bare);
+      assert.deepEqual(await conversations.latest(bare.id), none);
+      const gone = session(manager, [prompt('Gone')]);
+      rmSync(gone.file);
+      assert.deepEqual(await conversations.latest(gone.info.id), none);
+      const stray = session(manager, [prompt('secret'), assistant('msg_1', text('hidden'))], outside);
+      assert.deepEqual(await conversations.latest(stray.info.id), none);
+    } finally {
+      conversations.close();
+      rmSync(outside, { recursive: true, force: true });
     }
   });
 

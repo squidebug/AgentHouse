@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { describe, test } from 'node:test';
 import type { ConversationEntry } from '@agenthouse/protocol';
-import { ConversationBuilder, entryDetail, toolSummary, type LineRange } from '../src/claude/transcript';
+import { ConversationBuilder, entryDetail, latestWords, toolSummary, type LineRange } from '../src/claude/transcript';
 import { assistant, CWD, interrupt, noise, prompt, system, text, thinking, toolResult, toolUse, usage } from './fixtures/transcript';
 
 function build(records: unknown[], builder = new ConversationBuilder()) {
@@ -238,5 +238,42 @@ describe('conversation from a Claude Code transcript', () => {
     const range: LineRange = [0, 1];
     for (const record of [null, 3, 'text', [], { type: 'user' }, { type: 'assistant', message: 'x' }, { type: 'system', subtype: 'new-thing' }]) builder.add(record, range);
     assert.deepEqual(builder.snapshot().entries, []);
+  });
+
+  test('what it was last asked and what it last said to that, as plain words for a glance', () => {
+    const latest = (records: unknown[]) => latestWords(build(records).snapshot().entries);
+    const words = (records: unknown[]) => {
+      const { prompt: asked, answer } = latest(records);
+      return [asked, answer];
+    };
+    assert.deepEqual(latest([]), { prompt: null, promptAt: null, answer: null });
+
+    const first = prompt('Sort   the files\nby date');
+    const turn = [first, assistant('msg_1', toolUse('toolu_1', 'Bash', { command: 'ls -t' })), toolResult('toolu_1', 'b a')];
+    assert.deepEqual(latest(turn), { prompt: 'Sort the files by date', promptAt: Date.parse(first.timestamp), answer: null }, 'nothing said yet: it still works');
+    const answered = [...turn, assistant('msg_2', text('## Done\n\n- **Sorted** `2` files, see [the list](https://example.com/list).\n\n| a | b |\n|---|---|\n| 1 | 2 |'))];
+    assert.deepEqual(words(answered), ['Sort the files by date', 'Done Sorted 2 files, see the list. a b 1 2'], 'an answer is markdown: its marks are left out');
+    assert.deepEqual(words([...answered, prompt('And by size?')]), ['And by size?', null], 'the next prompt has no answer yet');
+
+    // A background agent's report starts a turn of its own, but asks nothing.
+    const report = '<task-notification>\n<task-id>a1</task-id>\n<status>completed</status>\n<summary>done</summary>\n<result>Three folders.</result>\n</task-notification>';
+    const reported = [prompt('Look around'), assistant('msg_1', text('It is running.')), prompt(report, { origin: { kind: 'task-notification' } }), assistant('msg_2', text('Three folders, it says.'))];
+    assert.deepEqual(words(reported), ['Look around', 'Three folders, it says.']);
+
+    // A prompt the CLI gave the session on a schedule is what that turn answers.
+    const scheduled = [prompt('First'), assistant('msg_1', text('One.')), prompt('check the deploy', { isMeta: true, scheduledTaskId: 'cron-1', origin: undefined }), assistant('msg_2', text('Deployed 3 of 5.'))];
+    assert.deepEqual(words(scheduled), ['check the deploy', 'Deployed 3 of 5.']);
+
+    // A command the model answered is what was asked; one the CLI answered itself is not.
+    const command = (name: string, args: string) => prompt(`<command-name>${name}</command-name>\n<command-message>${name.slice(1)}</command-message>\n<command-args>${args}</command-args>`, { origin: undefined });
+    const looped = [prompt('First'), assistant('msg_1', text('One.')), command('/loop', '5m check the deploy'), assistant('msg_2', toolUse('toolu_2', 'CronCreate', { cron: '*/5 * * * *' })), assistant('msg_3', text('Set.'))];
+    assert.deepEqual(words(looped), ['/loop 5m check the deploy', 'Set.']);
+    assert.deepEqual(words([...looped, command('/model', 'opus'), system('local_command', { content: '<local-command-stdout>Set model to Opus</local-command-stdout>' })]), ['/loop 5m check the deploy', 'Set.']);
+    assert.deepEqual(words([command('/clear', '')]), [null, null]);
+
+    // Read from the end of a transcript, the prompt may be missing: what was said is shown all the same.
+    assert.deepEqual(latest([toolResult('toolu_9', 'x'), assistant('msg_1', text('Done after all.'))]), { prompt: null, promptAt: null, answer: 'Done after all.' });
+    const [long] = words([prompt('p'.repeat(1000))]);
+    assert.deepEqual([long?.length, long?.endsWith('…')], [301, true], 'a long one is cut');
   });
 });

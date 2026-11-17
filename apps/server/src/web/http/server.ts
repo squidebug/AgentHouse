@@ -294,6 +294,11 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
         send(res, 200, detail);
         return;
       }
+      // What it was last asked and what it last said, for a glance: read from the end of its transcript when asked for.
+      if (parts[3] === 'latest' && parts.length === 4 && req.method === 'GET') {
+        send(res, 200, await conversations.latest(session.id));
+        return;
+      }
       // The skills its conversation was given, read from its transcript when asked for.
       if (parts[3] === 'skills' && parts.length === 4 && req.method === 'GET') {
         send(res, 200, { skills: await skillsOf(session, claudeConfigDir()) });

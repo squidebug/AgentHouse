@@ -1,4 +1,4 @@
-import type { ConversationEntry, ConversationTurn, EntryDetail, ToolState } from '@agenthouse/protocol';
+import type { ConversationEntry, ConversationTurn, EntryDetail, LatestWords, ToolState } from '@agenthouse/protocol';
 import { AGENT_TOOLS } from './agents';
 import { isInterruptText } from './status';
 
@@ -462,6 +462,59 @@ export class ConversationBuilder {
       default:
     }
   }
+}
+
+// What a glance at many sessions shows of a prompt or an answer.
+const GLANCE_CHARS = 300;
+
+/**
+ * The start of a text as plain words on one line: an answer is markdown, and
+ * its marks (headings, list bullets, emphasis, code fences, links, table bars)
+ * would only be in the way where a line or two of it are shown.
+ */
+function plainStart(text: string): string {
+  const words = text
+    // More than is shown, so that marks do not use up the room; the rest is never looked at.
+    .slice(0, GLANCE_CHARS * 8)
+    .split(/\r?\n/)
+    .filter((line) => !/^\s*(```|~~~)/.test(line) && !/^\s*\|?[\s:|-]*-[\s:|-]*\|?\s*$/.test(line))
+    .map((line) =>
+      line
+        .replace(/^\s*(#{1,6}\s+|>\s?|[-*+]\s+|\d+[.)]\s+)*/, '')
+        .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+        .replace(/\*\*|__|`/g, '')
+        .replace(/\|/g, ' '),
+    )
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return words.length > GLANCE_CHARS ? `${words.slice(0, GLANCE_CHARS)}…` : words;
+}
+
+/**
+ * What a conversation was last asked and what it last said to that, from its
+ * entries (all of them, or those of the end of its transcript): the latest
+ * prompt, and the latest text after it. A slash command the model answered (a
+ * skill, /loop) is what was asked; one the CLI answered itself (/model) is not.
+ * A background agent's report starts a turn but asks nothing: what the model
+ * says to it still answers the prompt before.
+ */
+export function latestWords(entries: ConversationEntry[]): LatestWords {
+  const said = (entry: ConversationEntry) => entry.kind === 'text' || entry.kind === 'tool' || entry.kind === 'agent' || entry.kind === 'thinking';
+  // From the end: the latest text is the answer, and the first prompt met is what it answers.
+  let ask: ConversationEntry | undefined;
+  let answered = false;
+  let answer: string | null = null;
+  for (let i = entries.length - 1; i >= 0 && !ask; i -= 1) {
+    const entry = entries[i]!;
+    if (entry.kind === 'prompt' || (entry.kind === 'command' && answered)) ask = entry;
+    else if (said(entry)) {
+      answered = true;
+      if (entry.kind === 'text' && answer === null) answer = entry.text;
+    }
+  }
+  const prompt = ask?.kind === 'prompt' ? plainStart(ask.text) : ask?.kind === 'command' ? plainStart(`${ask.name} ${ask.args}`) : '';
+  return { prompt: prompt || null, promptAt: ask?.at ?? null, answer: (answer !== null && plainStart(answer)) || null };
 }
 
 /** A value to show, cut where it is too long, too many or too deep; `state.truncated` says that something was left out. */

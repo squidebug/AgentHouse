@@ -68,6 +68,20 @@ export interface EntryDetail {
   truncated: boolean;
 }
 
+/**
+ * What a session was last asked and what it last said to that, as a few plain
+ * words: for a glance at many sessions (GET /api/sessions/:id/latest), read
+ * from the end of its transcript when asked for.
+ */
+export interface LatestWords {
+  /** The latest prompt (typed, handed over by another session, or given on a schedule), or the command the model answered. */
+  prompt: string | null;
+  /** When it was given (epoch ms): the turn it started may still go on. */
+  promptAt: number | null;
+  /** The latest the model said after it; null while it said nothing yet. */
+  answer: string | null;
+}
+
 /** Server → browser on /ws/conversation. */
 export type ConversationServerMessage =
   /** Everything known so far; sent first and whenever the view must start over. */

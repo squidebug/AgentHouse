@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
-import type { ConversationEntry, ConversationServerMessage, ConversationTurn, EntryDetail, SessionInfo } from '@agenthouse/protocol';
+import type { ConversationEntry, ConversationServerMessage, ConversationTurn, EntryDetail, LatestWords, SessionInfo } from '@agenthouse/protocol';
 import { eventually, login, openSocket, request, startServer, waitFor, type TestServer } from './helpers';
 
 // The fake agent writes its transcript only under a CLAUDE_CONFIG_DIR, never into ~/.claude.
@@ -83,6 +83,14 @@ describe('conversation view', () => {
     assert.deepEqual([(detail.json as EntryDetail).text, ((detail.json as EntryDetail).input as { command?: string }).command], ['fake-tool-output', 'echo fake-tool-output']);
     assert.equal((await request(app.port, 'GET', `/api/sessions/${session.id}/conversation/nothing`, { headers })).status, 404);
 
+    // For a glance (the dashboard): what it was last asked and what it said, without the conversation.
+    const latest = async () => (await request(app.port, 'GET', `/api/sessions/${session.id}/latest`, { headers })).json as LatestWords;
+    const words = await latest();
+    assert.deepEqual([words.prompt, words.answer], ['run a tool please', 'fake answer: run a tool please']);
+    assert.ok(Math.abs((words.promptAt ?? 0) - Date.now()) < 60_000, 'with when it was asked');
+    assert.equal((await request(app.port, 'GET', '/api/sessions/nobody/latest', { headers })).status, 404);
+    assert.equal((await request(app.port, 'GET', `/api/sessions/${session.id}/latest`)).status, 401, 'not without the login');
+
     // /clear: a new transcript, shown after the old conversation.
     await compose('/clear');
     assert.equal((await eventually(now, (s) => s?.transcripts.length === 2, 8000))?.transcripts.length, 2, 'a second transcript');
@@ -97,6 +105,8 @@ describe('conversation view', () => {
       after.turns.map((t) => t.segment),
       [0, 1, 1],
     );
+    const then = await latest();
+    assert.deepEqual([then.prompt, then.answer], ['and now?', 'fake answer: and now?'], 'the latest words are those of the new conversation');
     socket.ws?.close();
     await request(app.port, 'DELETE', `/api/sessions/${session.id}`, { headers });
   });

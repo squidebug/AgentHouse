@@ -1,8 +1,8 @@
 import { open } from 'node:fs/promises';
-import type { ConversationServerMessage, EntryDetail, SessionInfo, TranscriptSegment } from '@agenthouse/protocol';
+import type { ConversationEntry, ConversationServerMessage, EntryDetail, LatestWords, SessionInfo, TranscriptSegment } from '@agenthouse/protocol';
 import { claudeConfigDir } from '../claude/settings';
 import { isClaudeTranscript } from '../claude/status';
-import { ConversationBuilder, entryDetail, type LineRange } from '../claude/transcript';
+import { ConversationBuilder, entryDetail, latestWords, type LineRange } from '../claude/transcript';
 import type { SessionManager } from './manager';
 
 // Read in pieces, giving the event loop back in between: a 10 MB transcript
@@ -61,6 +61,56 @@ class SegmentReader {
     } finally {
       await handle.close();
     }
+  }
+}
+
+// For a glance at a session: the end of its transcript, this much at first and more while no prompt is in it.
+const TAIL_BYTES = 256 * 1024;
+const TAIL_MAX_BYTES = 4 * 1024 * 1024;
+
+/**
+ * The entries of the end of a transcript: as much of it as holds its latest
+ * prompt, up to a limit (a turn that wrote more than that since its prompt
+ * shows what it said, without the prompt). Read like a conversation, in pieces.
+ */
+async function tailEntries(file: string): Promise<ConversationEntry[]> {
+  let handle;
+  try {
+    handle = await open(file, 'r');
+  } catch {
+    return [];
+  }
+  try {
+    const { size } = await handle.stat();
+    for (let want = TAIL_BYTES; ; want *= 4) {
+      const start = Math.max(0, size - want);
+      const buffer = Buffer.alloc(size - start);
+      await handle.read(buffer, 0, buffer.length, start);
+      const builder = new ConversationBuilder();
+      // A read that starts mid-file may start mid-line: that piece is not a record.
+      let at = start > 0 ? buffer.indexOf(10) + 1 || buffer.length : 0;
+      let parsed = at;
+      while (at < buffer.length) {
+        let end = buffer.indexOf(10, at);
+        if (end === -1) end = buffer.length;
+        if (end > at) {
+          try {
+            builder.add(JSON.parse(buffer.toString('utf8', at, end)), [start + at, start + end]);
+          } catch {
+            // a line still being written
+          }
+        }
+        at = end + 1;
+        if (at - parsed >= CHUNK_BYTES) {
+          parsed = at;
+          await yieldToOthers();
+        }
+      }
+      const { entries } = builder.snapshot();
+      if (start === 0 || want >= TAIL_MAX_BYTES || entries.some((entry) => entry.kind === 'prompt')) return entries;
+    }
+  } finally {
+    await handle.close();
   }
 }
 
@@ -271,6 +321,17 @@ export class Conversations {
       this.open.set(key, { sessionId, agentId, conversation: created });
     }
     return conversation.subscribe(listener);
+  }
+
+  /**
+   * What the session was last asked and what it last said, for a glance at many
+   * sessions: from the end of its latest transcript alone, read when asked for.
+   * A conversation after /clear starts with neither.
+   */
+  async latest(sessionId: string): Promise<LatestWords> {
+    const session = this.manager.get(sessionId);
+    const last = session ? transcriptsOf(session, null).at(-1) : undefined;
+    return latestWords(last ? await tailEntries(last.path) : []);
   }
 
   /** The full content of one entry of a conversation being viewed. */
