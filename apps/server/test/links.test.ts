@@ -56,7 +56,7 @@ describe('session links', () => {
     const stateDir = await tempStateDir();
     const host = await createSessionHost({ stateDir, idleExitMs: null });
     const client = await HostClient.connect({ stateDir, spawn: false });
-    let app = await createAgentHouseServer({ port: 0, fakeAgentPath, host: client });
+    let app = await createAgentHouseServer({ port: 0, fakeAgentPath, host: client, claudeSessions: null });
     try {
       let headers = { authorization: await login(app), origin: `http://127.0.0.1:${app.port}` };
       const start = async (title: string) => ((await request(app.port, 'POST', '/api/sessions', { headers, body: { vendor: 'fake', title } })).json as SessionInfo).id;
@@ -80,7 +80,7 @@ describe('session links', () => {
       // A new web server reads them back.
       events.ws?.close();
       await app.close();
-      app = await createAgentHouseServer({ port: 0, fakeAgentPath, host: client });
+      app = await createAgentHouseServer({ port: 0, fakeAgentPath, host: client, claudeSessions: null });
       headers = { authorization: await login(app), origin: `http://127.0.0.1:${app.port}` };
       const again = await openSocket(app.port, '/ws/events', headers);
       assert.ok(await waitFor(() => again.messages.some((m) => m.type === 'links' && (m.links as SessionLink[]).length === 1), 3000), 'still there after a restart');

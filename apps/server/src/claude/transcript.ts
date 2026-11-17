@@ -517,6 +517,33 @@ export function latestWords(entries: ConversationEntry[]): LatestWords {
   return { prompt: prompt || null, promptAt: ask?.at ?? null, answer: (answer !== null && plainStart(answer)) || null };
 }
 
+/** What a session ran with when it last answered. */
+export interface LatestRun {
+  model: string | null;
+  effort: string | null;
+  /** The CLI's version, as each record carries it. */
+  version: string | null;
+}
+
+// A model's id, an effort, a version: short by nature.
+const NAME_CHARS = 80;
+
+/**
+ * The model, the effort and the CLI version of the latest answer among these
+ * records (the lines of a transcript's end, oldest first): what a session
+ * nothing else reports for is known to run with. All null before its first answer.
+ */
+export function latestRun(records: unknown[]): LatestRun {
+  for (let i = records.length - 1; i >= 0; i -= 1) {
+    const record = obj(records[i]);
+    const model = record?.type === 'assistant' ? str(obj(record.message)?.model) : null;
+    if (!record || !model || model === '<synthetic>') continue;
+    const short = (value: unknown) => str(value)?.slice(0, NAME_CHARS) || null;
+    return { model: model.slice(0, NAME_CHARS), effort: short(record.effort), version: short(record.version) };
+  }
+  return { model: null, effort: null, version: null };
+}
+
 /** A value to show, cut where it is too long, too many or too deep; `state.truncated` says that something was left out. */
 function clip(value: unknown, state: { truncated: boolean }, depth = 0): unknown {
   if (typeof value === 'string') {

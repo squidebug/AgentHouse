@@ -4,6 +4,9 @@ export const LoginBody = z.object({ code: z.string().min(1).max(200) });
 
 export const ChooseCliBody = z.object({ path: z.string().min(1).max(1024).nullable() });
 
+/** Watching the sessions started outside AgentHouse, on or off. */
+export const ExternalBody = z.object({ on: z.boolean() });
+
 export const LaunchBody = z.object({
   vendor: z.enum(['claude', 'codex', 'fake']),
   title: z.string().max(80).optional(),

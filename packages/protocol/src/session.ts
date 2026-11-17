@@ -289,7 +289,17 @@ export interface SessionInfo {
   schedules: ScheduledPrompt[];
   /** Skills the model started and slash commands the user typed, by name, in the order first used. */
   invoked: string[];
+  /**
+   * Started outside AgentHouse (a terminal, an editor) and only watched: the web
+   * server found it in the CLI's own list of sessions. It has no terminal here
+   * and takes nothing from here; what is known of it is its state, its folder
+   * and what its transcript says.
+   */
+  external?: boolean;
 }
+
+/** A session AgentHouse runs itself, still going: it takes messages. One only watched does not. */
+export const takesInput = (session: Pick<SessionInfo, 'state' | 'external'>): boolean => session.state === 'running' && !session.external;
 
 export interface CliInstall {
   file: string;

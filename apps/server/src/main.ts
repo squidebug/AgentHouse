@@ -4,7 +4,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { findOnPath } from './web/cli/resolve';
 import { doctor } from './web/doctor-command';
+import { askSessions } from './web/external';
 import { HostClient, stopHosts } from './web/host-client';
+import { childEnv } from './shared/child-env';
 import { defaultStateDir, webLogger } from './shared/state';
 import { createAgentHouseServer } from './web/http/server';
 import { forgetWebServer, recordWebServer, runningWebServer, stopWebServer } from './web/instance';
@@ -123,7 +125,9 @@ async function main(): Promise<void> {
     startCommand: dev ? 'pnpm dev' : 'pnpm start',
     defaultCwd: args.cwd ?? process.cwd(),
     ...(existsSync(path.join(webDist, 'index.html')) && !dev ? { webDist } : {}),
-    ...(args.allowFake ? { fakeAgentPath } : {}),
+    // With the test double allowed it also stands in for Claude Code's list of sessions: a check
+    // shows the sessions it made up, never the ones the user really has open.
+    ...(args.allowFake ? { fakeAgentPath, claudeSessions: () => askSessions({ file: process.execPath, args: [fakeAgentPath, 'agents', '--json'] }, childEnv()) } : {}),
   });
   if (!dev) recordWebServer(stateDir, { port: app.port, url: app.url, key: app.key });
 

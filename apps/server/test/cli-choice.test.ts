@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -31,13 +31,26 @@ after(async () => {
 
 test('the settings file keeps a full path per CLI; anything else reads as no choice', () => {
   const dir = path.join(scratch, 'settings');
-  assert.deepEqual(readAppSettings(dir), { cli: {} }, 'no file');
-  writeAppSettings(dir, { cli: { claude: path.join(scratch, 'claude.exe') } });
-  assert.deepEqual(readAppSettings(dir), { cli: { claude: path.join(scratch, 'claude.exe') } });
+  assert.deepEqual(readAppSettings(dir), { cli: {}, external: true }, 'no file');
+  writeAppSettings(dir, { cli: { claude: path.join(scratch, 'claude.exe') }, external: true });
+  assert.deepEqual(readAppSettings(dir), { cli: { claude: path.join(scratch, 'claude.exe') }, external: true });
   for (const text of ['not json', JSON.stringify({ version: 2, cli: { claude: '/x' } }), JSON.stringify({ version: 1, cli: { claude: 'relative', codex: 7 } })]) {
     writeFileSync(appSettingsFile(dir), text);
-    assert.deepEqual(readAppSettings(dir), { cli: {} }, text);
+    assert.deepEqual(readAppSettings(dir), { cli: {}, external: true }, text);
   }
+});
+
+test('the settings file keeps the sessions started elsewhere turned off, next to the chosen CLI', () => {
+  const dir = path.join(scratch, 'settings-external');
+  const claude = path.join(scratch, 'claude.exe');
+  writeAppSettings(dir, { cli: { claude }, external: false });
+  assert.deepEqual(readAppSettings(dir), { cli: { claude }, external: false });
+  assert.deepEqual(JSON.parse(readFileSync(appSettingsFile(dir), 'utf8')), { version: 1, cli: { claude }, external: false });
+  // On is how it comes: nothing is written for it, and anything but `false` reads as on.
+  writeAppSettings(dir, { cli: {}, external: true });
+  assert.deepEqual(JSON.parse(readFileSync(appSettingsFile(dir), 'utf8')), { version: 1, cli: {} });
+  writeFileSync(appSettingsFile(dir), JSON.stringify({ version: 1, cli: {}, external: 'no' }));
+  assert.equal(readAppSettings(dir).external, true);
 });
 
 test('a chosen file runs only as a full path to a program', () => {
@@ -90,7 +103,7 @@ test('a file chosen in the environment check is checked by running it, then laun
   const reset = await choose({ path: null });
   assert.equal(reset.status, 200);
   assert.equal((reset.json as CliStatus).chosen, null);
-  assert.deepEqual(readAppSettings(app.stateDir), { cli: {} });
+  assert.deepEqual(readAppSettings(app.stateDir), { cli: {}, external: true });
 });
 
 test('only known CLIs, only from the page\'s own origin', async () => {

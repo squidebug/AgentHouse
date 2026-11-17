@@ -74,7 +74,7 @@ test('doctor: without a CLI on PATH it fails; with one, that is the one it repor
     assert.match(claude[0]?.detail ?? '', /^9\.9\.9 · 로그인됨 · .*claude(\.cmd)?$/);
 
     // Chosen in the environment check: off PATH, it is still the one run, and said so.
-    writeAppSettings(base.AGENTHOUSE_HOME, { cli: { claude: fake } });
+    writeAppSettings(base.AGENTHOUSE_HOME, { cli: { claude: fake }, external: true });
     const chosen = runDoctor({ ...base, PATH: system.join(path.delimiter) });
     assert.equal(chosen.status, 0, JSON.stringify(chosen.checks));
     assert.match(chosen.checks.find((c) => c.label === 'Claude Code')?.detail ?? '', /^9\.9\.9 · 지정함 · 로그인됨 · /);

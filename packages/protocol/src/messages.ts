@@ -20,7 +20,14 @@ export type EventServerMessage =
   | { type: 'sessions'; sessions: SessionInfo[] }
   | { type: 'limits'; limits: AccountLimits[] }
   | { type: 'links'; links: SessionLink[] }
-  | { type: 'delegations'; delegations: DelegationInfo[] };
+  | { type: 'delegations'; delegations: DelegationInfo[] }
+  /** Whether the sessions started outside AgentHouse are watched (the user's choice, kept by the server). */
+  | { type: 'external'; on: boolean };
+
+/** PUT /api/external: watch the sessions started outside AgentHouse, or stop. */
+export interface ExternalRequest {
+  on: boolean;
+}
 
 export interface ComposeRequest {
   text: string;

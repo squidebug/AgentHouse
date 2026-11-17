@@ -19,11 +19,26 @@
 // that reads two lines (either ends by itself unless the prompt says "keep"),
 // "schedule" sets a prompt for every minute (with "run" it runs once), and
 // "skill" starts one; the transcript lists three skills.
+//
+// Run as `agents --json` it stands in for Claude Code's list of its sessions
+// instead: what a test or the UI check wrote to agents.json in CLAUDE_CONFIG_DIR
+// (the entries, as Claude prints them), else none.
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
+
+if (process.argv[2] === 'agents') {
+  let listed = '[]';
+  try {
+    if (process.env.CLAUDE_CONFIG_DIR) listed = readFileSync(path.join(process.env.CLAUDE_CONFIG_DIR, 'agents.json'), 'utf8');
+  } catch {
+    // nobody made any up
+  }
+  process.stdout.write(listed);
+  process.exit(0);
+}
 
 const out = (text) => process.stdout.write(text);
 const flag = (name) => {

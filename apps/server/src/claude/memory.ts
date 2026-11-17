@@ -2,6 +2,7 @@ import { readdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import type { MemoryFile, SessionInfo } from '@agenthouse/protocol';
 import { noteHeader, noteInside, noteStart } from './notes';
+import { projectDir } from './sessions';
 import { isClaudeTranscript } from './status';
 
 // What Claude Code reads into a session by itself, besides the prompt:
@@ -23,10 +24,10 @@ const FILE = /^[\w.@()+ -]{1,120}\.md$/i;
 
 type Listed = Omit<MemoryFile, 'title' | 'about' | 'type'>;
 
-/** Claude's folder for a project's transcripts and memory: every character of the path that is no letter or digit becomes a dash. */
-function projectDir(session: Pick<SessionInfo, 'cwd' | 'transcripts'>, configDir: string): string {
+/** Claude's folder for the session's project: where its transcript is, else the one named after its folder. */
+function projectOf(session: Pick<SessionInfo, 'cwd' | 'transcripts'>, configDir: string): string {
   const transcript = [...session.transcripts].reverse().find((segment) => isClaudeTranscript(segment.path, configDir));
-  return transcript ? path.dirname(transcript.path) : path.join(configDir, 'projects', session.cwd.replace(/[^A-Za-z0-9]/g, '-'));
+  return transcript ? path.dirname(transcript.path) : projectDir(configDir, session.cwd);
 }
 
 /** The markdown files of a folder itself, by name. */
@@ -95,7 +96,7 @@ export async function memoryFiles(session: Pick<SessionInfo, 'cwd' | 'transcript
   }
   await withImports({ id: 'local', kind: 'instructions', scope: 'local', name: 'CLAUDE.local.md' }, path.join(cwd, 'CLAUDE.local.md'));
 
-  const memory = path.join(projectDir(session, configDir), 'memory');
+  const memory = path.join(projectOf(session, configDir), 'memory');
   const notes = await notesIn(memory);
   // The index first, then the notes it lists.
   for (const name of [...notes.filter((n) => n === 'MEMORY.md'), ...notes.filter((n) => n !== 'MEMORY.md')]) {

@@ -53,7 +53,7 @@ describe('session registry', () => {
   test('sessions outlive their session host in the list, as ended, until removed', async () => {
     const stateDir = await tempStateDir();
     const client = await HostClient.connect({ stateDir, spawn: true, hostArgs: ['--idle-exit-ms', '60000'] });
-    const app = await createAgentHouseServer({ port: 0, fakeAgentPath, host: client });
+    const app = await createAgentHouseServer({ port: 0, fakeAgentPath, host: client, claudeSessions: null });
     let open = true;
     try {
       const authorization = await login(app);

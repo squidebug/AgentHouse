@@ -7,6 +7,7 @@ import { claudeConfigDir } from '../../claude/settings';
 import { memoryFiles } from '../../claude/memory';
 import { FileError, MAX_FILE_BYTES, readText, writeText } from '../../claude/notes';
 import { skillFile, skillsOf } from '../../claude/skills';
+import { readAppSettings, writeAppSettings } from '../app-settings';
 import { LaunchError } from '../cli/launch';
 import { CliChoiceError, EnvService } from '../doctor';
 import { HostUnavailableError, type HostClient } from '../host-client';
@@ -16,7 +17,7 @@ import { DelegationError, Delegations, delegationsFile } from '../delegations';
 import { LinkError } from '../links';
 import { SessionManager } from '../manager';
 import { AccessControl } from './access';
-import { ChooseCliBody, ComposeBody, DelegateBody, DeliverBody, LaunchBody, LinkBody, LoginBody, NoteBody, ResumeBody, TerminalClient } from './schemas';
+import { ChooseCliBody, ComposeBody, DelegateBody, DeliverBody, ExternalBody, LaunchBody, LinkBody, LoginBody, NoteBody, ResumeBody, TerminalClient } from './schemas';
 import { serveStatic } from './static';
 
 export interface ServerOptions {
@@ -31,6 +32,8 @@ export interface ServerOptions {
   webDist?: string;
   defaultCwd?: string;
   fakeAgentPath?: string;
+  /** Claude Code's own list of sessions, for the ones started outside AgentHouse (ManagerOptions.claudeSessions). */
+  claudeSessions?: (() => Promise<unknown>) | null;
   /** How the user ends the session host, for the environment check (default `pnpm stop`). */
   stopCommand?: string;
   /** How the user gets a new login address, for a page that is not logged in (default `pnpm start`). */
@@ -70,6 +73,8 @@ const RELAY_LOW_WATER = 256 * 1024;
 const TEXT_BODY_BYTES = 1024 * 1024;
 // A note is MAX_FILE_BYTES at most on disk; as JSON every byte of it can take six.
 const NOTE_BODY_BYTES = MAX_FILE_BYTES * 6 + 1024;
+// A page's first list waits this long at most for Claude's own list of sessions (one call is about half a second).
+const FIRST_LOOK_MS = 2500;
 
 /** A part of the address as it was before it was encoded for one; empty when it is not valid. */
 function segment(value: string): string {
@@ -208,8 +213,19 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
     stateDir: host.stateDir,
     stopCommand: options.stopCommand ?? 'pnpm stop',
   });
-  const manager = new SessionManager({ env, defaultCwd, host: options.host, ...(options.fakeAgentPath ? { fakeAgentPath: options.fakeAgentPath } : {}) });
+  const manager = new SessionManager({
+    env,
+    defaultCwd,
+    host: options.host,
+    ...(options.fakeAgentPath ? { fakeAgentPath: options.fakeAgentPath } : {}),
+    ...(options.claudeSessions !== undefined ? { claudeSessions: options.claudeSessions } : {}),
+  });
+  // The pages that are open, and those of them that have their first lists and get every change.
+  const pages = new Set<WebSocket>();
   const eventClients = new Set<WebSocket>();
+  // The sessions started outside AgentHouse are looked for while a page is open, unless the user turned that off.
+  let external = readAppSettings(host.stateDir).external;
+  const watchExternal = () => manager.watchExternal(external && pages.size > 0);
   const terminals = new Set<WebSocket>();
   const conversations = new Conversations(manager);
   const delegations = new Delegations(manager, delegationsFile(host.stateDir));
@@ -252,6 +268,17 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
         if (error instanceof CliChoiceError) throw new HttpError(400, error.message, 'INVALID_CLI');
         throw error;
       }
+      return;
+    }
+    // Watching the sessions started outside AgentHouse, on or off: kept in settings.json, the same for every page.
+    if (url.pathname === '/api/external' && req.method === 'PUT') {
+      const { on } = parse(ExternalBody, await readJson(req, 1024));
+      writeAppSettings(host.stateDir, { ...readAppSettings(host.stateDir), external: on });
+      external = on;
+      watchExternal();
+      if (!on) manager.forgetExternal();
+      broadcast({ type: 'external', on });
+      send(res, 200, { on });
       return;
     }
     if (url.pathname === '/api/sessions' && req.method === 'GET') {
@@ -489,16 +516,29 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
     if (url.pathname === '/ws/events') {
       wss.handleUpgrade(req, socket, head, (ws) => {
         accept(ws);
-        eventClients.add(ws);
-        ws.on('close', () => eventClients.delete(ws));
-        const sessions: EventServerMessage = { type: 'sessions', sessions: manager.list() };
-        const limits: EventServerMessage = { type: 'limits', limits: manager.limits() };
-        const links: EventServerMessage = { type: 'links', links: manager.links() };
-        const delegated: EventServerMessage = { type: 'delegations', delegations: delegations.list() };
-        ws.send(JSON.stringify(sessions));
-        ws.send(JSON.stringify(limits));
-        ws.send(JSON.stringify(links));
-        ws.send(JSON.stringify(delegated));
+        pages.add(ws);
+        ws.on('close', () => {
+          pages.delete(ws);
+          eventClients.delete(ws);
+          watchExternal();
+        });
+        watchExternal();
+        // The first list a page gets has the sessions started elsewhere in it: a pane restored to one
+        // of them would close on a list without it. Until Claude has been asked once, the page gets
+        // no list at all.
+        const looked = manager.externalReady(FIRST_LOOK_MS).catch(() => {});
+        void looked.then(() => {
+          if (ws.readyState !== ws.OPEN) return;
+          eventClients.add(ws);
+          const first: EventServerMessage[] = [
+            { type: 'sessions', sessions: manager.list() },
+            { type: 'limits', limits: manager.limits() },
+            { type: 'links', links: manager.links() },
+            { type: 'delegations', delegations: delegations.list() },
+            { type: 'external', on: external },
+          ];
+          for (const message of first) ws.send(JSON.stringify(message));
+        });
       });
       return;
     }
@@ -541,7 +581,7 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
       manager.close();
       conversations.close();
       for (const ws of conversationSockets) ws.terminate();
-      for (const ws of eventClients) ws.close();
+      for (const ws of pages) ws.close();
       for (const ws of terminals) ws.terminate();
       wss.close();
       const closed = new Promise<void>((resolve) => server.close(() => resolve()));

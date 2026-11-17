@@ -51,12 +51,16 @@ export interface TestServer extends AgentHouseServer {
   host: SessionHost;
 }
 
-/** A web server and a session host of its own, both in this process. close() ends both. */
-export async function startServer(): Promise<TestServer> {
+/**
+ * A web server and a session host of its own, both in this process. close() ends both.
+ * `claudeSessions` stands in for Claude Code's own list of sessions; without it nothing is asked
+ * (the real CLI never is: it would list the sessions the developer has open).
+ */
+export async function startServer(options: { claudeSessions?: () => Promise<unknown> } = {}): Promise<TestServer> {
   const stateDir = await tempStateDir();
   const host = await createSessionHost({ stateDir, idleExitMs: null });
   const client = await HostClient.connect({ stateDir, spawn: false });
-  const app = await createAgentHouseServer({ port: 0, fakeAgentPath, host: client });
+  const app = await createAgentHouseServer({ port: 0, fakeAgentPath, host: client, claudeSessions: options.claudeSessions ?? null });
   return {
     ...app,
     stateDir,

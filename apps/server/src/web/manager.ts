@@ -4,13 +4,15 @@ import { existsSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import path from 'node:path';
 import { VENDOR_NAMES, type AccountLimits, type CliStatus, type ComposeRequest, type LaunchOptions, type LinkKind, type SessionInfo, type SessionLink, type Vendor } from '@agenthouse/protocol';
+import { claudeConfigDir } from '../claude/settings';
 import { buildLaunch, LaunchError } from './cli/launch';
 import { EnvService, INSTALL_COMMAND } from './doctor';
+import { askSessions, ExternalSessions } from './external';
 import type { HostClient } from './host-client';
 import { HostRequestError, type CloseResult, type ComposeOutcome } from '../shared/host-protocol';
 import { removeTree } from '../shared/state';
 import { childEnv } from '../shared/child-env';
-import { LinkStore, linksFile } from './links';
+import { LinkError, LinkStore, linksFile } from './links';
 import { registryFile, SessionRegistry } from './registry';
 import { LimitsLog, stillValid } from './usage-log';
 
@@ -25,6 +27,11 @@ export interface ManagerOptions {
   host: HostClient;
   /** Path of the test double; only set when the server runs with --allow-fake. */
   fakeAgentPath?: string;
+  /**
+   * Claude Code's own list of sessions, parsed (see ExternalSessions): by default the installed
+   * CLI's `agents --json`; a check gives its own; null when nothing is to be asked.
+   */
+  claudeSessions?: (() => Promise<unknown>) | null;
 }
 
 // `claude agents --json` (lists sessions as idle, busy or waiting) arrived in 2.1.145.
@@ -66,7 +73,8 @@ async function resolveCwd(requested: string | undefined, fallback: string): Prom
  * flags, environment) and hands it to the session host, which runs it. It also
  * keeps the session registry, the usage log and the links between sessions,
  * so the list, the tree and the last plan usage outlive a host restart.
- * 'links' fires when the links change.
+ * The sessions started outside AgentHouse, which it only watches, are listed
+ * with the others. 'links' fires when the links change.
  */
 export class SessionManager extends EventEmitter {
   private readonly registry: SessionRegistry;
@@ -78,6 +86,9 @@ export class SessionManager extends EventEmitter {
   private readonly onLimits: () => void;
   /** Ended sessions being started again right now. */
   private readonly resuming = new Set<string>();
+  /** The Claude Code sessions started elsewhere; null when they are not looked for. */
+  private readonly external: ExternalSessions | null;
+  private readonly onExternal = () => this.emit('change');
 
   constructor(private readonly options: ManagerOptions) {
     super();
@@ -99,6 +110,39 @@ export class SessionManager extends EventEmitter {
     };
     host.on('change', this.onChange);
     host.on('limits', this.onLimits);
+    this.external =
+      options.claudeSessions === null
+        ? null
+        : new ExternalSessions({ ask: options.claudeSessions ?? (() => this.askClaude()), own: () => host.sessions(), configDir: claudeConfigDir() });
+    this.external?.on('change', this.onExternal);
+  }
+
+  /** The installed Claude Code's list of its sessions; null when there is no Claude to ask, or one from before it had the list. */
+  private async askClaude(): Promise<unknown> {
+    const status = await this.options.env.cli('claude');
+    const install = status.selected === null || status.chosenError ? undefined : status.installs[status.selected];
+    if (!install || !versionAtLeast(install.version, AGENTS_JSON_SINCE)) return null;
+    return askSessions({ file: install.file, args: [...install.args, 'agents', '--json'] }, childEnv());
+  }
+
+  /** Looks for the sessions started outside AgentHouse from now on (someone is there to see them), or stops looking. */
+  watchExternal(on: boolean): void {
+    this.external?.watch(on);
+  }
+
+  /** Settles once the first look since watching started is done, or the time is up. */
+  externalReady(timeoutMs: number): Promise<void> {
+    return this.external?.ready(timeoutMs) ?? Promise.resolve();
+  }
+
+  /** Takes them off the list: the user turned watching off. */
+  forgetExternal(): void {
+    this.external?.clear();
+  }
+
+  /** Refuses what only a session of AgentHouse's own can do. */
+  private ours(id: string): void {
+    if (this.external?.get(id)) throw new LaunchError('AgentHouse가 띄운 세션이 아닙니다.', 'EXTERNAL_SESSION', 409);
   }
 
   /** Plan usage per vendor account: the newest a session reported, or the log's; windows that reset since are dropped. */
@@ -222,18 +266,20 @@ export class SessionManager extends EventEmitter {
 
   /** Places a session under another, or back at the top with null. Throws LinkError for what the tree cannot show. */
   link(childId: string, parentId: string | null, kind: LinkKind = 'group'): SessionLink[] {
+    // A session only watched goes with its process: nothing is placed under it, and it under nothing.
+    if (this.external?.get(childId) || (parentId !== null && this.external?.get(parentId))) throw new LinkError('AgentHouse가 띄운 세션이 아닙니다.', 'INVALID_REQUEST');
     if (this.linkStore.set(childId, parentId, kind, this.known)) this.emit('links');
     return this.links();
   }
 
   get(id: string): SessionInfo | undefined {
-    return this.options.host.get(id) ?? this.registry.get(id);
+    return this.options.host.get(id) ?? this.registry.get(id) ?? this.external?.get(id);
   }
 
-  /** The host's sessions and the ended ones from earlier hosts, in the order they started. */
+  /** The host's sessions, the ended ones from earlier hosts and the ones started elsewhere, in the order they started. */
   list(): SessionInfo[] {
     const live = this.options.host.sessions();
-    return [...live, ...this.registry.past(live)].sort((a, b) => a.startedAt - b.startedAt);
+    return [...live, ...this.registry.past(live), ...(this.external?.list() ?? [])].sort((a, b) => a.startedAt - b.startedAt);
   }
 
   /**
@@ -241,6 +287,7 @@ export class SessionManager extends EventEmitter {
    * work delegated to or from it, like a session that quit by itself.
    */
   async end(id: string): Promise<CloseResult> {
+    this.ours(id);
     const result = this.options.host.get(id) ? await this.options.host.closeSession(id) : { exited: true, stillAlive: false };
     this.emit('change');
     return result;
@@ -248,6 +295,7 @@ export class SessionManager extends EventEmitter {
 
   /** Ends the session (if still running) and removes it from the list. */
   async remove(id: string): Promise<CloseResult> {
+    this.ours(id);
     const result = this.options.host.get(id) ? await this.options.host.closeSession(id) : { exited: true, stillAlive: false };
     this.registry.remove(id);
     this.emit('change');
@@ -260,10 +308,13 @@ export class SessionManager extends EventEmitter {
   close(): void {
     this.options.host.off('change', this.onChange);
     this.options.host.off('limits', this.onLimits);
+    this.external?.off('change', this.onExternal);
+    this.external?.close();
     this.registry.flush();
   }
 
-  compose(id: string, request: ComposeRequest): Promise<ComposeOutcome> {
+  async compose(id: string, request: ComposeRequest): Promise<ComposeOutcome> {
+    this.ours(id);
     return this.options.host.compose(id, request);
   }
 }

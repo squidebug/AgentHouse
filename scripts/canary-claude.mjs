@@ -15,6 +15,10 @@
 //   pnpm canary:claude -- --background            short prompts (haiku, low effort): a shell command in
 //       the background until its end is reported, a prompt scheduled with /loop until it has run once
 //       and is deleted, the skills listed in the transcript, the scheduled prompt in the conversation.
+//   pnpm canary:claude -- --external              no prompt: a second Claude Code, started directly in a
+//       terminal of its own as the user would in another window, shows as a session started outside
+//       AgentHouse (by its name, idle, read-only), AgentHouse's own session is not listed a second
+//       time, and it is gone once it ends.
 //       These run in a folder of their own in the temp folder; the first run tells Claude to trust it.
 import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync } from 'node:fs';
@@ -32,7 +36,8 @@ const { Terminal } = serverRequire('@xterm/headless');
 const scenario = process.argv.includes('--scenario');
 const withResume = !scenario && process.argv.includes('--resume');
 const background = !scenario && !withResume && process.argv.includes('--background');
-const withTurn = scenario || withResume || background || process.argv.includes('--turn');
+const external = !scenario && !withResume && !background && process.argv.includes('--external');
+const withTurn = scenario || withResume || background || (!external && process.argv.includes('--turn'));
 // The long form of the temp folder (Windows may give 8.3 names), as a user's folder would be.
 const tmp = realpathSync.native(os.tmpdir());
 const home = mkdtempSync(path.join(tmp, 'agenthouse-canary-'));
@@ -392,10 +397,92 @@ async function runResume(id) {
   }
 }
 
+// What an agent CLI sets for the programs it runs (apps/server/src/shared/child-env.ts): started with
+// them, a Claude Code takes itself for the child of whichever session ran the canary.
+const INHERITED = ['AI_AGENT', 'CLAUDECODE', 'CLAUDE_PID', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_CHILD_SESSION', 'CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_SESSION_ATTENDED', 'CLAUDE_CODE_MESSAGING_SOCKET', 'CLAUDE_CODE_MESSAGING_TOKEN', 'CLAUDE_CODE_SSE_PORT'];
+
+/**
+ * A Claude Code started directly, in a terminal of its own, as the user would in another window:
+ * AgentHouse did not start it and finds it in Claude's own list of sessions, asked for while a page
+ * is open (the events socket stands for one). No prompt is sent.
+ */
+async function runExternal(id) {
+  const pty = serverRequire('node-pty');
+  const report = (await api('GET', '/api/env')).json;
+  const install = report?.clis?.claude?.installs?.[report.clis.claude.selected];
+  if (!check(Boolean(install), 'external: the Claude Code AgentHouse runs is known')) return;
+  const childEnv = { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' };
+  for (const name of INHERITED) delete childEnv[name];
+  const name = `canary-outside-${process.pid}`;
+  const screen = new Terminal({ cols: 120, rows: 32, allowProposedApi: true });
+  const child = pty.spawn(install.file, [...install.args, '--name', name], { cwd: work, env: childEnv, cols: 120, rows: 32, name: 'xterm-256color' });
+  let exited = false;
+  child.onData((data) => screen.write(data));
+  child.onExit(() => (exited = true));
+  // A terminal answers what the CLI asks of it (its size, its colors); without answers the screen may not start.
+  screen.onData((data) => child.write(data));
+  const term = {
+    text: () =>
+      new Promise((resolve) =>
+        screen.write('', () => {
+          const lines = [];
+          for (let row = 0; row < screen.rows; row += 1) lines.push(screen.buffer.active.getLine(screen.buffer.active.baseY + row)?.translateToString(true) ?? '');
+          resolve(lines.join('\n'));
+        }),
+      ),
+    type: (data) => child.write(data),
+  };
+  const outside = async () => ((await api('GET', '/api/sessions')).json ?? []).filter((s) => s.external);
+  // Claude is asked every ten seconds: what it lists shows a little later than it happens.
+  const eventually = async (found, ms) => {
+    const deadline = Date.now() + ms;
+    let result = found(await outside());
+    while (!result && Date.now() < deadline) {
+      await sleep(500);
+      result = found(await outside());
+    }
+    return result;
+  };
+  try {
+    // The folder was trusted for AgentHouse's own session a moment ago; asked again all the same, it is answered the same way.
+    let text = await untilScreen(term, (now) => /trust this folder/i.test(now) || /Claude Code v/.test(now), 20_000);
+    for (let tries = 0; /trust this folder/i.test(text) && tries < 3; tries += 1) {
+      if (/^Yes, I trust/.test(highlighted(text) ?? '')) {
+        term.type('\r');
+        break;
+      }
+      term.type('\x1b[B');
+      text = await untilScreen(term, (now) => /^Yes, I trust/.test(highlighted(now) ?? ''), 2000);
+    }
+    const found = await eventually((list) => list.find((s) => s.pid === child.pid), 40_000);
+    if (!check(Boolean(found), 'external: a Claude Code started in a terminal of its own is listed', `pid ${child.pid}`)) {
+      console.log(await term.text());
+      return;
+    }
+    check(found.title === name && found.status.value === 'idle' && found.screen === false, 'external: by its name, idle, with no terminal here', `${found.title} · ${describe(found)}`);
+    const own = await sessionNow(id);
+    const listed = await outside();
+    check(!listed.some((s) => s.pid === own.pid || s.vendorSessionId === own.vendorSessionId), "external: AgentHouse's own session is not listed a second time");
+    // How many, not which: they are whatever the user has open.
+    console.log(`INFO  external: ${listed.length - 1} other session(s) started outside AgentHouse are listed`);
+    const refused = await api('POST', `/api/sessions/${found.id}/compose`, { text: 'hello' });
+    check(refused.status === 409 && refused.json?.code === 'EXTERNAL_SESSION', 'external: it takes no message from here', `HTTP ${refused.status}`);
+    term.type('\x03');
+    await sleep(600);
+    term.type('\x03');
+    await until(() => exited, 10_000);
+    check(exited, 'external: it ends in its own terminal (Ctrl+C twice)');
+    const gone = await eventually((list) => !list.some((s) => s.pid === child.pid), 40_000);
+    check(Boolean(gone), 'external: gone from the list once it ended');
+  } finally {
+    if (!exited) child.kill();
+  }
+}
+
 let session = null;
 try {
   // The scenario and the resumed conversation stay out of this repository's own Claude history.
-  const apart = scenario || withResume || background;
+  const apart = scenario || withResume || background || external;
   if (apart) mkdirSync(work, { recursive: true });
   if (scenario) for (const name of readdirSync(work)) rmSync(path.join(work, name), { recursive: true, force: true });
   const options = {
@@ -466,6 +553,8 @@ try {
     view.close();
   } else if (background) {
     await runBackground(id);
+  } else if (external) {
+    await runExternal(id);
   } else if (withTurn) {
     await turn(id, 'a prompt: working, then idle', 'Reply with exactly the word: pong', (s) => s.status.value === 'idle');
   }

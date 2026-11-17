@@ -105,7 +105,7 @@ describe('access control', () => {
     const webDist = await tempStateDir();
     writeFileSync(path.join(webDist, 'index.html'), '<!doctype html><title>AgentHouse</title>');
     const client = await HostClient.connect({ stateDir: app.stateDir, spawn: false });
-    const site = await createAgentHouseServer({ port: 0, host: client, webDist });
+    const site = await createAgentHouseServer({ port: 0, host: client, webDist, claudeSessions: null });
     try {
       const page = await request(site.port, 'GET', '/');
       assert.equal(page.status, 200);
@@ -204,10 +204,10 @@ describe('staying up', () => {
   test('a taken port falls back to the next; with none left, nothing of the server stays behind', async () => {
     const client = await HostClient.connect({ stateDir: app.stateDir, spawn: false });
     try {
-      const other = await createAgentHouseServer({ port: app.port, fallbackPorts: [0], host: client });
+      const other = await createAgentHouseServer({ port: app.port, fallbackPorts: [0], host: client, claudeSessions: null });
       assert.notEqual(other.port, app.port);
       await other.close();
-      await assert.rejects(createAgentHouseServer({ port: app.port, host: client }), { code: 'EADDRINUSE' });
+      await assert.rejects(createAgentHouseServer({ port: app.port, host: client, claudeSessions: null }), { code: 'EADDRINUSE' });
     } finally {
       client.close();
     }

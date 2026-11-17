@@ -18,7 +18,7 @@ import { fakeAgentPath, fakeSpec, login, openSocket, plain, request, screenText,
 /** A web server on the host of `stateDir`. Stopping it twice is fine: a test stops it where it means to, and again when it ends. */
 async function webServer(stateDir: string, port = 0) {
   const client = await HostClient.connect({ stateDir, spawn: false });
-  const app = await createAgentHouseServer({ port, fakeAgentPath, host: client });
+  const app = await createAgentHouseServer({ port, fakeAgentPath, host: client, claudeSessions: null });
   const authorization = await login(app);
   let stopped = false;
   return {
