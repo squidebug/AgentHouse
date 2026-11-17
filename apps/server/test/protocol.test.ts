@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import type { AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { createSessionHost } from '../src/host/server';
-import { buildIdOf, hostBuildId } from '../src/shared/build';
+import { buildIdOf, HOST_SOURCES, hostBuildId } from '../src/shared/build';
 import { childEnv } from '../src/shared/child-env';
 import { hostProof, HostRequestError } from '../src/shared/host-protocol';
 import { hostMessages } from '../src/web/doctor';
@@ -148,5 +150,29 @@ describe('host protocol', () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+
+  test('the build id is made of the files the host runs: every one it imports, and no file it does not', () => {
+    const src = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'src');
+    // Followed from the host's entry, import by import (the protocol package is named, not a path).
+    const runs = new Set<string>();
+    const follow = (file: string) => {
+      if (runs.has(file)) return;
+      runs.add(file);
+      for (const [, target] of readFileSync(file, 'utf8').matchAll(/\bfrom '(\.{1,2}\/[^']+)'/g)) {
+        const base = path.resolve(path.dirname(file), target!);
+        const found = [`${base}.ts`, path.join(base, 'index.ts'), base].find((candidate) => existsSync(candidate) && statSync(candidate).isFile());
+        assert.ok(found, `${path.relative(src, file)} imports ${target}`);
+        follow(found);
+      }
+    };
+    follow(path.join(src, 'host', 'main.ts'));
+    const listed = HOST_SOURCES.map((entry) => path.resolve(src, entry));
+    const covered = (file: string) => listed.some((entry) => file === entry || file.startsWith(entry + path.sep));
+    assert.deepEqual([...runs].filter((file) => !covered(file)).map((file) => path.relative(src, file)), [], 'a file the host runs that would not change its build id');
+    // A file named on its own is there because the host runs it.
+    const single = listed.filter((entry) => entry.endsWith('.ts'));
+    assert.deepEqual(single.filter((entry) => !runs.has(entry)).map((entry) => path.relative(src, entry)), [], 'a file in the list that the host does not run');
+    assert.ok(listed.some((entry) => entry.endsWith(path.join('packages', 'protocol', 'src'))), 'the types both sides share');
   });
 });
