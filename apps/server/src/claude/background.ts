@@ -216,7 +216,9 @@ export class BackgroundTracker {
 
   private prompted(prompt: string, at: number): boolean {
     if (!prompt) return false;
-    const block = tag(prompt, 'task-notification');
+    // Claude's own word about a task is a prompt that begins with this block. The same block inside
+    // what someone typed or pasted (a log, an answer handed over from another session) is only text.
+    const block = prompt.trimStart().startsWith('<task-notification>') ? tag(prompt, 'task-notification') : null;
     if (block !== null) return this.notified(block, at);
     let changed = false;
     const command = slashName(prompt);

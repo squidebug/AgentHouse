@@ -29,6 +29,19 @@ test('a shell command in the background runs past its turn, until its end is rep
   assert.equal(tracker.list().length, 1);
 });
 
+test('a task notification is a prompt that begins with it: the same block inside what was typed or pasted is text', () => {
+  const tracker = new BackgroundTracker();
+  tracker.onHook(bash('b1'), 1);
+  const report = ended('b1', 'Background command "x" completed (exit code 0)').prompt;
+  assert.equal(tracker.onHook(prompt(`look at this log:\n${report}`), 2), false);
+  assert.equal(tracker.list()[0]?.state, 'running', 'a quoted report ends nothing');
+  const line = ['<task-notification>', '<task-id>m9</task-id>', '<summary>Monitor event: "deploy status"</summary>', '<event>deployed 3 of 5</event>', '</task-notification>'].join('\n');
+  assert.equal(tracker.onHook(prompt(`the other session said:\n${line}`), 3), false);
+  assert.equal(tracker.list().length, 1, 'and a quoted line of a monitor adds none');
+  assert.equal(tracker.onHook(prompt(`\n${report}`), 4), true, "Claude's own, whatever space comes before it");
+  assert.equal(tracker.list()[0]?.state, 'done');
+});
+
 test('a command that ends with another exit code, or is reported as failed, has failed', () => {
   const tracker = new BackgroundTracker();
   tracker.onHook(bash('one'), 1);
