@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
@@ -39,6 +39,24 @@ export function fakeSpec(extra: Partial<SpawnSpec> = {}): SpawnSpec {
     agentsCommand: null,
     ...extra,
   };
+}
+
+/**
+ * Removes a temporary folder, and again while something is still put into it:
+ * the environment check a starting server runs asks the installed CLI for its
+ * version and login, and Claude Code then writes its own files into the config
+ * folder the test gave it, sometimes after the test is over.
+ */
+export async function removeTemp(dir: string): Promise<void> {
+  for (let tries = 0; ; tries += 1) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      if (tries >= 20) throw error;
+      await sleep(250);
+    }
+  }
 }
 
 /** A state folder of the test's own, so tests never touch ~/.agenthouse or each other. */

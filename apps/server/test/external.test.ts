@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
@@ -11,16 +11,16 @@ import { childEnv } from '../src/shared/child-env';
 import { appSettingsFile } from '../src/web/app-settings';
 import { ExternalSessions } from '../src/web/external';
 import { assistant, jsonl, prompt, text } from './fixtures/transcript';
-import { eventually, fakeAgentPath, login, openSocket, request, startServer, waitFor, type TestServer } from './helpers';
+import { eventually, fakeAgentPath, login, openSocket, removeTemp, request, startServer, waitFor, type TestServer } from './helpers';
 
 // Transcripts are looked for under Claude's config folder: a temporary one, never ~/.claude.
 const config = mkdtempSync(path.join(os.tmpdir(), 'agenthouse-claude-config-'));
 process.env.CLAUDE_CONFIG_DIR = config;
 const scratch = mkdtempSync(path.join(os.tmpdir(), 'agenthouse-external-'));
 
-after(() => {
-  rmSync(config, { recursive: true, force: true });
-  rmSync(scratch, { recursive: true, force: true });
+after(async () => {
+  await removeTemp(config);
+  await removeTemp(scratch);
 });
 
 const folder = (name: string) => path.join(scratch, name);
