@@ -1,5 +1,6 @@
 import type { ConversationEntry, ConversationTurn, EntryDetail, LatestWords, ToolState } from '@agenthouse/protocol';
 import { AGENT_TOOLS } from './agents';
+import { obj, tag, type Json } from './json';
 import { isInterruptText } from './status';
 
 // Claude Code's transcript (<config>/projects/<cwd>/<session>.jsonl), as of
@@ -40,8 +41,6 @@ export interface EntrySource {
   lines: LineRange[];
 }
 
-type Json = Record<string, unknown>;
-const obj = (value: unknown): Json | null => (value && typeof value === 'object' && !Array.isArray(value) ? (value as Json) : null);
 const str = (value: unknown): string | null => (typeof value === 'string' ? value : null);
 const num = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) ? value : 0);
 
@@ -59,11 +58,6 @@ const oneLine = (text: string, max = SUMMARY_CHARS) => {
 
 // Terminal escapes in a command's printed output.
 const ANSI = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
-
-function tag(text: string, name: string): string | null {
-  const match = text.match(new RegExp(`<${name}>([\\s\\S]*?)</${name}>`));
-  return match ? (match[1] ?? '') : null;
-}
 
 /** What a background agent's report says (a `<task-notification>` block in a user record). */
 interface TaskReport {

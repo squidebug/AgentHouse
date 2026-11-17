@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { isAsking, type AccountLimits, type RateWindow, type SessionStatus, type SessionTelemetry, type StatusValue } from '@agenthouse/protocol';
+import { text } from './json';
 import { listedActivity, type ListedState } from './sessions';
 
 /** The fields of a Claude Code hook event that the status and the agent tree read; everything else is dropped. */
@@ -30,10 +31,6 @@ export interface HookEvent {
   prompt?: unknown;
 }
 
-// A tool name, an error kind, an id: short by nature. Whatever holds a session's hook token can
-// send anything, and these go to every browser and into sessions.json.
-const TEXT_CHARS = 200;
-const text = (value: unknown): string | null => (typeof value === 'string' && value ? value.slice(0, TEXT_CHARS) : null);
 const number = (value: unknown): number | null => (typeof value === 'number' && Number.isFinite(value) ? value : null);
 
 function status(value: StatusValue, at: number, extra: Partial<SessionStatus> = {}): SessionStatus {

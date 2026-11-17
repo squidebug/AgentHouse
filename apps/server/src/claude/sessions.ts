@@ -6,6 +6,7 @@
 import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { isAsking, type SessionStatus, type StatusValue } from '@agenthouse/protocol';
+import { text } from './json';
 
 const ASK_TIMEOUT_MS = 8000;
 
@@ -42,11 +43,8 @@ export interface ListedSession {
 /** The part of an entry that says what its session is doing. */
 export type ListedState = Pick<ListedSession, 'status'> & { waitingFor?: string | null };
 
-// A name, a state: short by nature. The list is whatever the session files in Claude's folder say,
-// and any program of the user's can write one.
-const TEXT_CHARS = 200;
+// The list is whatever the session files in Claude's folder say, and any program of the user's can write one.
 const PATH_CHARS = 1024;
-const text = (value: unknown, limit = TEXT_CHARS): string | null => (typeof value === 'string' && value ? value.slice(0, limit) : null);
 /** The id of a conversation names a file: nothing but a UUID is taken for one. */
 export const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

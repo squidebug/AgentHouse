@@ -1,4 +1,5 @@
 import type { BackgroundTask, ScheduledPrompt } from '@agenthouse/protocol';
+import { obj, SHORT_ID, tag, text, TEXT_CHARS } from './json';
 import type { HookEvent } from './status';
 
 // What a Claude Code session leaves running or scheduled, as its hooks report
@@ -19,9 +20,6 @@ import type { HookEvent } from './status';
 //    When a job runs, the prompt is the job's own text and nothing else tells.
 //  - A skill: PostToolUse(Skill) names it; typed as /name it is only a prompt.
 
-// Claude's task and job ids are short strings of letters and digits.
-const ID = /^[A-Za-z0-9_-]{1,64}$/;
-const TEXT_CHARS = 200;
 // A command line or a prompt may be long: Claude itself lists at most this much.
 const LONG_CHARS = 1000;
 // Ended tasks stay listed; beyond this many the oldest go.
@@ -33,16 +31,11 @@ const WAKEUP_TTL_MS = 120_000;
 const SHELL_TOOLS = new Set(['Bash', 'PowerShell']);
 const ENDED: Record<string, BackgroundTask['state']> = { completed: 'done', failed: 'failed', error: 'failed', killed: 'stopped', stopped: 'stopped', cancelled: 'stopped' };
 
-type Json = Record<string, unknown>;
-const obj = (value: unknown): Json | null => (value && typeof value === 'object' && !Array.isArray(value) ? (value as Json) : null);
-const text = (value: unknown, max = TEXT_CHARS): string | null => (typeof value === 'string' && value ? value.slice(0, max) : null);
-const id = (value: unknown): string | null => (typeof value === 'string' && ID.test(value) ? value : null);
+const id = (value: unknown): string | null => (typeof value === 'string' && SHORT_ID.test(value) ? value : null);
 const time = (value: unknown): number | null => (typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.round(value) : null);
 
-function tag(block: string, name: string): string | null {
-  const match = block.match(new RegExp(`<${name}>([\\s\\S]*?)</${name}>`));
-  return match ? (match[1] ?? '').trim() : null;
-}
+/** A part of a notification, without the space around it. */
+const field = (block: string, name: string): string | null => tag(block, name)?.trim() ?? null;
 
 /** The name a prompt starts with when it is a slash command (`/loop 1m …` → `loop`). */
 export function slashName(prompt: string): string | null {
@@ -218,7 +211,7 @@ export class BackgroundTracker {
     if (!prompt) return false;
     // Claude's own word about a task is a prompt that begins with this block. The same block inside
     // what someone typed or pasted (a log, an answer handed over from another session) is only text.
-    const block = prompt.trimStart().startsWith('<task-notification>') ? tag(prompt, 'task-notification') : null;
+    const block = prompt.trimStart().startsWith('<task-notification>') ? field(prompt, 'task-notification') : null;
     if (block !== null) return this.notified(block, at);
     let changed = false;
     const command = slashName(prompt);
@@ -237,12 +230,12 @@ export class BackgroundTracker {
 
   /** A task's own word: a line a monitor read (no status), or its end. Reports of sub-agents use the same block and are not tasks. */
   private notified(block: string, at: number): boolean {
-    const taskId = id(tag(block, 'task-id'));
+    const taskId = id(field(block, 'task-id'));
     if (!taskId) return false;
-    const status = tag(block, 'status');
-    const summary = tag(block, 'summary') ?? '';
+    const status = field(block, 'status');
+    const summary = field(block, 'summary') ?? '';
     if (!status) {
-      const event = tag(block, 'event');
+      const event = field(block, 'event');
       if (event === null) return false;
       // A monitor whose start was missed is known by its line.
       const added = !this.tasks.has(taskId) && this.seen(taskId, 'monitor', { description: text(summary.match(/^Monitor event: "(.*)"$/)?.[1]), command: null }, at);

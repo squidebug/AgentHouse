@@ -10,6 +10,7 @@ import {
   type LaunchOptions,
 } from '@agenthouse/protocol';
 import { relayPath } from '../../relay/path';
+import { SESSION_ID } from '../../claude/sessions';
 import { STATUS_EVENTS } from '../../claude/status';
 import { userStatusLine } from '../../claude/settings';
 import { findOnPath } from './resolve';
@@ -36,8 +37,6 @@ export interface LaunchSpec {
 
 // Aliases (opus), full ids (claude-opus-5-5, gpt-6.1-sol) and variants like [1m].
 const MODEL_NAME = /^[A-Za-z0-9][\w.:\-[\]]{0,79}$/;
-// Claude Code's own session ids.
-const SESSION_ID = /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 
 function pick<T extends string>(value: string | undefined, allowed: readonly T[], label: string): T | undefined {
   if (!value) return undefined;

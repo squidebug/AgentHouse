@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 // What the session host runs, relative to apps/server/src during development
 // (AGENTS.md lists the same). Built, all of it is in dist/host.js.
-export const HOST_SOURCES = ['host', 'shared', 'claude/status.ts', 'claude/settings.ts', 'claude/agents.ts', 'claude/background.ts', 'claude/sessions.ts', '../../../packages/protocol/src'];
+export const HOST_SOURCES = ['host', 'shared', 'claude/status.ts', 'claude/settings.ts', 'claude/agents.ts', 'claude/background.ts', 'claude/json.ts', 'claude/sessions.ts', '../../../packages/protocol/src'];
 
 function filesUnder(entry: string): string[] {
   let stats;

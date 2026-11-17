@@ -1,11 +1,10 @@
 import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import type { AccountLimits, RateWindow } from '@agenthouse/protocol';
+import { sameWindow, type AccountLimits, type RateWindow } from '@agenthouse/protocol';
 
 const LINE_VERSION = 1;
 
 const monthOf = (at: number) => new Date(at).toISOString().slice(0, 7);
-const sameWindow = (a: RateWindow | null, b: RateWindow | null) => a?.usedPct === b?.usedPct && a?.resetsAt === b?.resetsAt;
 
 /** A window whose reset time has passed says nothing about now. */
 function current(window: RateWindow | null, now: number): RateWindow | null {

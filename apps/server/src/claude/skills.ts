@@ -3,6 +3,7 @@ import { readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import type { SessionInfo, SkillInfo } from '@agenthouse/protocol';
+import { obj, type Json } from './json';
 import { noteHeader, noteInside, noteStart } from './notes';
 import { isClaudeTranscript } from './status';
 
@@ -19,8 +20,6 @@ const ABOUT_CHARS = 300;
 // A name becomes part of a path: only what a skill can be called.
 const NAME = /^[A-Za-z0-9][\w.-]{0,63}(?::[\w.-]{1,64})?$/;
 
-type Json = Record<string, unknown>;
-const obj = (value: unknown): Json | null => (value && typeof value === 'object' && !Array.isArray(value) ? (value as Json) : null);
 
 /** The skills a transcript lists, in its order; none when it has no listing (or cannot be read). */
 export async function listedSkills(transcript: string): Promise<Array<Pick<SkillInfo, 'name' | 'about'>>> {

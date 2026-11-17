@@ -1,5 +1,6 @@
 import path from 'node:path';
 import type { AgentInfo } from '@agenthouse/protocol';
+import { obj, SHORT_ID, text } from './json';
 import { askingTool, isClaudeTranscript, type HookEvent } from './status';
 
 // Claude Code's sub-agents as its hooks and sub-agent status line report them
@@ -15,15 +16,11 @@ import { askingTool, isClaudeTranscript, type HookEvent } from './status';
 export const AGENT_TOOLS = new Set(['Agent', 'Task']);
 const RESUMES = new Set(['PostToolUse', 'PostToolUseFailure', 'PermissionDenied', 'ElicitationResult']);
 // Claude's agent ids are short hex strings; a path is built from them, so nothing else is taken.
-export const AGENT_ID = /^[A-Za-z0-9_-]{1,64}$/;
+export const AGENT_ID = SHORT_ID;
 const MAX_AGENTS = 500;
-const TEXT_CHARS = 200;
 // An Agent call that never started an agent (refused, failed) is forgotten after this.
 const LAUNCH_TTL_MS = 120_000;
 
-type Json = Record<string, unknown>;
-const obj = (value: unknown): Json | null => (value && typeof value === 'object' && !Array.isArray(value) ? (value as Json) : null);
-const text = (value: unknown): string | null => (typeof value === 'string' && value ? value.slice(0, TEXT_CHARS) : null);
 const agentId = (value: unknown): string | null => (typeof value === 'string' && AGENT_ID.test(value) ? value : null);
 
 /** One of the sub-agents' tools waits for the user. */
@@ -210,7 +207,7 @@ export class AgentTracker {
 
   private started(id: string | null, type: unknown, at: number): boolean {
     if (!id) return false;
-    const agentType = typeof type === 'string' ? type.slice(0, TEXT_CHARS) : '';
+    const agentType = text(type) ?? '';
     if (!agentType) {
       this.internal.add(id);
       return false;

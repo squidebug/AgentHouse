@@ -10,7 +10,7 @@ AgentHouse is three programs plus a browser app. Know which one a file runs in b
 |---|---|---|
 | Browser | `apps/web/src` (React + MUI) | reload |
 | Web server | everything else in `apps/server/src` (`main.ts`, `web/`, ...) | freely; `tsx watch` restarts it in dev |
-| Session host | `apps/server/src/host/` and what it loads: `src/shared/`, `src/claude/status.ts`, `agents.ts`, `background.ts`, `sessions.ts` and `settings.ts`, `packages/protocol/src/` | ends every session: `pnpm dev:stop` (dev) or `pnpm stop` |
+| Session host | `apps/server/src/host/` and what it loads: `src/shared/`, `src/claude/status.ts`, `agents.ts`, `background.ts`, `json.ts`, `sessions.ts` and `settings.ts`, `packages/protocol/src/` | ends every session: `pnpm dev:stop` (dev) or `pnpm stop` |
 | Relay | `apps/server/src/relay/relay.cjs`, run by Claude Code for each hook and as its status line and sub-agent status line | per event |
 
 - `src/claude/` is what AgentHouse knows about Claude Code (hook events, status line, settings files, sub-agents in `agents.ts`, background work in `background.ts`, the transcript format in `transcript.ts`, the sessions it lists itself in `sessions.ts`, and the user's notes for it: skills in `skills.ts`, CLAUDE.md and memory in `memory.ts`, read and saved through `notes.ts`); `src/shared/` is used by both servers.

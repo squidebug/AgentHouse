@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { TERMINAL_COLORS, type AccountLimits, type SessionInfo, type TerminalClientMessage, type Vendor } from '@agenthouse/protocol';
+import { sameWindow, TERMINAL_COLORS, type AccountLimits, type SessionInfo, type TerminalClientMessage, type Vendor } from '@agenthouse/protocol';
 import { hostBuildId } from '../shared/build';
 import { HOST_PROTOCOL, HostRequestError, hostProof, validWebProof, type HostMessage, type HostRequest, type SpawnSpec } from '../shared/host-protocol';
 import { clearState, removeTree, runDir, writeState } from '../shared/state';
@@ -27,8 +27,6 @@ export interface SessionHost {
   done: Promise<'idle' | 'shutdown'>;
   close(): Promise<void>;
 }
-
-const sameWindow = (a: AccountLimits['fiveHour'], b: AccountLimits['fiveHour']) => a?.usedPct === b?.usedPct && a?.resetsAt === b?.resetsAt;
 
 // How long a starting host waits for the files of the one before it to be gone.
 const CLEAR_WAIT_MS = 2000;

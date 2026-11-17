@@ -84,6 +84,9 @@ export interface RateWindow {
   resetsAt: number | null;
 }
 
+/** Two readings of a window that say the same: nothing to report, nothing to write down. */
+export const sameWindow = (a: RateWindow | null, b: RateWindow | null): boolean => a?.usedPct === b?.usedPct && a?.resetsAt === b?.resetsAt;
+
 /** Plan usage of one vendor account: the latest any of its sessions reported. */
 export interface AccountLimits {
   vendor: Vendor;

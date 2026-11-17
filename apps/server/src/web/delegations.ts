@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { open, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { isAsking, isHeld, type DelegationInfo, type SessionInfo } from '@agenthouse/protocol';
+import { obj } from '../claude/json';
 import { claudeConfigDir } from '../claude/settings';
 import { isClaudeTranscript } from '../claude/status';
 import { notSaved, writeJsonFile } from '../shared/state';
@@ -66,8 +67,6 @@ interface Task {
   pasted?: boolean;
 }
 
-type Json = Record<string, unknown>;
-const obj = (value: unknown): Json | null => (value && typeof value === 'object' && !Array.isArray(value) ? (value as Json) : null);
 
 /** The text blocks of an assistant record that holds an answer (not an API error), joined. */
 function answerText(record: unknown): string | null {
