@@ -61,7 +61,7 @@ pnpm typecheck
 pnpm test             # 공통·웹·서버 테스트(가짜 에이전트 사용, 로그인 불필요)
 pnpm licenses:check   # 의존성 라이선스 허용 목록 검사
 pnpm canary:claude    # 빌드한 앱을 설치된 Claude Code로 확인. 프롬프트는 보내지 않음(-- --turn: haiku로 짧은 프롬프트 1회, -- --resume: 1회 뒤 끝내고 이어서 열어 1회 더, -- --scenario: 승인·거부·중단·서브에이전트·/clear, -- --background: 백그라운드 명령·/loop 예약·스킬)
-pnpm ui:check         # 빌드한 앱을 설치된 Chrome과 가짜 에이전트로 확인(헤드리스, -- --out <폴더>를 주면 스크린숏을 남김)
+pnpm ui:check         # 빌드한 앱을 설치된 Chrome과 가짜 에이전트로 확인(헤드리스, -- --out <폴더>를 주면 스크린숏과 그것을 모은 페이지 index.html을 남김. --before <폴더>를 더하면 이전 실행의 것과 나란히 보임)
 ```
 
 AI 에이전트로 이 코드를 고칠 때는 [AGENTS.md](AGENTS.md)를 보세요.

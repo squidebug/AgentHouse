@@ -4,10 +4,12 @@
 // composer and its turn in the pane's conversation view, an ended session that
 // an earlier session host left in sessions.json (ui-sample.mjs), sub-agents,
 // groups, delegation, and a session ended and started again where it stopped.
-// Light and dark screenshots go to the output folder.
+// Light and dark screenshots go to the output folder, and with --out one page
+// of them all (index.html): light next to dark, and before next to after when
+// --before names the folder an earlier run was given as --out.
 // Uses throwaway state and Claude config folders, so it never touches real
 // sessions or ~/.claude.
-//   pnpm build && pnpm ui:check [-- --out <folder>] [-- --headed]
+//   pnpm build && pnpm ui:check [-- --out <folder> [--before <folder>]] [-- --headed]
 import { execFileSync, spawn } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
@@ -15,6 +17,7 @@ import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
+import { writePage } from './ui-page.mjs';
 import { writeSampleSession } from './ui-sample.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -22,6 +25,35 @@ const main = path.join(root, 'apps/server/dist/main.js');
 const flag = (name) => {
   const i = process.argv.indexOf(name);
   return i === -1 ? null : process.argv[i + 1];
+};
+const started = Date.now();
+const before = flag('--before') && path.resolve(flag('--before'));
+if (before && (!flag('--out') || before === path.resolve(flag('--out')))) {
+  console.error('--before compares with the screenshots of an earlier run: give --out as well, another folder');
+  process.exit(2);
+}
+// What the page of screenshots calls each scene (the name of its files, without the mode).
+const SCENES = {
+  'startup-first': '시작 화면 · 첫 실행',
+  login: '로그인',
+  'startup-loading': '시작 화면 · 점검 중',
+  'cli-choice': '실행 파일 지정',
+  'startup-issues': '시작 화면 · 문제',
+  conversation: '대화 보기',
+  terminal: '터미널',
+  ended: '끝난 세션',
+  flow: '흐름 보기',
+  agents: '서브에이전트',
+  group: '묶음',
+  notifications: '알림',
+  background: '백그라운드 작업',
+  skills: '스킬',
+  'note-editor': '편집 창',
+  memory: '메모리',
+  delegate: '위임',
+  'composer-delegate': '입력창 위임',
+  resume: '이어서 열기',
+  failed: '멈춘 곳',
 };
 const scratch = mkdtempSync(path.join(os.tmpdir(), 'agenthouse-ui-'));
 const out = path.resolve(flag('--out') ?? path.join(scratch, 'shots'));
@@ -646,7 +678,13 @@ try {
   } catch {
     // the host may already be gone
   }
-  if (!flag('--out')) console.log('INFO  (screenshots are removed with the temporary folder unless --out is given)');
+  if (flag('--out')) {
+    try {
+      console.log(`INFO  page: ${writePage({ out, before: before || null, since: started, labels: SCENES })}`);
+    } catch (error) {
+      check(false, 'the screenshots are on one page', error.message);
+    }
+  } else console.log('INFO  (screenshots are removed with the temporary folder unless --out is given)');
   // The whole temporary folder: with --out the screenshots are elsewhere, and what was left of it
   // (the work folder) piled up in the temp folder, one per run.
   setTimeout(() => rmSync(scratch, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }), 500);

@@ -1,0 +1,450 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentHouse 화면</title>
+<style>
+  :root {
+    color-scheme: light;
+    --page: #eef0f3;
+    --card: #ffffff;
+    --text: #1a1c1e;
+    --soft: #5c6066;
+    --line: #d3d7dd;
+    --fill: #dfe3e8;
+    --key: #2b5ea7;
+    --mark: #d6006f;
+  }
+  :root[data-tone='dark'] {
+    color-scheme: dark;
+    --page: #111316;
+    --card: #1c1e22;
+    --text: #e3e5e8;
+    --soft: #9da2a9;
+    --line: #33363c;
+    --fill: #2f3238;
+    --key: #a8c7fa;
+    --mark: #ff66b8;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--text);
+    font: 13px/1.5 'IBM Plex Sans KR', 'Malgun Gothic', 'Apple SD Gothic Neo', system-ui, sans-serif;
+  }
+  button { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--key); outline-offset: 2px; }
+  header {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 16px;
+    padding: 10px 20px;
+    background: var(--page);
+    border-bottom: 1px solid var(--line);
+  }
+  h1 { margin: 0; font-size: 18px; font-weight: 600; }
+  .soft { color: var(--soft); font-size: 12px; }
+  .grow { flex: 1; }
+  .seg { display: inline-flex; padding: 2px; border-radius: 8px; background: var(--fill); }
+  .seg button { border: 0; border-radius: 6px; padding: 3px 12px; background: none; cursor: pointer; }
+  .seg button[aria-pressed='true'] { background: var(--card); font-weight: 600; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2); }
+  main { display: grid; gap: 32px; padding: 16px 20px 96px; }
+  nav { display: flex; flex-wrap: wrap; gap: 6px; }
+  nav a {
+    display: inline-flex;
+    gap: 6px;
+    padding: 2px 10px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    color: inherit;
+    text-decoration: none;
+  }
+  nav a:hover { background: var(--fill); }
+  nav a b { font-weight: 600; color: var(--mark); }
+  section { scroll-margin-top: 64px; }
+  .rest { margin: 0; padding-top: 16px; border-top: 1px solid var(--line); }
+  h2 { display: flex; align-items: baseline; gap: 8px; margin: 0 0 8px; font-size: 14px; font-weight: 600; }
+  h2 small { font-size: 12px; font-weight: 400; color: var(--soft); }
+  .note { max-width: 960px; margin: -4px 0 10px; }
+  .rows { display: grid; gap: 12px; }
+  .row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
+  figure { margin: 0; }
+  figcaption { display: flex; gap: 8px; margin-bottom: 4px; font-size: 12px; color: var(--soft); }
+  figcaption b { font-weight: 600; color: var(--mark); }
+  figcaption b.same { font-weight: 400; color: inherit; }
+  .frame {
+    display: block;
+    position: relative;
+    padding: 0;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--card);
+  }
+  button.frame { cursor: zoom-in; }
+  .frame > img, .frame > canvas { display: block; width: 100%; height: auto; }
+  .wipe { cursor: ew-resize; touch-action: none; user-select: none; }
+  .wipe img { position: absolute; top: 0; left: 0; display: block; height: auto; pointer-events: none; }
+  .wipe .over { position: absolute; inset: 0; clip-path: inset(0 0 0 var(--at)); }
+  .wipe .rule { position: absolute; top: 0; bottom: 0; left: var(--at); width: 2px; margin-left: -1px; background: var(--mark); }
+  .tag {
+    position: absolute;
+    top: 6px;
+    padding: 0 6px;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.62);
+    color: #fff;
+    font-size: 12px;
+    pointer-events: none;
+  }
+  .tag.was { left: 6px; }
+  .tag.now { right: 6px; }
+  #viewer { position: fixed; inset: 0; z-index: 5; display: flex; flex-direction: column; background: var(--page); }
+  #viewer .bar { display: flex; align-items: center; gap: 12px; padding: 8px 20px; border-bottom: 1px solid var(--line); }
+  #viewer .stage { flex: 1; overflow: auto; padding: 16px 20px; }
+  #viewer img { display: block; max-width: none; border: 1px solid var(--line); background: var(--card); }
+  .plain { border: 1px solid var(--line); border-radius: 6px; padding: 3px 12px; background: var(--card); cursor: pointer; }
+  .plain:hover { background: var(--fill); }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title"></h1>
+  <span class="soft" id="made"></span>
+  <span class="grow"></span>
+  <span class="seg" id="views" role="group" aria-label="전후 보기" hidden>
+    <button type="button" data-view="side">나란히</button>
+    <button type="button" data-view="wipe">겹쳐서</button>
+    <button type="button" data-view="diff">차이</button>
+  </span>
+  <span class="seg" id="tones" role="group" aria-label="바탕">
+    <button type="button" data-tone="light">밝게</button>
+    <button type="button" data-tone="dark">어둡게</button>
+  </span>
+</header>
+<main>
+  <nav id="index" aria-label="장면"></nav>
+</main>
+<div id="viewer" role="dialog" aria-modal="true" aria-labelledby="viewer-title" hidden>
+  <div class="bar">
+    <strong id="viewer-title"></strong>
+    <span class="soft" id="viewer-count"></span>
+    <span class="grow"></span>
+    <span class="seg" id="zooms" role="group" aria-label="배율">
+      <button type="button" data-zoom="1">1배</button>
+      <button type="button" data-zoom="2">2배</button>
+    </span>
+    <button type="button" class="plain" id="previous" aria-label="이전">←</button>
+    <button type="button" class="plain" id="next" aria-label="다음">→</button>
+    <button type="button" class="plain" id="close">닫기</button>
+  </div>
+  <div class="stage"><img id="viewer-image" alt=""></div>
+</div>
+<script id="data" type="application/json">__DATA__</script>
+<script>
+(() => {
+  const data = JSON.parse(document.getElementById('data').textContent);
+  const root = document.documentElement;
+  const main = document.querySelector('main');
+  const index = document.getElementById('index');
+  const MODE = { light: '라이트', dark: '다크' };
+  const state = { view: 'side', tone: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light' };
+
+  const make = (tag, props = {}, ...children) => {
+    const node = Object.assign(document.createElement(tag), props);
+    node.append(...children);
+    return node;
+  };
+  const css = (image) => image.w / data.scale;
+  const widest = Math.max(1, ...data.images.map(css));
+  const percent = (width) => `${(width / widest) * 100}%`;
+  const picture = (at, alt) => make('img', { src: data.images[at].src, alt, loading: 'lazy', draggable: false });
+  const named = (scene, shot, side) => [scene.label, side, MODE[shot.mode]].filter(Boolean).join(' · ');
+
+  // Two runs of the same page rarely give the same file, so a shot counts as changed once its
+  // pixels were compared and some differ. Until then it shows alone, like one that did not change.
+  const shares = new Map();
+  const pair = (shot) => `${shot.before}:${shot.after}`;
+  const paired = (shot) => shot.before !== null && shot.before !== shot.after;
+  const counting = (shot) => paired(shot) && !shares.has(pair(shot));
+  const changed = (shot) => paired(shot) && shares.get(pair(shot)) > 0;
+
+  // What shows in the viewer, in the order ← → walk through: a scene's shots, before then after.
+  const frames = (scene) =>
+    scene.shots.flatMap((shot) => [
+      ...(changed(shot) ? [{ at: shot.before, name: named(scene, shot, '전') }] : []),
+      { at: shot.after, name: named(scene, shot, changed(shot) ? '후' : '') },
+    ]);
+
+  // How much of a pair differs: counted once per pair, in the background.
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d', { willReadFrequently: true });
+  const loaded = (at) =>
+    new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = reject;
+      image.src = data.images[at].src;
+    });
+  const pixels = (image, width, height) => {
+    canvas.width = width;
+    canvas.height = height;
+    context.drawImage(image, 0, 0);
+    return context.getImageData(0, 0, width, height).data;
+  };
+  /** The pixels of two shots that differ, painted over a faint copy of the later one. */
+  async function compare(before, after) {
+    const [was, now] = await Promise.all([loaded(before), loaded(after)]);
+    const width = Math.max(was.naturalWidth, now.naturalWidth);
+    const height = Math.max(was.naturalHeight, now.naturalHeight);
+    const a = pixels(was, width, height);
+    const b = pixels(now, width, height);
+    const out = new ImageData(width, height);
+    let count = 0;
+    for (let i = 0; i < a.length; i += 4) {
+      const apart = Math.max(Math.abs(a[i] - b[i]), Math.abs(a[i + 1] - b[i + 1]), Math.abs(a[i + 2] - b[i + 2]), Math.abs(a[i + 3] - b[i + 3]));
+      if (apart > 8) {
+        count += 1;
+        out.data[i] = 255;
+        out.data[i + 1] = 0;
+        out.data[i + 2] = 150;
+        out.data[i + 3] = 255;
+      } else {
+        const grey = Math.round(b[i] * 0.3 + b[i + 1] * 0.59 + b[i + 2] * 0.11);
+        out.data[i] = out.data[i + 1] = out.data[i + 2] = grey;
+        out.data[i + 3] = 70;
+      }
+    }
+    return { share: (count / (width * height)) * 100, out };
+  }
+  const amount = (share) => (share < 0.01 ? '0.01% 미만' : `${share.toFixed(share < 10 ? 2 : 1)}%`);
+  /** What a shot's caption says of it next to the earlier run's, and whether that is worth a look. */
+  function note(shot) {
+    if (!data.before) return null;
+    if (shot.before === null) return { text: '새 장면', loud: true };
+    if (counting(shot)) return { text: '비교 중', loud: false };
+    return changed(shot) ? { text: `${amount(shares.get(pair(shot)))} 다름`, loud: true } : { text: '같음', loud: false };
+  }
+  /** The most any of a scene's shots differs, in percent; a scene the earlier run did not have counts as all of it. */
+  function most(scene) {
+    if (data.before && scene.shots.some((shot) => shot.before === null)) return 100;
+    return Math.max(0, ...scene.shots.filter(changed).map((shot) => shares.get(pair(shot))));
+  }
+  const mostText = (scene) => (data.before && scene.shots.some((shot) => shot.before === null) ? '새 장면' : most(scene) > 0 ? amount(most(scene)) : '');
+  async function countAll() {
+    const waiting = data.scenes.flatMap((scene) => scene.shots).filter(counting);
+    for (const shot of waiting) {
+      if (!shares.has(pair(shot))) shares.set(pair(shot), (await compare(shot.before, shot.after)).share);
+      await new Promise((resolve) => setTimeout(resolve));
+    }
+    if (waiting.length) draw();
+  }
+
+  // The difference is drawn when its place comes into view: a canvas each is a lot to hold for all of them.
+  const drawn = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        drawn.unobserve(entry.target);
+        const [before, after] = entry.target.dataset.of.split(':').map(Number);
+        compare(before, after).then(({ out }) => {
+          const surface = entry.target.querySelector('canvas');
+          surface.width = out.width;
+          surface.height = out.height;
+          surface.getContext('2d').putImageData(out, 0, 0);
+        });
+      }
+    },
+    { rootMargin: '400px' },
+  );
+
+  function caption(scene, shot, side) {
+    const text = make('figcaption', {}, [side, MODE[shot.mode]].filter(Boolean).join(' · ') || scene.id);
+    const said = side === '전' ? null : note(shot);
+    if (said) text.append(make('b', { textContent: said.text, className: said.loud ? '' : 'same' }));
+    return text;
+  }
+  /** One shot, opening alone on a click. */
+  function single(sceneAt, scene, shot, at, side) {
+    const open = make('button', { type: 'button', className: 'frame' }, picture(at, named(scene, shot, side)));
+    open.style.width = percent(css(data.images[at]));
+    open.addEventListener('click', () => show(sceneAt, frames(scene).findIndex((frame) => frame.at === at)));
+    return make('figure', {}, caption(scene, shot, side), open);
+  }
+  /** Before under after, with a line to drag between them. */
+  function wipe(scene, shot) {
+    const was = data.images[shot.before];
+    const now = data.images[shot.after];
+    const width = Math.max(css(was), css(now));
+    const height = Math.max(was.h, now.h) / data.scale;
+    const under = picture(shot.before, named(scene, shot, '전'));
+    const over = picture(shot.after, named(scene, shot, '후'));
+    under.style.width = `${(css(was) / width) * 100}%`;
+    over.style.width = `${(css(now) / width) * 100}%`;
+    const box = make(
+      'div',
+      { className: 'frame wipe', tabIndex: 0 },
+      under,
+      make('div', { className: 'over' }, over),
+      make('div', { className: 'rule' }),
+      make('span', { className: 'tag was', textContent: '전' }),
+      make('span', { className: 'tag now', textContent: '후' }),
+    );
+    box.style.width = percent(width);
+    box.style.aspectRatio = `${width} / ${height}`;
+    box.setAttribute('role', 'slider');
+    box.setAttribute('aria-label', `${named(scene, shot, '')} 전후 경계`);
+    box.setAttribute('aria-valuemin', '0');
+    box.setAttribute('aria-valuemax', '100');
+    let at = 50;
+    const put = (value) => {
+      at = Math.min(100, Math.max(0, value));
+      box.style.setProperty('--at', `${at}%`);
+      box.setAttribute('aria-valuenow', String(Math.round(at)));
+    };
+    const follow = (event) => {
+      const rect = box.getBoundingClientRect();
+      put(((event.clientX - rect.left) / rect.width) * 100);
+    };
+    box.addEventListener('pointerdown', (event) => {
+      box.setPointerCapture(event.pointerId);
+      follow(event);
+    });
+    box.addEventListener('pointermove', (event) => box.hasPointerCapture(event.pointerId) && follow(event));
+    box.addEventListener('keydown', (event) => {
+      const step = { ArrowLeft: -2, ArrowRight: 2, Home: -100, End: 100 }[event.key];
+      if (!step) return;
+      event.preventDefault();
+      put(at + step * (event.shiftKey ? 5 : 1));
+    });
+    put(50);
+    return make('figure', {}, caption(scene, shot, ''), box);
+  }
+  /** Where the two differ, on a faint copy of the later one. */
+  function difference(sceneAt, scene, shot) {
+    const now = data.images[shot.after];
+    const open = make('button', { type: 'button', className: 'frame' }, make('canvas', { width: 1, height: 1 }));
+    open.style.width = percent(Math.max(css(data.images[shot.before]), css(now)));
+    open.style.aspectRatio = `${Math.max(data.images[shot.before].w, now.w)} / ${Math.max(data.images[shot.before].h, now.h)}`;
+    open.dataset.of = pair(shot);
+    open.setAttribute('aria-label', `${named(scene, shot, '')} 차이`);
+    open.addEventListener('click', () => show(sceneAt, frames(scene).findIndex((frame) => frame.at === shot.after)));
+    drawn.observe(open);
+    return make('figure', {}, caption(scene, shot, ''), open);
+  }
+
+  function draw() {
+    drawn.disconnect();
+    for (const old of main.querySelectorAll('section, .rest')) old.remove();
+    index.replaceChildren();
+    // What differs most comes first, since that is what the page is opened for (two runs of the same
+    // page differ a little too: a time, a blinking cursor); the scenes that are the same follow in
+    // the order they were taken.
+    const order = data.scenes.map((scene, sceneAt) => ({ scene, sceneAt, share: most(scene) })).sort((a, b) => b.share - a.share || a.sceneAt - b.sceneAt);
+    for (const [place, { scene, sceneAt, share }] of order.entries()) {
+      if (place > 0 && share === 0 && order[place - 1].share > 0) main.append(make('p', { className: 'rest soft', textContent: '전과 같은 장면' }));
+      index.append(make('a', { href: `#${scene.id}` }, scene.label, make('b', { textContent: mostText(scene) })));
+      const rows = make('div', { className: 'rows' });
+      const apart = scene.shots.filter(changed);
+      if (state.view === 'side') {
+        // A pair to a row, before on the left; what has no pair goes side by side: light, dark.
+        for (const shot of apart) rows.append(make('div', { className: 'row' }, single(sceneAt, scene, shot, shot.before, '전'), single(sceneAt, scene, shot, shot.after, '후')));
+        const alone = scene.shots.filter((shot) => !changed(shot));
+        if (alone.length) rows.append(make('div', { className: 'row' }, ...alone.map((shot) => single(sceneAt, scene, shot, shot.after, ''))));
+      } else {
+        rows.append(
+          make(
+            'div',
+            { className: 'row' },
+            ...scene.shots.map((shot) => (!changed(shot) ? single(sceneAt, scene, shot, shot.after, '') : state.view === 'wipe' ? wipe(scene, shot) : difference(sceneAt, scene, shot))),
+          ),
+        );
+      }
+      const head = make('h2', {}, scene.label);
+      if (scene.label !== scene.id) head.append(make('small', { textContent: scene.id }));
+      main.append(make('section', { id: scene.id }, head, ...(scene.note ? [make('p', { className: 'note', textContent: scene.note })] : []), rows));
+    }
+    for (const button of document.querySelectorAll('#views button')) button.setAttribute('aria-pressed', String(button.dataset.view === state.view));
+  }
+  function tone() {
+    root.dataset.tone = state.tone;
+    for (const button of document.querySelectorAll('#tones button')) button.setAttribute('aria-pressed', String(button.dataset.tone === state.tone));
+  }
+
+  // One shot alone at its own size; ← → put the next of its scene in the same place.
+  const viewer = document.getElementById('viewer');
+  const shown = { scene: 0, frame: 0, zoom: 1, from: null };
+  function show(scene, frame) {
+    if (viewer.hidden) shown.from = document.activeElement;
+    const list = frames(data.scenes[scene]);
+    Object.assign(shown, { scene, frame: (frame + list.length) % list.length });
+    const { at, name } = list[shown.frame];
+    const image = document.getElementById('viewer-image');
+    image.src = data.images[at].src;
+    image.alt = name;
+    image.style.width = `${css(data.images[at]) * shown.zoom}px`;
+    image.style.imageRendering = shown.zoom > data.scale ? 'pixelated' : 'auto';
+    document.getElementById('viewer-title').textContent = name;
+    document.getElementById('viewer-count').textContent = `${shown.frame + 1} / ${list.length}`;
+    for (const button of document.querySelectorAll('#zooms button')) button.setAttribute('aria-pressed', String(Number(button.dataset.zoom) === shown.zoom));
+    if (viewer.hidden) {
+      viewer.hidden = false;
+      document.body.style.overflow = 'hidden';
+      document.getElementById('close').focus();
+    }
+  }
+  function hide() {
+    viewer.hidden = true;
+    document.body.style.overflow = '';
+    shown.from?.focus?.();
+  }
+  document.getElementById('previous').addEventListener('click', () => show(shown.scene, shown.frame - 1));
+  document.getElementById('next').addEventListener('click', () => show(shown.scene, shown.frame + 1));
+  document.getElementById('close').addEventListener('click', hide);
+  document.getElementById('zooms').addEventListener('click', (event) => {
+    const zoom = Number(event.target.dataset?.zoom);
+    if (!zoom) return;
+    shown.zoom = zoom;
+    show(shown.scene, shown.frame);
+  });
+  document.addEventListener('keydown', (event) => {
+    if (viewer.hidden) return;
+    if (event.key === 'Escape') hide();
+    else if (event.key === 'ArrowLeft') show(shown.scene, shown.frame - 1);
+    else if (event.key === 'ArrowRight') show(shown.scene, shown.frame + 1);
+    else if (event.key === '1' || event.key === '2') {
+      shown.zoom = Number(event.key);
+      show(shown.scene, shown.frame);
+    } else return;
+    event.preventDefault();
+  });
+
+  document.getElementById('views').addEventListener('click', (event) => {
+    if (!event.target.dataset?.view) return;
+    state.view = event.target.dataset.view;
+    draw();
+  });
+  document.getElementById('tones').addEventListener('click', (event) => {
+    if (!event.target.dataset?.tone) return;
+    state.tone = event.target.dataset.tone;
+    tone();
+  });
+
+  document.title = data.title;
+  document.getElementById('title').textContent = data.title;
+  document.getElementById('made').textContent = new Date(data.made).toLocaleString('ko-KR', { dateStyle: 'medium', timeStyle: 'short' });
+  document.getElementById('views').hidden = !data.before;
+  tone();
+  draw();
+  countAll();
+})();
+</script>
+</body>
+</html>
