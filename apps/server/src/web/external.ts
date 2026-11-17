@@ -1,11 +1,12 @@
 import { execFile } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { open, readdir, stat } from 'node:fs/promises';
+import { readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import type { SessionInfo, TranscriptSegment } from '@agenthouse/protocol';
 import { listedSessions, listedStatus, transcriptFile, type ListedSession } from '../claude/sessions';
 import { initialTelemetry } from '../claude/status';
 import { latestRun, type LatestRun } from '../claude/transcript';
+import { readTail, tailLines } from '../shared/tail';
 
 /**
  * How often Claude Code is asked for its sessions while a page is open (the
@@ -51,31 +52,16 @@ async function fileState(file: string): Promise<{ key: string; at: number } | nu
 
 /** The records in the end of a transcript, oldest first. */
 async function tailRecords(file: string): Promise<unknown[]> {
-  let handle;
-  try {
-    handle = await open(file, 'r');
-  } catch {
-    return [];
-  }
-  try {
-    const { size } = await handle.stat();
-    const start = Math.max(0, size - TAIL_BYTES);
-    const buffer = Buffer.alloc(size - start);
-    await handle.read(buffer, 0, buffer.length, start);
-    // A read that starts mid-file starts mid-line: that piece is not a record.
-    const lines = buffer.toString('utf8').split('\n').slice(start > 0 ? 1 : 0);
-    const records: unknown[] = [];
-    for (const line of lines) {
-      try {
-        if (line.trim()) records.push(JSON.parse(line));
-      } catch {
-        // a line still being written
-      }
+  const tail = await readTail(file, TAIL_BYTES);
+  const records: unknown[] = [];
+  for (const line of tail ? tailLines(tail) : []) {
+    try {
+      records.push(JSON.parse(line.text));
+    } catch {
+      // a line still being written
     }
-    return records;
-  } finally {
-    await handle.close();
   }
+  return records;
 }
 
 /** A conversation's transcript in whichever project folder has it; null when none does. */

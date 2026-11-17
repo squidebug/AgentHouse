@@ -3,12 +3,12 @@ import type { ConversationEntry, ConversationServerMessage, EntryDetail, LatestW
 import { claudeConfigDir } from '../claude/settings';
 import { isClaudeTranscript } from '../claude/status';
 import { ConversationBuilder, entryDetail, latestWords, type LineRange } from '../claude/transcript';
+import { MAX_LINE_BYTES, readTail, tailLines } from '../shared/tail';
 import type { SessionManager } from './manager';
 
 // Read in pieces, giving the event loop back in between: a 10 MB transcript
 // must not hold up terminals and API calls while it is parsed.
 const CHUNK_BYTES = 256 * 1024;
-const MAX_LINE_BYTES = 64 * 1024 * 1024;
 // A transcript grows while its session works; hook events also prompt a read.
 const POLL_MS = 1000;
 // A view switched away and back within this reuses what was read.
@@ -74,43 +74,24 @@ const TAIL_MAX_BYTES = 4 * 1024 * 1024;
  * shows what it said, without the prompt). Read like a conversation, in pieces.
  */
 async function tailEntries(file: string): Promise<ConversationEntry[]> {
-  let handle;
-  try {
-    handle = await open(file, 'r');
-  } catch {
-    return [];
-  }
-  try {
-    const { size } = await handle.stat();
-    for (let want = TAIL_BYTES; ; want *= 4) {
-      const start = Math.max(0, size - want);
-      const buffer = Buffer.alloc(size - start);
-      await handle.read(buffer, 0, buffer.length, start);
-      const builder = new ConversationBuilder();
-      // A read that starts mid-file may start mid-line: that piece is not a record.
-      let at = start > 0 ? buffer.indexOf(10) + 1 || buffer.length : 0;
-      let parsed = at;
-      while (at < buffer.length) {
-        let end = buffer.indexOf(10, at);
-        if (end === -1) end = buffer.length;
-        if (end > at) {
-          try {
-            builder.add(JSON.parse(buffer.toString('utf8', at, end)), [start + at, start + end]);
-          } catch {
-            // a line still being written
-          }
-        }
-        at = end + 1;
-        if (at - parsed >= CHUNK_BYTES) {
-          parsed = at;
-          await yieldToOthers();
-        }
+  for (let want = TAIL_BYTES; ; want *= 4) {
+    const tail = await readTail(file, want);
+    if (!tail) return [];
+    const builder = new ConversationBuilder();
+    let parsed = tail.start;
+    for (const line of tailLines(tail)) {
+      try {
+        builder.add(JSON.parse(line.text), [line.start, line.end]);
+      } catch {
+        // a line still being written
       }
-      const { entries } = builder.snapshot();
-      if (start === 0 || want >= TAIL_MAX_BYTES || entries.some((entry) => entry.kind === 'prompt')) return entries;
+      if (line.end - parsed >= CHUNK_BYTES) {
+        parsed = line.end;
+        await yieldToOthers();
+      }
     }
-  } finally {
-    await handle.close();
+    const { entries } = builder.snapshot();
+    if (tail.start === 0 || want >= TAIL_MAX_BYTES || entries.some((entry) => entry.kind === 'prompt')) return entries;
   }
 }
 

@@ -1,6 +1,5 @@
 import { execFile } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { open } from 'node:fs/promises';
 import { isAsking, type AgentInfo, type BackgroundTask, type ScheduledPrompt, type SessionStatus, type SessionTelemetry, type StatusValue, type TranscriptSegment } from '@agenthouse/protocol';
 import { AgentTracker, agentTranscript, type AgentAsk } from '../claude/agents';
 import { BackgroundTracker } from '../claude/background';
@@ -22,6 +21,7 @@ import {
   type StatusLineInput,
 } from '../claude/status';
 import { sameSecret } from '../shared/compare';
+import { readTail } from '../shared/tail';
 
 // Claude's first hook (SessionStart) comes within a few seconds; none by then
 // means hooks are blocked (e.g. by managed policy) and only the terminal is left.
@@ -42,19 +42,6 @@ function listAgents(command: { file: string; args: string[] }, env: NodeJS.Proce
       }
     });
   });
-}
-
-async function readTail(file: string, bytes: number): Promise<string> {
-  const handle = await open(file, 'r');
-  try {
-    const { size } = await handle.stat();
-    const start = Math.max(0, size - bytes);
-    const buffer = Buffer.alloc(size - start);
-    await handle.read(buffer, 0, buffer.length, start);
-    return buffer.toString('utf8');
-  } finally {
-    await handle.close();
-  }
 }
 
 /**
@@ -330,7 +317,7 @@ export class ClaudeObserver extends Observer {
     // A sub-agent's dialog is answered in that agent's transcript; the main one only tells about the main turn.
     const agentAsks = () => this.tracker.asking() !== null && !isAsking(this.mainNow().value);
     const transcript = this.transcripts.at(-1)?.path;
-    if (!agentAsks() && transcript && endsWithInterrupt(await readTail(transcript, 64 * 1024))) {
+    if (!agentAsks() && transcript && endsWithInterrupt((await readTail(transcript, 64 * 1024))?.data.toString('utf8') ?? '')) {
       if (stale()) return;
       this.dialogs.clear();
       this.setMain(interruptedStatus());

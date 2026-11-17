@@ -7,6 +7,7 @@ import { isAsking, isHeld, type DelegationInfo, type SessionInfo } from '@agenth
 import { claudeConfigDir } from '../claude/settings';
 import { isClaudeTranscript } from '../claude/status';
 import { notSaved, writeJsonFile } from '../shared/state';
+import { MAX_LINE_BYTES, readTail, tailLines } from '../shared/tail';
 import type { SessionManager } from './manager';
 
 const FILE_VERSION = 1;
@@ -25,8 +26,6 @@ const RETRY_MS = 1000;
 const REPORT_WAIT_MS = 60_000;
 // The host holds automatic text back while someone types in that terminal; nothing else would say when to try again.
 const TYPING_RETRY_MS = 3000;
-// A transcript line is 64 MB at most (web/conversations.ts); an answer's range is no longer.
-const MAX_ANSWER_BYTES = 64 * 1024 * 1024;
 
 export const delegationsFile = (stateDir: string) => path.join(stateDir, 'delegations.json');
 
@@ -83,41 +82,21 @@ function answerText(record: unknown): string | null {
   return text || null;
 }
 
-/** The last answer written to a transcript from a byte offset on. */
+/** The last answer written to a transcript from a byte offset on (where a line begins). */
 async function findAnswer(file: string, from: number): Promise<{ line: AnswerLine; text: string } | null> {
-  const handle = await open(file, 'r');
-  try {
-    const { size } = await handle.stat();
-    const start = Math.max(from, size - TAIL_BYTES);
-    if (start >= size) return null;
-    const buffer = Buffer.alloc(size - start);
-    await handle.read(buffer, 0, buffer.length, start);
-    let found: { line: AnswerLine; text: string } | null = null;
-    let at = 0;
-    if (start > from) {
-      // A read that starts mid-file may start mid-line: that piece is not a record.
-      const newline = buffer.indexOf(10);
-      if (newline === -1) return null;
-      at = newline + 1;
+  const tail = await readTail(file, TAIL_BYTES, from);
+  if (!tail) return null;
+  let found: { line: AnswerLine; text: string } | null = null;
+  for (const line of tailLines(tail, from)) {
+    if (!line.text.includes('"assistant"') || !line.text.includes('"text"')) continue;
+    try {
+      const text = answerText(JSON.parse(line.text));
+      if (text) found = { line: { path: file, start: line.start, end: line.end }, text };
+    } catch {
+      // a line still being written
     }
-    while (at < buffer.length) {
-      let end = buffer.indexOf(10, at);
-      if (end === -1) end = buffer.length;
-      const line = buffer.toString('utf8', at, end);
-      if (line.includes('"assistant"') && line.includes('"text"')) {
-        try {
-          const text = answerText(JSON.parse(line));
-          if (text) found = { line: { path: file, start: start + at, end: start + end }, text };
-        } catch {
-          // a line still being written
-        }
-      }
-      at = end + 1;
-    }
-    return found;
-  } finally {
-    await handle.close();
   }
+  return found;
 }
 
 async function readAnswer(line: AnswerLine): Promise<string | null> {
@@ -152,7 +131,7 @@ function isTask(value: unknown): value is Task {
 function checked(task: Task): Task {
   const ours = (file: unknown): file is string => typeof file === 'string' && isClaudeTranscript(file, claudeConfigDir());
   const range = task.answer;
-  const answer = range && ours(range.path) && Number.isInteger(range.start) && Number.isInteger(range.end) && range.start >= 0 && range.end >= range.start && range.end - range.start <= MAX_ANSWER_BYTES ? range : null;
+  const answer = range && ours(range.path) && Number.isInteger(range.start) && Number.isInteger(range.end) && range.start >= 0 && range.end >= range.start && range.end - range.start <= MAX_LINE_BYTES ? range : null;
   return { ...task, transcript: ours(task.transcript) ? task.transcript : null, from: Number.isFinite(task.from) && task.from >= 0 ? task.from : 0, answer };
 }
 
