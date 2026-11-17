@@ -7,7 +7,8 @@ import { VENDOR_NAMES, type AccountLimits, type CliStatus, type ComposeRequest, 
 import { claudeConfigDir } from '../claude/settings';
 import { buildLaunch, LaunchError } from './cli/launch';
 import { EnvService, INSTALL_COMMAND } from './doctor';
-import { askSessions, ExternalSessions } from './external';
+import { askSessions } from '../claude/sessions';
+import { ExternalSessions } from './external';
 import type { HostClient } from './host-client';
 import { HostRequestError, type CloseResult, type ComposeOutcome } from '../shared/host-protocol';
 import { removeTree } from '../shared/state';

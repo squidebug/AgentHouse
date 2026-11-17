@@ -1,4 +1,3 @@
-import { execFile } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
@@ -14,7 +13,6 @@ import { readTail, tailLines } from '../shared/tail';
  * of one of CPU (facts §2.8).
  */
 export const EXTERNAL_EVERY_MS = 10_000;
-const ASK_TIMEOUT_MS = 8000;
 // One answer missing (the CLI took too long, or is being updated) is no reason to take every card away.
 const MISSES = 3;
 // The end of a transcript: its latest answer is in it, but for a turn that wrote more than this since.
@@ -26,19 +24,15 @@ const SEARCH_FOLDERS = 1000;
 // A session of AgentHouse's own that just ended may still be in Claude's list for a moment.
 const JUST_ENDED_MS = 60_000;
 
-/** `claude agents --json` (or what stands in for it), parsed; null when it fails or prints something else. Starts the CLI once. */
-export function askSessions(command: { file: string; args: string[] }, env: NodeJS.ProcessEnv): Promise<unknown> {
-  return new Promise((resolve) => {
-    execFile(command.file, command.args, { env, timeout: ASK_TIMEOUT_MS, windowsHide: true, maxBuffer: 4 * 1024 * 1024 }, (error, stdout) => {
-      if (error) return resolve(null);
-      try {
-        resolve(JSON.parse(stdout));
-      } catch {
-        resolve(null);
-      }
-    });
-  });
-}
+/** A listed session that can be shown: it says which conversation it is in and where it runs. */
+type Shown = ListedSession & { sessionId: string; cwd: string };
+
+/**
+ * A folder on another machine (\\host\share). A session there is left out: its notes would be read
+ * from there, and Windows sends the user's credentials to such a host.
+ */
+const remote = (cwd: string) => /^(\\\\|\/\/)/.test(cwd);
+const canShow = (entry: ListedSession): entry is Shown => entry.sessionId !== null && entry.cwd !== null && !remote(entry.cwd);
 
 /** A file's size and time of change in one word, to tell whether it changed; null when it is not there. */
 async function fileState(file: string): Promise<{ key: string; at: number } | null> {
@@ -105,7 +99,7 @@ interface Watched {
 const NO_RUN: LatestRun = { model: null, effort: null, version: null };
 
 /** The id AgentHouse knows it by: its process, and when it registered (a process id is used again). */
-const idOf = (entry: ListedSession) => `x-${entry.pid}-${entry.startedAt ?? 0}`;
+const idOf = (entry: Shown) => `x-${entry.pid}-${entry.startedAt ?? 0}`;
 
 /**
  * The Claude Code sessions that run on this machine and AgentHouse did not
@@ -206,7 +200,7 @@ export class ExternalSessions extends EventEmitter {
     const conversations = new Set(mine.flatMap((s) => [s.vendorSessionId, ...s.transcripts.map((t) => t.vendorSessionId)]));
     const next = new Map<string, Watched>();
     for (const entry of listed) {
-      if (pids.has(entry.pid) || conversations.has(entry.sessionId)) continue;
+      if (!canShow(entry) || pids.has(entry.pid) || conversations.has(entry.sessionId)) continue;
       const id = idOf(entry);
       next.set(id, await this.describe(id, entry, this.sessions.get(id), now));
     }
@@ -224,7 +218,7 @@ export class ExternalSessions extends EventEmitter {
   }
 
   /** A listed session as AgentHouse shows it, from what was known of it before and what its transcript says now. */
-  private async describe(id: string, entry: ListedSession, before: Watched | undefined, now: number): Promise<Watched> {
+  private async describe(id: string, entry: Shown, before: Watched | undefined, now: number): Promise<Watched> {
     const { configDir } = this.options;
     let transcripts: TranscriptSegment[] = before?.info.transcripts ?? [];
     let found = before?.found ?? false;

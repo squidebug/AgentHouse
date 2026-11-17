@@ -1,8 +1,8 @@
-import { execFile } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { isAsking, type AgentInfo, type BackgroundTask, type ScheduledPrompt, type SessionStatus, type SessionTelemetry, type StatusValue, type TranscriptSegment } from '@agenthouse/protocol';
 import { AgentTracker, agentTranscript, type AgentAsk } from '../claude/agents';
 import { BackgroundTracker } from '../claude/background';
+import { askSessions, listedSessions, type ListedSession } from '../claude/sessions';
 import { claudeConfigDir } from '../claude/settings';
 import {
   applyAgents,
@@ -16,7 +16,6 @@ import {
   interruptedStatus,
   isClaudeTranscript,
   unobservedStatus,
-  type AgentsEntry,
   type HookEvent,
   type StatusLineInput,
 } from '../claude/status';
@@ -28,21 +27,6 @@ import { readTail } from '../shared/tail';
 const FIRST_HOOK_WAIT_MS = 30_000;
 
 const BUSY = new Set<StatusValue>(['working', 'awaiting_permission', 'awaiting_input']);
-
-/** `claude agents --json`; null if it fails (older CLI, timeout). Each call starts the CLI once. */
-function listAgents(command: { file: string; args: string[] }, env: NodeJS.ProcessEnv): Promise<AgentsEntry[] | null> {
-  return new Promise((resolve) => {
-    execFile(command.file, command.args, { env, timeout: 8000, windowsHide: true, maxBuffer: 1024 * 1024 }, (error, stdout) => {
-      if (error) return resolve(null);
-      try {
-        const parsed: unknown = JSON.parse(stdout);
-        resolve(Array.isArray(parsed) ? (parsed as AgentsEntry[]) : null);
-      } catch {
-        resolve(null);
-      }
-    });
-  });
-}
 
 /**
  * What a session's CLI reports about itself: its status and telemetry.
@@ -210,14 +194,17 @@ export class ClaudeObserver extends Observer {
 
   /** `claude agents --json` on whether this session waits for the user; null when it does not or cannot tell. */
   async waiting(): Promise<StatusValue | null> {
-    const command = this.options.agentsCommand;
-    if (!command || this.done) return null;
-    const mine = this.mine(await listAgents(command, this.options.env));
+    if (this.done) return null;
+    const mine = await this.listed();
     if (mine?.status !== 'waiting') return null;
     return applyAgents(this.main, mine).value;
   }
 
-  private mine(entries: AgentsEntry[] | null): AgentsEntry | undefined {
+  /** This session in Claude's own list, asked for now: by its process, or by the conversation it is in. Undefined when it is not there, or there is no list to ask for. */
+  private async listed(): Promise<ListedSession | undefined> {
+    const command = this.options.agentsCommand;
+    if (!command) return undefined;
+    const entries = listedSessions(await askSessions(command, this.options.env));
     return entries?.find((e) => e.pid === this.options.pid || (this.vendorSessionId !== null && e.sessionId === this.vendorSessionId));
   }
 
@@ -323,9 +310,7 @@ export class ClaudeObserver extends Observer {
       this.setMain(interruptedStatus());
       return;
     }
-    const command = this.options.agentsCommand;
-    if (!command) return;
-    const mine = this.mine(await listAgents(command, this.options.env));
+    const mine = await this.listed();
     if (!mine || stale()) return;
     if (agentAsks()) {
       // Waiting means the sub-agent's dialog, never the main conversation's: that is as it was.

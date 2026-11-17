@@ -5,11 +5,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import type { ConversationServerMessage, LatestWords, SessionInfo } from '@agenthouse/protocol';
-import { listedSessions, listedStatus, projectDir, transcriptFile } from '../src/claude/sessions';
+import { askSessions, listedActivity, listedSessions, listedStatus, projectDir, transcriptFile } from '../src/claude/sessions';
 import { latestRun } from '../src/claude/transcript';
 import { childEnv } from '../src/shared/child-env';
 import { appSettingsFile } from '../src/web/app-settings';
-import { askSessions, ExternalSessions } from '../src/web/external';
+import { ExternalSessions } from '../src/web/external';
 import { assistant, jsonl, prompt, text } from './fixtures/transcript';
 import { eventually, fakeAgentPath, login, openSocket, request, startServer, waitFor, type TestServer } from './helpers';
 
@@ -33,24 +33,16 @@ function writeTranscript(file: string, asked: string, answered: string, extra: R
 }
 
 describe("Claude Code's own list of sessions", () => {
-  test('only what can be shown is taken from it', () => {
+  test('an entry is taken when it says whose it is; what else it says is used only where it can be', () => {
     assert.equal(listedSessions({ sessions: [] }), null, 'not a list');
     assert.equal(listedSessions('[]'), null);
     const good = listed({ waitingFor: 'permission prompt', status: 'waiting' });
-    const taken = listedSessions([
-      good,
-      listed({ pid: '12' }),
-      listed({ pid: 1.5 }),
-      listed({ sessionId: '../../x' }),
-      listed({ sessionId: undefined }),
-      listed({ cwd: 'relative/folder' }),
-      listed({ cwd: '\\\\host\\share\\project' }),
-      listed({ cwd: '//host/share/project' }),
-      null,
-      'text',
-    ]);
-    assert.equal(taken?.length, 1);
+    const taken = listedSessions([good, listed({ pid: '12' }), listed({ pid: 1.5 }), listed({ pid: 0 }), null, 'text']);
+    assert.equal(taken?.length, 1, 'no process id, no session');
     assert.deepEqual(taken?.[0], { pid: 4242, sessionId: good.sessionId, cwd: folder('shop'), name: 'shop-14', startedAt: 1_794_000_000_000, status: 'waiting', waitingFor: 'permission prompt' });
+    // The id of a conversation names a file and the folder is opened: neither is taken as it comes.
+    const odd = listedSessions([listed({ sessionId: '../../x' }), listed({ sessionId: undefined }), listed({ cwd: 'relative/folder' }), listed({ cwd: 7 })]);
+    assert.deepEqual(odd?.map((entry) => [entry.sessionId === null, entry.cwd === null]), [[true, false], [true, false], [false, true], [false, true]]);
     // What is missing or not what it should be is left empty; a name is no longer than a line.
     const bare = listedSessions([listed({ name: 7, startedAt: 'yesterday', status: null }), listed({ name: 'n'.repeat(500) })]);
     assert.deepEqual([bare?.[0]?.name, bare?.[0]?.startedAt, bare?.[0]?.status, bare?.[0]?.waitingFor], [null, null, null, null]);
@@ -69,6 +61,11 @@ describe("Claude Code's own list of sessions", () => {
     const idle = listedStatus({ status: 'idle', waitingFor: null }, null, 5);
     assert.equal(listedStatus({ status: 'idle', waitingFor: null }, idle, 9), idle);
     assert.equal(listedStatus({ status: 'busy', waitingFor: null }, idle, 9).at, 9);
+    // The words themselves, as the host reads them too when no hook tells it what its own session does.
+    assert.deepEqual(
+      [{ status: 'idle' }, { status: 'busy' }, { status: 'waiting', waitingFor: 'permission prompt' }, { status: 'waiting' }, { status: 'gone' }, { status: null }].map(listedActivity),
+      ['idle', 'working', 'awaiting_permission', 'awaiting_input', null, null],
+    );
   });
 
   test("a conversation's transcript is in the folder named after its project", () => {
@@ -174,6 +171,22 @@ describe('sessions started outside AgentHouse', () => {
     await external.refresh();
     assert.deepEqual(external.list(), []);
     assert.equal(external.get(session.id), undefined);
+  });
+
+  test('one that does not say which conversation it is in or where it runs is not shown, nor one on another machine', async () => {
+    const { external, state } = watcher();
+    after(() => external.close());
+    state.answer = [
+      listed({ pid: 60, sessionId: 'not-an-id' }),
+      listed({ pid: 61, cwd: 'relative/folder' }),
+      // Its notes would be read from there, and Windows sends the user's credentials to such a host.
+      listed({ pid: 62, cwd: '\\\\host\\share\\project' }),
+      listed({ pid: 63, cwd: '//host/share/project' }),
+      listed({ pid: 64 }),
+    ];
+    external.watch(true);
+    await external.ready(5000);
+    assert.deepEqual(external.list().map((session) => session.pid), [64]);
   });
 
   test('one nobody has asked anything yet has a name, a folder and a state', async () => {

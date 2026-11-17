@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
-import type { AccountLimits, RateWindow, SessionStatus, SessionTelemetry, StatusValue } from '@agenthouse/protocol';
+import { isAsking, type AccountLimits, type RateWindow, type SessionStatus, type SessionTelemetry, type StatusValue } from '@agenthouse/protocol';
+import { listedActivity, type ListedState } from './sessions';
 
 /** The fields of a Claude Code hook event that the status and the agent tree read; everything else is dropped. */
 export interface HookEvent {
@@ -207,34 +208,17 @@ export function applyHook(current: SessionStatus, event: HookEvent, at = Date.no
 /** Esc or Ctrl+C ended the turn. No hook reports this; the transcript does. */
 export const interruptedStatus = (at = Date.now()) => status('idle', at, { reason: 'interrupted' });
 
-/** One entry of `claude agents --json` (2.1.145+). */
-export interface AgentsEntry {
-  pid?: unknown;
-  sessionId?: unknown;
-  status?: unknown;
-  waitingFor?: unknown;
-}
-
 /**
- * Status from `claude agents --json`, asked when no hook can tell: after a
- * dialog is answered or a turn is cut short in the terminal (denying with Esc
- * fires no hook either).
+ * Status from Claude's own list of sessions (`claude agents --json`), asked
+ * when no hook can tell: after a dialog is answered or a turn is cut short in
+ * the terminal (denying with Esc fires no hook either). What it waits with is
+ * known from the hooks, if at all; else Claude's word for it stands in.
  */
-export function applyAgents(current: SessionStatus, entry: AgentsEntry, at = Date.now()): SessionStatus {
+export function applyAgents(current: SessionStatus, entry: ListedState, at = Date.now()): SessionStatus {
   if (current.value === 'exited') return current;
-  switch (entry.status) {
-    case 'idle':
-      return current.value === 'idle' ? current : status('idle', at);
-    case 'busy':
-      return current.value === 'working' ? current : status('working', at);
-    case 'waiting': {
-      const what = text(entry.waitingFor);
-      const value: StatusValue = what && /permission/i.test(what) ? 'awaiting_permission' : 'awaiting_input';
-      return current.value === value ? current : status(value, at, { reason: current.reason ?? what, tool: current.tool });
-    }
-    default:
-      return current;
-  }
+  const value = listedActivity(entry);
+  if (value === null || current.value === value) return current;
+  return isAsking(value) ? status(value, at, { reason: current.reason ?? text(entry.waitingFor), tool: current.tool }) : status(value, at);
 }
 
 export const exitedStatus = (code: number, at = Date.now()) => status('exited', at, { reason: code === 0 ? null : `exit ${code}`, error: code !== 0 });

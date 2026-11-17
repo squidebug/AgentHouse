@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { findOnPath } from './web/cli/resolve';
 import { doctor } from './web/doctor-command';
-import { askSessions } from './web/external';
+import { askSessions } from './claude/sessions';
 import { HostClient, stopHosts } from './web/host-client';
 import { childEnv } from './shared/child-env';
 import { defaultStateDir, webLogger } from './shared/state';
