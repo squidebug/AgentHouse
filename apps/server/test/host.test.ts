@@ -91,6 +91,8 @@ describe('session host', () => {
     try {
       const state = readState(stateDir);
       assert.ok(state);
+      // Before it said where it is: a web server that finds it puts a new session's files there at once.
+      assert.equal(existsSync(stale), false, 'files a previous host left behind are cleared');
       const nonce = 'a-nonce-from-the-web-server';
       // The web server shows that it holds the token, for a nonce of its own; the token itself is not sent.
       const auth = { authorization: `Bearer ${webProof(state.token, nonce)}`, 'x-agenthouse-nonce': nonce };
@@ -108,7 +110,6 @@ describe('session host', () => {
       assert.ok(await waitFor(() => allowed.messages.length > 0, 2000));
       assert.equal(allowed.messages[0]?.proof, hostProof(state.token, nonce), 'the hello proves the host knows the token');
       allowed.ws?.close();
-      assert.ok(await waitFor(() => !existsSync(stale), 3000), 'files a previous host left behind are cleared');
     } finally {
       await host.close();
       await rm(stateDir, { recursive: true, force: true });

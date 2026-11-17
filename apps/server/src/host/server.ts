@@ -30,6 +30,9 @@ export interface SessionHost {
 
 const sameWindow = (a: AccountLimits['fiveHour'], b: AccountLimits['fiveHour']) => a?.usedPct === b?.usedPct && a?.resetsAt === b?.resetsAt;
 
+// How long a starting host waits for the files of the one before it to be gone.
+const CLEAR_WAIT_MS = 2000;
+
 /**
  * The long-lived half of AgentHouse. It owns every PTY and its screen mirror, so
  * the web server can restart (or crash) without ending a running agent. Only web
@@ -253,10 +256,12 @@ export async function createSessionHost(options: HostOptions): Promise<SessionHo
       resolve((server.address() as AddressInfo).port);
     });
   });
+  // Session files a previous host of this protocol left behind (it was killed, or Windows still held
+  // a file when it tried): nobody reads them any more. Cleared before this host says where it is: a
+  // web server that finds it puts a new session's files in that folder at once. A file Windows will
+  // not let go of does not hold the start up for long.
+  await Promise.race([removeTree(runDir(options.stateDir)).catch(() => {}), new Promise((resolve) => setTimeout(resolve, CLEAR_WAIT_MS).unref())]);
   writeState(options.stateDir, { protocol: HOST_PROTOCOL, pid: process.pid, port, token, startedAt: Date.now() });
-  // Session files a previous host of this protocol left behind (it was killed,
-  // or Windows still held a file when it tried): nobody reads them any more.
-  removeTree(runDir(options.stateDir)).catch(() => {});
   checkIdle();
 
   return {
