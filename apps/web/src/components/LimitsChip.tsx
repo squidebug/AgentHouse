@@ -5,11 +5,12 @@ import { t } from '../strings';
 import { motion, v } from '../theme/tokens';
 
 /** A window whose reset time has passed no longer tells the usage. */
-const fresh = (window: RateWindow | null, now: number) => (window && (window.resetsAt === null || window.resetsAt > now) ? window : null);
+export const fresh = (window: RateWindow | null, now: number) => (window && (window.resetsAt === null || window.resetsAt > now) ? window : null);
 
-const tone = (pct: number) => (pct >= 90 ? v.error : pct >= 75 ? v.warn : v.primary);
+/** How near a limit a share of it is: the color of a gauge, and of its number. */
+export const tone = (pct: number) => (pct >= 90 ? v.error : pct >= 75 ? v.warn : v.primary);
 
-function resetText(at: number, now: number): string {
+export function resetText(at: number, now: number): string {
   const date = new Date(at);
   const time = date.toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' });
   const day = new Date(now).toDateString() === date.toDateString() ? '' : `${date.toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'short' })} `;

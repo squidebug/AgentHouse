@@ -6,6 +6,7 @@ import { api, RequestError } from './api/client';
 import { useEnv, useSessions } from './api/hooks';
 import { Composer } from './components/Composer';
 import { CopyCommand } from './components/CopyCommand';
+import { Dashboard } from './components/Dashboard';
 import { statusText } from './components/Details';
 import { LaunchDialog } from './components/LaunchDialog';
 import { PaneGrid } from './components/PaneGrid';
@@ -13,6 +14,7 @@ import { SessionTree } from './components/SessionTree';
 import { TopBar } from './components/TopBar';
 import { t } from './strings';
 import { v } from './theme/tokens';
+import { loadScreen, saveScreen, type Screen } from './workspace/dashboard';
 import { makeDnd } from './workspace/dnd';
 import { finished, loadNotifyDone, saveNotifyDone, statusesOf } from './workspace/notify';
 import { delegatesOf, parentsOf } from './workspace/tree';
@@ -38,6 +40,15 @@ export function App() {
 
   const { panes, active, nextPane, paneMode } = state;
   useEffect(() => saveWorkspace({ ...state, panes, active, nextPane, paneMode }), [panes, active, nextPane, paneMode]);
+
+  // What shows under the top bar: the workspace, or the dashboard laid over it.
+  const [screen, setScreen] = useState<Screen>(() => loadScreen());
+  useEffect(() => saveScreen(screen), [screen]);
+  // A session asked for from outside the workspace (the bell, a notification, a card of the dashboard) shows there.
+  const openSession = useCallback((sessionId: string) => {
+    dispatch({ type: 'open', sessionId });
+    setScreen('workspace');
+  }, []);
 
   const byId = useMemo(() => {
     const map = new Map<string, SessionInfo>(Object.entries(launched));
@@ -77,17 +88,20 @@ export function App() {
   }, [asking.length]);
   // One notification per session: the next takes the place of the last one, closed first so that it shows again.
   const notes = useRef(new Map<string, Notification>());
-  const announce = useCallback((session: SessionInfo, body: string) => {
-    if (document.visibilityState === 'visible' || typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
-    notes.current.get(session.id)?.close();
-    const note = new Notification(session.title, { body, tag: session.id });
-    notes.current.set(session.id, note);
-    note.onclick = () => {
-      window.focus();
-      dispatch({ type: 'open', sessionId: session.id });
-      note.close();
-    };
-  }, []);
+  const announce = useCallback(
+    (session: SessionInfo, body: string) => {
+      if (document.visibilityState === 'visible' || typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+      notes.current.get(session.id)?.close();
+      const note = new Notification(session.title, { body, tag: session.id });
+      notes.current.set(session.id, note);
+      note.onclick = () => {
+        window.focus();
+        openSession(session.id);
+        note.close();
+      };
+    },
+    [openSession],
+  );
   const announced = useRef(new Map<string, number>());
   useEffect(() => {
     for (const session of asking) {
@@ -111,11 +125,12 @@ export function App() {
 
   // Ctrl+`: the active pane between its terminal and its conversation, from anywhere on the page.
   // Taken before the terminal sees it, so it never reaches the CLI.
-  const latest = useRef({ state, byId });
-  latest.current = { state, byId };
+  const latest = useRef({ state, byId, screen });
+  latest.current = { state, byId, screen };
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (!isModeShortcut(event)) return;
+      // Under the dashboard no pane is in sight to switch.
+      if (!isModeShortcut(event) || latest.current.screen !== 'workspace') return;
       event.preventDefault();
       event.stopPropagation();
       if (event.repeat) return;
@@ -157,6 +172,8 @@ export function App() {
       sx={{ minHeight: '100vh', height: { md: '100vh' }, overflow: { md: 'hidden' }, display: 'flex', flexDirection: 'column', bgcolor: v.bg, color: v.on }}
     >
       <TopBar
+        screen={screen}
+        onScreen={setScreen}
         limits={limits}
         env={env}
         envLoading={envLoading}
@@ -164,7 +181,7 @@ export function App() {
         mode={resolved}
         onToggleMode={() => setMode(resolved === 'dark' ? 'light' : 'dark')}
         waiting={asking}
-        onOpenSession={(sessionId) => dispatch({ type: 'open', sessionId })}
+        onOpenSession={openSession}
         notifyDone={notifyDone}
         onNotifyDone={(on) => {
           setNotifyDone(on);
@@ -179,62 +196,85 @@ export function App() {
         </Box>
       )}
 
-      <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexWrap: { xs: 'wrap', md: 'nowrap' }, alignItems: { xs: 'flex-start', md: 'stretch' }, gap: '12px 20px', p: '12px 16px 16px' }}>
-        <SessionTree
-          sessions={[...byId.values()]}
-          links={links}
-          onLink={(childId, parentId, kind) => api.link(childId, parentId, kind).catch(failed(t.failure.link))}
-          state={state}
-          dispatch={dispatch}
-          dnd={dnd}
-          onNew={() => setLaunchOpen(true)}
-          onEnd={(id) => setEnding(byId.get(id) ?? null)}
-          // The same session comes back, shown like one just started: in the pane that has it, else in a new one.
-          onResume={(id) =>
-            api
-              .resume(id, resolved)
-              .then(() => dispatch({ type: 'openNew', sessionId: id }))
-              .catch(failed(t.failure.resume))
-          }
-          onRemove={(id) => api.remove(id).catch(failed(t.failure.remove))}
-          onRemoveEnded={(list) => setRemoving({ open: true, list })}
-        />
+      <Box sx={{ position: 'relative', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <Box
-          component="main"
+          // Under the dashboard the workspace stays as it is, out of sight and out of reach, with every
+          // pane at its size. Taken out of the layout instead, a terminal would be fitted again to a box
+          // without a size (a few cells) and would tell its PTY so.
+          inert={screen !== 'workspace'}
           sx={{
-            minWidth: 0,
+            flex: 1,
             minHeight: 0,
             display: 'flex',
-            flexDirection: 'column',
-            gap: '12px',
-            // Its scrollbar has its place whether it shows or not: a draft growing in the composer must
-            // not narrow the panes, which would resize every terminal.
-            overflowY: { md: 'auto' },
-            scrollbarGutter: { md: 'stable' },
-            scrollbarWidth: 'thin',
-            // What scrolls cuts off whatever is outside it: the padding is room for the panes' shadows and
-            // the active pane's outline. The margin takes the room back and the basis grows by as much
-            // (560 + 2 × (12 - 3)), so the panes are exactly as wide as they were with 3px of it.
-            flex: { xs: '999 1 560px', md: '999 1 578px' },
-            p: { md: '12px' },
-            m: { md: '-12px' },
+            flexWrap: { xs: 'wrap', md: 'nowrap' },
+            alignItems: { xs: 'flex-start', md: 'stretch' },
+            gap: '12px 20px',
+            p: '12px 16px 16px',
+            visibility: screen === 'workspace' ? 'visible' : 'hidden',
           }}
         >
-          <PaneGrid
+          <SessionTree
+            sessions={[...byId.values()]}
+            links={links}
+            onLink={(childId, parentId, kind) => api.link(childId, parentId, kind).catch(failed(t.failure.link))}
             state={state}
             dispatch={dispatch}
             dnd={dnd}
-            sessionById={sessionById}
-            mode={resolved}
-            windowsBuild={env?.windowsBuild ?? null}
             onNew={() => setLaunchOpen(true)}
-            links={links}
-            delegations={delegations}
-            onDelegate={onDelegate}
-            onDeliver={onDeliver}
+            onEnd={(id) => setEnding(byId.get(id) ?? null)}
+            // The same session comes back, shown like one just started: in the pane that has it, else in a new one.
+            onResume={(id) =>
+              api
+                .resume(id, resolved)
+                .then(() => dispatch({ type: 'openNew', sessionId: id }))
+                .catch(failed(t.failure.resume))
+            }
+            onRemove={(id) => api.remove(id).catch(failed(t.failure.remove))}
+            onRemoveEnded={(list) => setRemoving({ open: true, list })}
           />
-          <Composer state={state} dispatch={dispatch} dnd={dnd} sessionById={sessionById} activeSession={activeSession} delegates={delegates} />
+          <Box
+            component="main"
+            sx={{
+              minWidth: 0,
+              minHeight: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '12px',
+              // Its scrollbar has its place whether it shows or not: a draft growing in the composer must
+              // not narrow the panes, which would resize every terminal.
+              overflowY: { md: 'auto' },
+              scrollbarGutter: { md: 'stable' },
+              scrollbarWidth: 'thin',
+              // What scrolls cuts off whatever is outside it: the padding is room for the panes' shadows and
+              // the active pane's outline. The margin takes the room back and the basis grows by as much
+              // (560 + 2 × (12 - 3)), so the panes are exactly as wide as they were with 3px of it.
+              flex: { xs: '999 1 560px', md: '999 1 578px' },
+              p: { md: '12px' },
+              m: { md: '-12px' },
+            }}
+          >
+            <PaneGrid
+              state={state}
+              dispatch={dispatch}
+              dnd={dnd}
+              sessionById={sessionById}
+              mode={resolved}
+              windowsBuild={env?.windowsBuild ?? null}
+              onNew={() => setLaunchOpen(true)}
+              links={links}
+              delegations={delegations}
+              onDelegate={onDelegate}
+              onDeliver={onDeliver}
+            />
+            <Composer state={state} dispatch={dispatch} dnd={dnd} sessionById={sessionById} activeSession={activeSession} delegates={delegates} />
+          </Box>
         </Box>
+        {screen === 'dashboard' && (
+          // Over the workspace, with the page's own face: whatever lies under it is covered.
+          <Box sx={{ position: 'absolute', inset: 0, overflowY: 'auto', scrollbarWidth: 'thin', bgcolor: v.bg }}>
+            <Dashboard sessions={[...byId.values()]} links={links} limits={limits} onOpen={openSession} onNew={() => setLaunchOpen(true)} />
+          </Box>
+        )}
       </Box>
 
       <LaunchDialog
@@ -246,6 +286,8 @@ export function App() {
         onLaunched={(session) => {
           setLaunched((current) => ({ ...current, [session.id]: session }));
           dispatch({ type: 'openNew', sessionId: session.id });
+          // Started from the dashboard too, a new session shows where it is worked with.
+          setScreen('workspace');
           // Asked once, right after the user starts a session: approval requests notify from then on.
           if (typeof Notification !== 'undefined' && Notification.permission === 'default') Notification.requestPermission().catch(() => {});
         }}

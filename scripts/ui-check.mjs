@@ -3,7 +3,8 @@
 // with the fake agent: the login, a session in a pane, a message through the
 // composer and its turn in the pane's conversation view, an ended session that
 // an earlier session host left in sessions.json (ui-sample.mjs), sub-agents,
-// groups, delegation, and a session ended and started again where it stopped.
+// groups, the dashboard (and the panes' size after it), delegation, and a
+// session ended and started again where it stopped.
 // Light and dark screenshots go to the output folder, and with --out one page
 // of them all (index.html): light next to dark, and before next to after when
 // --before names the folder an earlier run was given as --out.
@@ -50,6 +51,8 @@ const SCENES = {
   skills: '스킬',
   'note-editor': '편집 창',
   memory: '메모리',
+  dashboard: '대시보드',
+  'dashboard-more': '대시보드 · 여러 세션',
   delegate: '위임',
   'composer-delegate': '입력창 위임',
   resume: '이어서 열기',
@@ -557,6 +560,58 @@ try {
   await memoryWindow.waitFor({ state: 'detached', timeout: 5000 });
   await background.getByRole('button', { name: 'Wait for the build 세부 정보' }).click();
 
+  // The dashboard: every session as a card, in the place of what it is doing, with what runs in it. The
+  // workspace stays as it is underneath, so its panes and terminals keep their size.
+  const sizeNow = async () => {
+    const { cols, rows } = await named('ui-check');
+    return `${JSON.stringify(round(await paneBox()))} ${cols}×${rows}`;
+  };
+  const sizedBefore = await sizeNow();
+  await tell('ui-agents', 'this needs approval');
+  await page.getByRole('button', { name: '알림 · 승인·입력 대기 1' }).waitFor({ timeout: 10_000 });
+  const screens = page.getByRole('navigation', { name: '화면' });
+  await screens.getByRole('button', { name: '대시보드' }).click();
+  const dashboard = page.getByRole('region', { name: '대시보드' });
+  const placeOf = (name) => dashboard.getByRole('group', { name, exact: true });
+  const waitingCard = placeOf('승인·입력 대기').getByRole('button', { name: 'ui-agents 열기' });
+  await waitingCard.getByText('승인 대기 · Write').waitFor({ timeout: 10_000 });
+  check(true, 'the dashboard: a session that waits for the user comes first');
+  const loopCard = placeOf('예약').getByRole('button', { name: 'ui-check 열기' });
+  const runs = loopCard.getByRole('group', { name: 'ui-check 실행 중' });
+  await runs.getByText('1분마다 · 1회').waitFor({ timeout: 10_000 });
+  check((await runs.getByText('Wait for the build').isVisible()) && (await runs.getByText('모니터 · deployed 3 of 5').isVisible()), 'a session with a loop has a place of its own, and its card lists what runs in it');
+  await loopCard.getByText('pong', { exact: true }).waitFor({ timeout: 10_000 });
+  check(await loopCard.getByText('use a skill', { exact: true }).isVisible(), 'a card says what its session was last asked, and what it said');
+  check(!(await tree.isVisible()), 'the workspace is out of sight under the dashboard');
+  await dashboard.getByRole('button', { name: /^종료 \d+$/ }).click();
+  await dashboard.getByRole('button', { name: 'readme-cleanup 열기' }).getByText('새 작업: 장바구니 세금 계산을 고쳐 줘').waitFor({ timeout: 10_000 });
+  check(true, 'ended sessions fold away there too, each with the last it was asked');
+  await settle();
+  await page.screenshot({ path: path.join(out, 'dashboard-dark.png') });
+  await page.getByRole('button', { name: '라이트 모드' }).click();
+  await settle();
+  await page.screenshot({ path: path.join(out, 'dashboard-light.png') });
+  await page.getByRole('button', { name: '다크 모드' }).click();
+  // The screen shown last is shown again, and the terminals under it start at the size they had.
+  await page.reload();
+  await enter();
+  await waitingCard.waitFor({ timeout: 10_000 });
+  check(!(await tree.isVisible()), 'a reload shows the dashboard again');
+  await waitingCard.click();
+  const asking = page.getByRole('region', { name: 'ui-agents', exact: true });
+  await asking.locator('.xterm-screen').waitFor({ timeout: 10_000 });
+  check((await screens.getByRole('button', { name: '워크스페이스' }).getAttribute('aria-pressed')) === 'true', 'a card shows its session in the workspace');
+  await asking.locator('.xterm-screen').click();
+  await page.keyboard.press('Enter');
+  await page.getByRole('button', { name: '알림', exact: true }).waitFor({ timeout: 10_000 });
+  await tree.getByRole('button', { name: 'ui-check 열기', exact: true }).click();
+  await page.getByRole('region', { name: 'ui-check', exact: true }).locator('.xterm-screen').waitFor({ timeout: 10_000 });
+  await page.waitForTimeout(400);
+  const sizedAfter = await sizeNow();
+  check(sizedBefore === sizedAfter, 'the pane and its terminal are the size they were before the dashboard', `${sizedBefore} → ${sizedAfter}`);
+  // The reload folded what was open in the tree; as it was, for the scenes that follow.
+  await tree.getByRole('button', { name: 'ui-agents 세부 정보' }).click();
+
   // Delegation: a session works for another; a piece of the lead's conversation goes to it, and its answer comes back.
   for (const title of ['ui-lead', 'ui-helper']) {
     await fetch(`${origin}/api/sessions`, {
@@ -630,6 +685,22 @@ try {
   check(await cards.nth(3).getByText('fake answer: list the open questions').isVisible(), 'and from the keyboard, with Ctrl+Shift+Enter');
   await composer.getByRole('button', { name: 'ui-helper 빼기' }).click();
   await handOver.waitFor({ state: 'detached', timeout: 5000 });
+
+  // The dashboard again, with more on it: idle sessions, each with the last it was asked and said, one of
+  // them working for another. Back by the switch, the workspace is as it was left.
+  await screens.getByRole('button', { name: '대시보드' }).click();
+  const helperCard = placeOf('대기').getByRole('button', { name: 'ui-helper 열기' });
+  await helperCard.getByText('fake answer: list the open questions').waitFor({ timeout: 10_000 });
+  check((await helperCard.getByRole('img', { name: '위임' }).isVisible()) && (await helperCard.getByText('ui-lead', { exact: true }).isVisible()), 'the card of a delegate names the session it works for');
+  check((await placeOf('대기').getByRole('button', { name: /열기$/ }).count()) === 3, 'idle sessions have their place, a card each');
+  await settle();
+  await page.screenshot({ path: path.join(out, 'dashboard-more-light.png') });
+  await page.getByRole('button', { name: '다크 모드' }).click();
+  await settle();
+  await page.screenshot({ path: path.join(out, 'dashboard-more-dark.png') });
+  await page.getByRole('button', { name: '라이트 모드' }).click();
+  await screens.getByRole('button', { name: '워크스페이스' }).click();
+  check((await cards.nth(3).getByText('fake answer: list the open questions').isVisible()) && (await box.inputValue()) === '', 'back by the switch, the conversation the pane showed is where it was');
 
   // An answer nested too deep for the markdown parser shows as plain text, and the rest of the app stays.
   await box.fill(`deep\n${'- '.repeat(5000)}end`);

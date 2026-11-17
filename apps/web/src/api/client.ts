@@ -9,6 +9,7 @@ import {
   type DelegationInfo,
   type EntryDetail,
   type EnvReport,
+  type LatestWords,
   type LaunchOptions,
   type LinkKind,
   type MemoryFile,
@@ -73,6 +74,8 @@ export const api = {
     call<DelegationInfo>('POST', `/api/sessions/${encodeURIComponent(parentId)}/delegations`, { childId, text }),
   /** Hands a delegate's answer back to its parent, now or once the parent is idle. */
   deliver: (id: string, header: string) => call<DelegationInfo>('POST', `/api/delegations/${encodeURIComponent(id)}/deliver`, { header }),
+  /** What a session was last asked and what it last said, as a few plain words. */
+  latest: (id: string) => call<LatestWords>('GET', `/api/sessions/${encodeURIComponent(id)}/latest`),
   /** The skills a session's conversation was given, with the ones it ran marked. */
   skills: (id: string) => call<{ skills: SkillInfo[] }>('GET', `/api/sessions/${encodeURIComponent(id)}/skills`),
   /** One of the project's or the user's own skills, as text to edit; saved over the version it was loaded as. */

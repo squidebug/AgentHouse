@@ -1,10 +1,21 @@
 import { VENDOR_NAMES, type BackgroundTask, type DelegationInfo, type MemoryFile, type NoticeKind, type SkillInfo, type StatusValue, type ToolState } from '@agenthouse/protocol';
+import type { Screen } from './workspace/dashboard';
 
 // UI text in one place so an English catalog can be added later. A map of labels
 // is checked against the values it names (`satisfies`): a value added to the
 // protocol without its label does not compile.
 export const t = {
   appName: 'AgentHouse',
+  // What the page shows under its top bar, and the switch between the two.
+  screens: '화면',
+  screen: { workspace: '워크스페이스', dashboard: '대시보드' } satisfies Record<Screen, string>,
+  noSessions: '세션 없음',
+  // A session whose own conversation is idle while its sub-agents work.
+  agentsAtWork: '서브에이전트 작업 중',
+  // When a prompt set for a session ran last, and when it runs next.
+  ranAt: (time: string) => `마지막 ${time}`,
+  runsAt: (time: string) => `다음 ${time}`,
+  more: (n: number) => `+${n}`,
   sessions: '세션',
   newSession: '새 세션',
   dropHere: '여기에 놓기',
@@ -124,10 +135,12 @@ export const t = {
   before: (span: string) => `${span} 전`,
   later: (span: string) => `${span} 후`,
   now: '지금',
+  justNow: '방금',
   recent: (span: string) => `최근 ${span}`,
   // Spans of time are put together where they are shown: 45초, 1분 30초, 1시간 5분.
   unit: { day: '일', hour: '시간', minute: '분', second: '초' },
   underSecond: '1초 미만',
+  underMinute: '1분 미만',
   noConversation: '대화 없음',
   earlierTurns: (n: number) => `이전 턴 ${n}개`,
   tools: (n: number) => `도구 ${n}`,

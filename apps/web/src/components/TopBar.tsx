@@ -1,15 +1,20 @@
-import { Badge, Box, Button, IconButton, Popover, Tooltip, Typography } from '@mui/material';
+import { Badge, Box, Button, ButtonBase, IconButton, Popover, Tooltip, Typography } from '@mui/material';
 import { useState } from 'react';
 import type { AccountLimits, EnvReport, SessionInfo, ThemeMode, Vendor } from '@agenthouse/protocol';
 import { t } from '../strings';
 import { v } from '../theme/tokens';
+import { SCREENS, type Screen } from '../workspace/dashboard';
 import { CliDialog, CliRows } from './CliChoice';
 import { CopyCommand } from './CopyCommand';
 import { MoonIcon, PulseIcon, SunIcon } from './icons';
 import { LimitsChip } from './LimitsChip';
 import { Notifications } from './Notifications';
+import { switchSide, switchTrack } from './switch';
 
 interface Props {
+  /** The workspace or the dashboard, and the switch between them. */
+  screen: Screen;
+  onScreen: (screen: Screen) => void;
   limits: AccountLimits[];
   env: EnvReport | null;
   envLoading: boolean;
@@ -25,18 +30,27 @@ interface Props {
 
 const LEVEL_COLOR = { error: v.error, warn: v.warn, info: v.on2 } as const;
 
-export function TopBar({ limits, env, envLoading, refreshEnv, mode, onToggleMode, waiting, onOpenSession, notifyDone, onNotifyDone }: Props) {
+export function TopBar({ screen, onScreen, limits, env, envLoading, refreshEnv, mode, onToggleMode, waiting, onOpenSession, notifyDone, onNotifyDone }: Props) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const [choosing, setChoosing] = useState<Vendor | null>(null);
   const messages = env?.messages ?? [];
   const attention = messages.some((m) => m.level !== 'info');
 
   return (
-    // Part of the page, like the tree below it: no face of its own and no line under it.
-    <Box component="header" sx={{ display: 'flex', alignItems: 'center', gap: 1, minHeight: 56, px: 2 }}>
+    // Part of the page, like the tree below it: no face of its own and no line under it. In a window too
+    // narrow for all of it on one line it takes a second one.
+    <Box component="header" sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1, minHeight: 56, px: 2 }}>
       <Typography component="h1" variant="h6">
         {t.appName}
       </Typography>
+      {/* What the page shows under the bar. On the page, so its track has the page's fill. */}
+      <Box component="nav" aria-label={t.screens} sx={{ ...switchTrack, bgcolor: v.bg2, ml: 1 }}>
+        {SCREENS.map((one) => (
+          <ButtonBase key={one} aria-pressed={screen === one} onClick={() => onScreen(one)} sx={{ ...switchSide(screen === one), height: 32, px: '14px', fontSize: 13, fontWeight: 500 }}>
+            {t.screen[one]}
+          </ButtonBase>
+        ))}
+      </Box>
       <Box sx={{ flex: 1 }} />
       <LimitsChip limits={limits} />
       <Notifications waiting={waiting} onOpen={onOpenSession} notifyDone={notifyDone} onNotifyDone={onNotifyDone} />
