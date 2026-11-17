@@ -3,8 +3,9 @@
 // with the fake agent: the login, a session in a pane, a message through the
 // composer and its turn in the pane's conversation view, an ended session that
 // an earlier session host left in sessions.json (ui-sample.mjs), sub-agents,
-// groups, the dashboard (and the panes' size after it), delegation, and a
-// session ended and started again where it stopped.
+// groups, the dashboard (and the panes' size after it), delegation, a session
+// ended and started again where it stopped, and sessions started outside
+// AgentHouse, which the fake agent lists in Claude's place (ui-sample.mjs).
 // Light and dark screenshots go to the output folder, and with --out one page
 // of them all (index.html): light next to dark, and before next to after when
 // --before names the folder an earlier run was given as --out.
@@ -19,7 +20,7 @@ import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
 import { writePage } from './ui-page.mjs';
-import { writeSampleSession } from './ui-sample.mjs';
+import { writeOutsideSessions, writeSampleSession } from './ui-sample.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const main = path.join(root, 'apps/server/dist/main.js');
@@ -56,6 +57,9 @@ const SCENES = {
   delegate: '위임',
   'composer-delegate': '입력창 위임',
   resume: '이어서 열기',
+  external: '외부 세션',
+  'external-dashboard': '외부 세션 · 대시보드',
+  'external-bell': '외부 세션 · 종',
   failed: '멈춘 곳',
 };
 const scratch = mkdtempSync(path.join(os.tmpdir(), 'agenthouse-ui-'));
@@ -734,6 +738,81 @@ try {
   await helper.getByRole('button', { name: '대화', exact: true }).click();
   await helper.getByText('fake answer: fake answer: please outline the plan', { exact: true }).first().waitFor({ timeout: 10_000 });
   check(true, 'with the conversation it had before it ended');
+
+  // Sessions started outside AgentHouse, in a terminal or an editor (made up here: the fake agent
+  // prints them as Claude's own list of sessions): with the others in the tree and on the dashboard,
+  // marked, and only read. Watching them is turned off and on again, which asks for the list at once
+  // instead of at the next interval.
+  const outside = path.join(scratch, 'infra');
+  mkdirSync(outside, { recursive: true });
+  const [asks, digs, fresh] = writeOutsideSessions({ config, cwd: work, other: outside });
+  const watching = (checked) => page.getByRole('switch', { name: '외부 세션', checked });
+  await bell.click();
+  check(await watching(true).isVisible(), 'sessions started elsewhere are watched unless that is turned off');
+  await watching(true).click();
+  await watching(false).waitFor({ timeout: 5000 });
+  await watching(false).click();
+  await watching(true).waitFor({ timeout: 5000 });
+  await page.keyboard.press('Escape');
+  await row(asks.name).getByText('외부', { exact: true }).waitFor({ timeout: 10_000 });
+  check(await row(asks.name).getByText('Sonnet 5.5 · 승인 대기').isVisible(), 'a session started in a terminal is in the tree, marked, with its model and what it is doing');
+  check((await tree.getByText('infra', { exact: true }).count()) === 1 && (await row(fresh.name).getByText('Claude Code', { exact: true }).isVisible()), 'in its folder; one nobody asked anything yet has a name and a state');
+  await page.getByRole('button', { name: '알림 · 승인·입력 대기 1' }).waitFor({ timeout: 10_000 });
+  check(true, 'the bell counts one that waits for an approval');
+
+  await tree.getByRole('button', { name: `${digs.name} 열기`, exact: true }).click();
+  const watched = page.getByRole('region', { name: digs.name, exact: true });
+  await watched.getByText('어제 배포 뒤 오류 로그를 유형별로 묶어 줘').waitFor({ timeout: 10_000 });
+  check(
+    (await watched.getByText('외부', { exact: true }).isVisible()) && (await watched.getByRole('button', { name: /^터미널/ }).count()) === 0 && (await watched.getByRole('button', { name: '흐름', exact: true }).isVisible()),
+    'its pane shows its conversation, marked: there is no terminal to switch to',
+  );
+  check(await watched.getByText(/Opus 5\.5 · high · 입력/).first().isVisible(), 'with the model and the effort its transcript names');
+  check((await composer.getByText(digs.name).count()) === 0 && (await box.isVisible()), 'the composer has nobody to send to: such a session takes no messages');
+  const endings = () => tree.getByRole('button', { name: /^(세션 종료|목록에서 제거|아래로 넣기|이어서 열기)$/ }).count();
+  const keysBefore = await endings();
+  await tree.getByRole('button', { name: `${asks.name} 세부 정보` }).click();
+  await tree.getByText(String(asks.pid), { exact: true }).waitFor({ timeout: 5000 });
+  check((await endings()) === keysBefore && (await tree.getByText('Claude Code 2.1.326', { exact: true }).isVisible()), 'its details are read, with nothing to press');
+  await settle();
+  await page.screenshot({ path: path.join(out, 'external-light.png') });
+  await page.getByRole('button', { name: '다크 모드' }).click();
+  await settle();
+  await page.screenshot({ path: path.join(out, 'external-dark.png') });
+
+  await screens.getByRole('button', { name: '대시보드' }).click();
+  const asksCard = placeOf('승인·입력 대기').getByRole('button', { name: `${asks.name} 열기` });
+  await asksCard.getByText('주문 테이블에 인덱스를 추가하는 마이그레이션을 만들어 줘').waitFor({ timeout: 10_000 });
+  check(await asksCard.getByText('외부', { exact: true }).isVisible(), 'on the dashboard it stands with the others by what it is doing, marked: one that asks comes first');
+  check(
+    (await placeOf('작업 중').getByRole('button', { name: `${digs.name} 열기` }).getByText('infra · Opus 5.5 · high').isVisible()) &&
+      (await placeOf('대기').getByRole('button', { name: `${fresh.name} 열기` }).getByText('infra · Claude Code').isVisible()),
+    'its card says its folder and what it runs with, as far as that is known',
+  );
+  await settle();
+  await page.screenshot({ path: path.join(out, 'external-dashboard-dark.png') });
+  await page.getByRole('button', { name: '라이트 모드' }).click();
+  await settle();
+  await page.screenshot({ path: path.join(out, 'external-dashboard-light.png') });
+
+  await bell.click();
+  check(await page.getByRole('menuitem', { name: new RegExp(asks.name) }).getByText('외부', { exact: true }).isVisible(), 'the bell lists it, marked');
+  await settle();
+  await page.screenshot({ path: path.join(out, 'external-bell-light.png') });
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: '다크 모드' }).click();
+  await bell.click();
+  await settle();
+  await page.screenshot({ path: path.join(out, 'external-bell-dark.png') });
+  // Turned off: they are gone from every place, the pane that showed one too, and nobody waits any more.
+  await watching(true).click();
+  await watching(false).waitFor({ timeout: 5000 });
+  await page.keyboard.press('Escape');
+  await asksCard.waitFor({ state: 'detached', timeout: 10_000 });
+  await page.getByRole('button', { name: '알림', exact: true }).waitFor({ timeout: 10_000 });
+  await screens.getByRole('button', { name: '워크스페이스' }).click();
+  check((await watched.count()) === 0 && (await row(asks.name).count()) === 0, 'turned off, they are gone: from the dashboard, the tree, the bell and the pane that showed one');
+  await page.getByRole('button', { name: '라이트 모드' }).click();
 
   check(errors.length === 0, 'no errors in the browser console', errors.join(' | '));
   console.log(`INFO  screenshots: ${out}`);

@@ -74,6 +74,8 @@ export const api = {
     call<DelegationInfo>('POST', `/api/sessions/${encodeURIComponent(parentId)}/delegations`, { childId, text }),
   /** Hands a delegate's answer back to its parent, now or once the parent is idle. */
   deliver: (id: string, header: string) => call<DelegationInfo>('POST', `/api/delegations/${encodeURIComponent(id)}/deliver`, { header }),
+  /** Watches the sessions started outside AgentHouse from now on, or stops: the same for every page. */
+  watchExternal: (on: boolean) => call<{ on: boolean }>('PUT', '/api/external', { on }),
   /** What a session was last asked and what it last said, as a few plain words. */
   latest: (id: string) => call<LatestWords>('GET', `/api/sessions/${encodeURIComponent(id)}/latest`),
   /** The skills a session's conversation was given, with the ones it ran marked. */

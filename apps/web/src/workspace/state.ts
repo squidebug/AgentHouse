@@ -176,12 +176,14 @@ export type Action =
   | { type: 'sync'; sessionIds: string[]; runningIds: string[] };
 
 export interface DropContext {
-  /** Sessions that can receive input (running, not read-only). */
+  /** Sessions that can receive input (running, and AgentHouse's own). */
   runningIds: string[];
   /** The session each placed session sits under. */
   parents?: Record<string, string>;
   /** The same for the sessions delegated under another: work can be handed to them. */
   delegates?: Record<string, string>;
+  /** Sessions started outside AgentHouse: shown, but placed under nothing, and nothing under them. */
+  externalIds?: string[];
 }
 
 const sameDrop = (a: DropTarget, b: DropTarget) => a.type === b.type && (!('id' in a) || !('id' in b) || a.id === b.id);
@@ -208,6 +210,7 @@ export function accepts(state: WorkspaceState, target: DropTarget, ctx: DropCont
   const parents = ctx.parents ?? {};
   if (target.type === 'nest') {
     if (drag.kind !== 'session' || drag.id === target.id || parents[target.id] || parents[drag.id] === target.id) return false;
+    if (ctx.externalIds?.includes(drag.id) || ctx.externalIds?.includes(target.id)) return false;
     return !Object.values(parents).includes(drag.id);
   }
   if (target.type === 'root') return drag.kind === 'session' && Boolean(parents[drag.id]);

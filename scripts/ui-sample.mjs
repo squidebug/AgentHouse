@@ -27,6 +27,70 @@ const REPORT = `**구조 요약**
 2. \`apps/web\`: React 화면
 3. \`packages/protocol\`: 공통 타입`;
 
+/**
+ * Made-up Claude Code sessions started outside AgentHouse (a terminal, an editor): the list the fake
+ * agent prints in place of `claude agents --json` (agents.json in the config folder), and the
+ * transcripts of the two that were asked something, where Claude would write them. One waits for an
+ * approval, one works, one was only just started. Returns the entries of the list.
+ */
+export function writeOutsideSessions({ config, cwd, other }) {
+  const now = Date.now();
+  let n = 0;
+  const transcript = (session, records) => {
+    const dir = path.join(config, 'projects', session.cwd.replace(/[^A-Za-z0-9]/g, '-'));
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, `${session.sessionId}.jsonl`), records.map((record) => `${JSON.stringify(record)}\n`).join(''));
+  };
+  const writer = (session, model, effort, start) => {
+    let clock = start;
+    const at = (seconds = 3) => new Date((clock += seconds * 1000)).toISOString();
+    const base = { cwd: session.cwd, sessionId: session.sessionId, version: '2.1.326', userType: 'external', entrypoint: 'cli', isSidechain: false };
+    const usage = (output) => ({ input_tokens: 6, cache_read_input_tokens: 30_000 + output * 2, cache_creation_input_tokens: 900, output_tokens: output });
+    return {
+      ask: (text) => ({ ...base, type: 'user', message: { role: 'user', content: text }, origin: { kind: 'human' }, uuid: `ou${(n += 1)}`, timestamp: at() }),
+      say: (id, block, output = 200) => ({ ...base, type: 'assistant', effort, message: { id, model, role: 'assistant', content: [block], usage: usage(output) }, uuid: `oa${(n += 1)}`, timestamp: at() }),
+      got: (id, content) => ({ ...base, type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content, is_error: false }] }, toolUseResult: { stdout: content, stderr: '', interrupted: false }, uuid: `ou${(n += 1)}`, timestamp: at() }),
+      done: (ms) => ({ ...base, type: 'system', subtype: 'turn_duration', durationMs: ms, uuid: `os${(n += 1)}`, timestamp: at() }),
+    };
+  };
+  const use = (id, name, input) => ({ type: 'tool_use', id, name, input });
+
+  const asks = { pid: 40101, cwd, kind: 'interactive', startedAt: now - 1_500_000, sessionId: '11111111-1111-4111-8111-111111111111', name: `${path.basename(cwd)}-14`, status: 'waiting', waitingFor: 'permission prompt' };
+  const digs = { pid: 40102, cwd: other, kind: 'interactive', startedAt: now - 5_400_000, sessionId: '22222222-2222-4222-8222-222222222222', name: '로그 조사', status: 'busy' };
+  const fresh = { pid: 40103, cwd: other, kind: 'interactive', startedAt: now - 20_000, sessionId: '33333333-3333-4333-8333-333333333333', name: `${path.basename(other)}-7`, status: 'idle' };
+
+  const first = writer(asks, 'claude-sonnet-5-5', 'medium', now - 120_000);
+  transcript(asks, [
+    first.ask('주문 테이블에 인덱스를 추가하는 마이그레이션을 만들어 줘'),
+    first.say('om1', use('ot1', 'Read', { file_path: path.join(cwd, 'db', 'schema.sql') })),
+    first.got('ot1', '     1\tCREATE TABLE orders (id bigint primary key, placed_at timestamptz);\n'),
+    first.say('om2', use('ot2', 'Bash', { command: 'pnpm migrate:new add-orders-index', description: 'Create the migration' })),
+  ]);
+  const second = writer(digs, 'claude-opus-5-5', 'high', now - 3_000_000);
+  const earlier = [
+    second.ask('배포 스크립트가 어디에 있는지 찾아 줘'),
+    second.say('om3', { type: 'text', text: '배포 스크립트는 `scripts/deploy.sh` 하나이고, CI에서는 `.github/workflows/deploy.yml`이 이것을 부릅니다.' }, 420),
+    second.done(38_000),
+  ];
+  const latest = writer(digs, 'claude-opus-5-5', 'high', now - 360_000);
+  transcript(digs, [
+    ...earlier,
+    latest.ask('어제 배포 뒤 오류 로그를 유형별로 묶어 줘'),
+    latest.say('om4', use('ot3', 'Bash', { command: 'ls logs/', description: 'List the logs' })),
+    latest.got('ot3', 'app-11-16.log\nworker-11-16.log'),
+    latest.say('om5', use('ot4', 'Read', { file_path: path.join(other, 'logs', 'app-11-16.log') })),
+    latest.got('ot4', '     1\t2026-11-16T02:14:07Z ERROR payment timeout\n'),
+    latest.say('om6', use('ot5', 'Grep', { pattern: 'ERROR|FATAL', path: path.join(other, 'logs') })),
+    latest.got('ot5', 'logs/app-11-16.log:1: ERROR payment timeout'),
+    latest.say('om7', use('ot6', 'Read', { file_path: path.join(other, 'logs', 'worker-11-16.log') })),
+  ]);
+
+  const list = [asks, digs, fresh];
+  mkdirSync(config, { recursive: true });
+  writeFileSync(path.join(config, 'agents.json'), JSON.stringify(list));
+  return list;
+}
+
 export function writeSampleSession({ home, config, cwd }) {
   const dir = path.join(config, 'projects', 'sample');
   mkdirSync(dir, { recursive: true });

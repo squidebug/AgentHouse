@@ -142,6 +142,8 @@ test('Ctrl+` takes a pane from its terminal to its conversation and back; from t
   assert.equal(switchedMode('terminal', paneModes({}, { screen: true, transcripts: [] })), null, 'no transcript yet: nowhere to go');
   assert.equal(switchedMode('flow', paneModes({}, { screen: false, transcripts: ['t1'] })), 'conversation', 'an ended session: its conversation');
   assert.deepEqual(paneModes({ agentId: 'a1' }, live), ['conversation'], 'a sub-agent has its conversation only');
+  // A session started elsewhere has no terminal here: its conversation, where Claude will write it, and its flow.
+  assert.deepEqual(paneModes({}, { screen: false, transcripts: ['expected'] }), ['conversation', 'flow']);
   assert.equal(shownMode(undefined, modes), 'terminal');
   assert.equal(shownMode('conversation', ['terminal', 'flow']), 'terminal', 'a mode the pane no longer has falls back to its first');
 

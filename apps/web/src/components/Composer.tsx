@@ -1,6 +1,6 @@
 import { Box, IconButton, InputBase, Tooltip, Typography } from '@mui/material';
 import { useEffect, useState } from 'react';
-import type { SessionInfo } from '@agenthouse/protocol';
+import { takesInput, type SessionInfo } from '@agenthouse/protocol';
 import { api } from '../api/client';
 import { t } from '../strings';
 import { motion, v } from '../theme/tokens';
@@ -59,7 +59,7 @@ export function Composer({ state, dispatch, dnd, sessionById, activeSession, del
   }, [notice, draft]);
 
   const explicit = state.targets.map(sessionById).filter((s): s is SessionInfo => Boolean(s) && !got.includes(s!.id));
-  const implicit = !state.targets.length && activeSession?.state === 'running' && !got.includes(activeSession.id) ? activeSession : undefined;
+  const implicit = !state.targets.length && activeSession && takesInput(activeSession) && !got.includes(activeSession.id) ? activeSession : undefined;
   const recipients = implicit ? [implicit] : explicit;
   const target = { type: 'composer' as const };
   const acceptsDrop = dnd.dragging?.kind === 'session' && dnd.canDrop(target);

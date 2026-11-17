@@ -27,6 +27,10 @@ test('a folder is read through its latest session that has a conversation, when 
   const folders = libraryFolders([session('old', '/w', { startedAt: 1, transcripts: talked }), session('new', '/w', { startedAt: 2 })]);
   assert.equal(folders[0]?.sessionId, 'old', 'the listing of skills is in a transcript');
   assert.equal(libraryFolders([session('one', '/w', { startedAt: 1, transcripts: talked }), session('two', '/w', { startedAt: 2, transcripts: talked })])[0]?.sessionId, 'two');
+  // A session started outside AgentHouse names its transcript before anything is in it: one of AgentHouse's own goes first.
+  const outside = session('outside', '/w', { startedAt: 3, transcripts: talked, external: true });
+  assert.equal(libraryFolders([session('own', '/w', { startedAt: 1, transcripts: talked }), outside])[0]?.sessionId, 'own');
+  assert.deepEqual(libraryFolders([outside]).map((f) => [f.cwd, f.sessionId]), [['/w', 'outside']], 'a folder only such a session runs in has its skills and memory too');
 });
 
 test("the window opens on the folder of the session the user is at, else on the first", () => {

@@ -18,7 +18,36 @@ export interface Detail {
 
 /** Collapsed views show only the model; everything else lives behind the expand toggle. */
 export function modelLabel(session: SessionInfo): string {
-  return session.telemetry.model ?? session.model ?? t.vendorName[session.vendor] ?? session.vendor;
+  // The status line names the model as it is called; a transcript (all there is of a session only watched) by its id.
+  const model = session.telemetry.model ?? session.model;
+  return model ? modelName(model) : (t.vendorName[session.vendor] ?? session.vendor);
+}
+
+/**
+ * The mark of a session started outside AgentHouse, next to its name: the chip
+ * a pane's header has for an ended session (`big`), smaller in a row or a card.
+ */
+export function ExternalMark({ big = false }: { big?: boolean }) {
+  return (
+    <Box
+      component="span"
+      sx={{
+        flex: 'none',
+        display: 'inline-flex',
+        alignItems: 'center',
+        height: big ? 26 : 20,
+        px: big ? 1.25 : '7px',
+        borderRadius: big ? '8px' : '6px',
+        bgcolor: big ? v.surface2 : v.surface3,
+        color: big ? v.on : v.on2,
+        fontSize: 12,
+        lineHeight: '16px',
+        fontWeight: big ? 400 : 500,
+      }}
+    >
+      {t.external}
+    </Box>
+  );
 }
 
 /** "승인 대기 · Write", "작업 중 · Bash", "대기 · 중단됨". */
@@ -121,7 +150,7 @@ export function sessionDetails(session: SessionInfo): Detail[] {
     { k: t.cli, v: [t.vendorName[session.vendor], session.cli.version].filter(Boolean).join(' ') },
   ];
   const model = telemetry.model ?? session.model;
-  if (model) list.push({ k: t.model, v: model });
+  if (model) list.push({ k: t.model, v: modelName(model) });
   const effort = telemetry.effort ?? session.effort;
   if (effort) list.push({ k: t.effort, v: effort });
   if (telemetry.contextPct !== null) {
@@ -130,7 +159,8 @@ export function sessionDetails(session: SessionInfo): Detail[] {
   }
   if (session.permissionMode) list.push({ k: t.permissionMode, v: session.permissionMode });
   if (telemetry.costUsd) list.push({ k: t.cost, v: `$${telemetry.costUsd.toFixed(2)}` });
-  list.push({ k: t.size, v: `${session.cols}×${session.rows}` });
+  // A session only watched has no terminal here to have a size.
+  if (!session.external) list.push({ k: t.size, v: `${session.cols}×${session.rows}` });
   list.push({ k: t.pid, v: String(session.pid) });
   if (session.exit?.code != null) list.push({ k: t.exitCode, v: String(session.exit.code) });
   // Last, on a line of its own across the columns.

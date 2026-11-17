@@ -3,7 +3,7 @@ import { useState } from 'react';
 import type { SessionInfo } from '@agenthouse/protocol';
 import { t } from '../strings';
 import { v } from '../theme/tokens';
-import { SessionSubtitle } from './Details';
+import { ExternalMark, SessionSubtitle } from './Details';
 import { BellIcon } from './icons';
 import { StatusIcon } from './StatusIcon';
 
@@ -14,6 +14,9 @@ interface Props {
   /** Finished work is announced too, while the tab is in the background. */
   notifyDone: boolean;
   onNotifyDone: (on: boolean) => void;
+  /** The sessions started outside AgentHouse are watched: shown, and counted here when they wait. */
+  external: boolean;
+  onExternal: (on: boolean) => void;
 }
 
 /** What the browser lets the page announce: `unsupported` where it has no notifications at all. */
@@ -24,7 +27,7 @@ const permissionNow = (): NotificationPermission | 'unsupported' => (typeof Noti
  * are in the tree. It opens the list of them (one click shows a session) and
  * the choice of being told about finished work as well.
  */
-export function Notifications({ waiting, onOpen, notifyDone, onNotifyDone }: Props) {
+export function Notifications({ waiting, onOpen, notifyDone, onNotifyDone, external, onExternal }: Props) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const [permission, setPermission] = useState(permissionNow);
   const blocked = permission === 'denied' || permission === 'unsupported';
@@ -81,9 +84,12 @@ export function Notifications({ waiting, onOpen, notifyDone, onNotifyDone }: Pro
               >
                 <StatusIcon status={session.status} />
                 <Box sx={{ minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-                  <Typography noWrap sx={{ fontWeight: 500 }}>
-                    {session.title}
-                  </Typography>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
+                    <Typography noWrap sx={{ minWidth: 0, fontWeight: 500 }}>
+                      {session.title}
+                    </Typography>
+                    {session.external && <ExternalMark />}
+                  </Box>
                   <SessionSubtitle session={session} />
                 </Box>
               </MenuItem>
@@ -99,6 +105,12 @@ export function Notifications({ waiting, onOpen, notifyDone, onNotifyDone }: Pro
             sx={{ m: 0, justifyContent: 'space-between' }}
           />
           {blocked && <Typography sx={{ fontSize: 12, lineHeight: '16px', color: v.on2 }}>{t.notifyBlocked}</Typography>}
+          <FormControlLabel
+            label={t.externalSessions}
+            labelPlacement="start"
+            control={<Switch size="small" checked={external} onChange={(_event, on) => onExternal(on)} />}
+            sx={{ m: 0, justifyContent: 'space-between' }}
+          />
         </Box>
       </Popover>
     </>

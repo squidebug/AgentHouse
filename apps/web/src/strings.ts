@@ -40,7 +40,7 @@ export const t = {
   noScreen: '터미널 화면 없음',
   cannotShow: '표시할 수 없음',
   reload: '새로고침',
-  failure: { delegate: '위임 실패', deliver: '전달 실패', end: '종료 실패', resume: '이어서 열기 실패', remove: '제거 실패', link: '옮기기 실패', save: '저장 실패', load: '불러오기 실패' },
+  failure: { delegate: '위임 실패', deliver: '전달 실패', end: '종료 실패', resume: '이어서 열기 실패', remove: '제거 실패', link: '옮기기 실패', save: '저장 실패', load: '불러오기 실패', setting: '설정 실패' },
   running: '실행 중',
   exited: '종료',
   lightMode: '라이트 모드',
@@ -50,6 +50,9 @@ export const t = {
   waiting: '승인·입력 대기',
   waitingCount: (n: number) => `승인·입력 대기 ${n}`,
   notifyDone: '완료 알림',
+  // A session started outside AgentHouse (a terminal, an editor) and only watched; the switch that watches them.
+  external: '외부',
+  externalSessions: '외부 세션',
   notifyBlocked: '브라우저 알림 차단됨',
   // What a notification says of a session whose work ended.
   workDone: '작업 완료',

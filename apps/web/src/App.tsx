@@ -1,7 +1,7 @@
 import { Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, Snackbar, Typography } from '@mui/material';
 import { useColorScheme } from '@mui/material/styles';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import { isAsking, type DelegationInfo, type SessionInfo, type StatusValue, type ThemeMode } from '@agenthouse/protocol';
+import { isAsking, takesInput, type DelegationInfo, type SessionInfo, type StatusValue, type ThemeMode } from '@agenthouse/protocol';
 import { api, RequestError } from './api/client';
 import { useEnv, useSessions } from './api/hooks';
 import { Composer } from './components/Composer';
@@ -26,7 +26,7 @@ export function App() {
   const { env, loading: envLoading, refresh: refreshEnv } = useEnv();
   // What to do with every session list as it arrives; set further down, once what it needs is there.
   const arrived = useRef<(list: SessionInfo[]) => void>(() => {});
-  const { sessions, limits, links, delegations, connected, loaded } = useSessions((list) => arrived.current(list));
+  const { sessions, limits, links, delegations, external, connected, loaded } = useSessions((list) => arrived.current(list));
 
   // Sessions launched from this tab, until the live list includes them.
   const [launched, setLaunched] = useState<Record<string, SessionInfo>>({});
@@ -62,9 +62,10 @@ export function App() {
   const sessionById = useCallback((id: string) => byIdRef.current.get(id), []);
   // Where sessions ran before, the latest first: what the launcher offers for a new one.
   const folders = useMemo(() => [...new Set([...byId.values()].sort((a, b) => b.startedAt - a.startedAt).map((s) => s.cwd))], [byId]);
-  const runningIds = [...byId.values()].filter((s) => s.state === 'running').map((s) => s.id);
+  const runningIds = [...byId.values()].filter(takesInput).map((s) => s.id);
   const delegates = delegatesOf([...byId.values()], links);
-  ctxRef.current = { runningIds, parents: parentsOf([...byId.values()], links), delegates };
+  const externalIds = [...byId.values()].filter((s) => s.external).map((s) => s.id);
+  ctxRef.current = { runningIds, parents: parentsOf([...byId.values()], links), delegates, externalIds };
 
   useEffect(() => {
     const listed = new Set(sessions.map((s) => s.id));
@@ -77,7 +78,7 @@ export function App() {
   useEffect(() => {
     // Until the first list arrives, every restored pane would look like a removed session.
     if (!loaded) return;
-    dispatch({ type: 'sync', sessionIds: [...byId.keys()], runningIds: [...byId.values()].filter((s) => s.state === 'running').map((s) => s.id) });
+    dispatch({ type: 'sync', sessionIds: [...byId.keys()], runningIds: [...byId.values()].filter(takesInput).map((s) => s.id) });
   }, [byId, loaded]);
 
   // Sessions waiting for an approval or an answer: counted in the tab title and on the bell, and
@@ -187,6 +188,9 @@ export function App() {
           setNotifyDone(on);
           saveNotifyDone(on);
         }}
+        external={external}
+        // The server keeps it and tells every page: the switch moves when that comes back.
+        onExternal={(on) => void api.watchExternal(on).catch(failed(t.failure.setting))}
       />
 
       {(!connected || noCli) && (

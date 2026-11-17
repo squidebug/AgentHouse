@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { SessionInfo } from '@agenthouse/protocol';
+import { takesInput, type SessionInfo } from '@agenthouse/protocol';
 import { canResume, keepUnchanged } from '../src/workspace/sessions';
 
 const session = (id: string, extra: object = {}) =>
@@ -42,4 +42,12 @@ test('sessions added, removed or in another order make a new list of the same ob
   const swapped = keepUnchanged(before, arrived([before[1]!, before[0]!]));
   assert.notEqual(swapped, before);
   assert.deepEqual([swapped[0] === before[1], swapped[1] === before[0]], [true, true]);
+});
+
+test("a session takes messages while it runs and is AgentHouse's own; one only watched is read", () => {
+  assert.equal(takesInput({ state: 'running' }), true);
+  assert.equal(takesInput({ state: 'exited' }), false);
+  assert.equal(takesInput({ state: 'running', external: true }), false);
+  // It runs, so there is nothing to start again either.
+  assert.equal(canResume({ state: 'running', vendor: 'claude', transcripts: [{ vendorSessionId: 'c1', path: 'a.jsonl', since: 1 }] }), false);
 });

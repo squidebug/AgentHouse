@@ -66,3 +66,19 @@ test('a piece of a conversation goes only to a session delegated under the one i
   const fromHelper = reducer(panes, { type: 'dragStart', drag: { kind: 'item', id: 'e2', sessionId: 'helper', text: 'x' } }, delegating);
   assert.equal(accepts(fromHelper, { type: 'delegate', id: 'helper' }, delegating), false, 'not back to itself');
 });
+
+test('a session started outside AgentHouse is in its folder with the others; it opens in a pane and goes nowhere else', () => {
+  const outside = { ...session('x'), external: true } as SessionInfo;
+  assert.deepEqual(shape([session('a'), outside, session('c')], []), ['shop: a x c']);
+
+  // It takes no messages, so it is not among the running ones.
+  const watching: DropContext = { runningIds: ['a', 'c'], parents: {}, externalIds: ['x'] };
+  const dragging = (id: string) => reducer(initialWorkspace, drag(id), watching);
+  const can = (id: string, target: Parameters<typeof accepts>[1]) => accepts(dragging(id), target, watching);
+  assert.equal(can('x', { type: 'slot' }), true, 'into a new pane');
+  assert.equal(can('x', { type: 'composer' }), false, 'not a recipient');
+  assert.equal(can('x', { type: 'nest', id: 'a' }), false, 'not under a session');
+  assert.equal(can('c', { type: 'nest', id: 'x' }), false, 'and none under it');
+  assert.equal(can('c', { type: 'nest', id: 'a' }), true, 'the others as before');
+  assert.equal(reducer(dragging('x'), { type: 'drop', target: { type: 'nest', id: 'a' } }, watching).pending, null);
+});

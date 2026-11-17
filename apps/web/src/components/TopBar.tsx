@@ -26,11 +26,13 @@ interface Props {
   onOpenSession: (sessionId: string) => void;
   notifyDone: boolean;
   onNotifyDone: (on: boolean) => void;
+  external: boolean;
+  onExternal: (on: boolean) => void;
 }
 
 const LEVEL_COLOR = { error: v.error, warn: v.warn, info: v.on2 } as const;
 
-export function TopBar({ screen, onScreen, limits, env, envLoading, refreshEnv, mode, onToggleMode, waiting, onOpenSession, notifyDone, onNotifyDone }: Props) {
+export function TopBar({ screen, onScreen, limits, env, envLoading, refreshEnv, mode, onToggleMode, waiting, onOpenSession, notifyDone, onNotifyDone, external, onExternal }: Props) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const [choosing, setChoosing] = useState<Vendor | null>(null);
   const messages = env?.messages ?? [];
@@ -53,7 +55,7 @@ export function TopBar({ screen, onScreen, limits, env, envLoading, refreshEnv, 
       </Box>
       <Box sx={{ flex: 1 }} />
       <LimitsChip limits={limits} />
-      <Notifications waiting={waiting} onOpen={onOpenSession} notifyDone={notifyDone} onNotifyDone={onNotifyDone} />
+      <Notifications waiting={waiting} onOpen={onOpenSession} notifyDone={notifyDone} onNotifyDone={onNotifyDone} external={external} onExternal={onExternal} />
       <Tooltip title={t.environment}>
         <IconButton aria-label={t.environment} onClick={(event) => setAnchor(event.currentTarget)} sx={{ width: 40, height: 40 }}>
           <Badge variant="dot" color="warning" invisible={!attention}>

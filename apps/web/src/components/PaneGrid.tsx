@@ -9,7 +9,7 @@ import type { FlowRow } from '../workspace/flow';
 import { MAX_PANES, paneModes, shownMode, type Action, type Pane, type PaneMode, type WorkspaceState } from '../workspace/state';
 import { ConversationView, type DelegateTarget, type DelegationView } from './ConversationView';
 import { Boundary } from './Boundary';
-import { AgentSubtitle, agentDetails, agentTitle, Details, SessionSubtitle, sessionDetails } from './Details';
+import { AgentSubtitle, agentDetails, agentTitle, Details, ExternalMark, SessionSubtitle, sessionDetails } from './Details';
 import { FlowView } from './FlowView';
 import { BackIcon, ChatIcon, ChevronIcon, CloseIcon, DelegateIcon, FlowIcon, Grip, PlusIcon, TerminalIcon } from './icons';
 import { AgentStatusIcon, StatusIcon } from './StatusIcon';
@@ -339,6 +339,7 @@ function PaneView({ pane, wide, session, state, dispatch, dnd, theme, windowsBui
             {t.exited}
           </Box>
         )}
+        {!agentId && session.external && <ExternalMark big />}
         {modes.length > 1 && <ModeSwitch mode={mode} modes={modes} onChange={(next) => dispatch({ type: 'setMode', paneId: pane.id, mode: next })} />}
         <IconButton
           aria-label={`${title} ${t.details}`}

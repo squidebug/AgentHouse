@@ -9,7 +9,7 @@ import type { Dnd } from '../workspace/dnd';
 import { canResume } from '../workspace/sessions';
 import type { Action, WorkspaceState } from '../workspace/state';
 import { sessionTree, type SessionNode } from '../workspace/tree';
-import { AgentSubtitle, agentDetails, agentTitle, Details, scheduleDetails, SessionSubtitle, sessionDetails, taskDetails, type Detail } from './Details';
+import { AgentSubtitle, agentDetails, agentTitle, Details, ExternalMark, scheduleDetails, SessionSubtitle, sessionDetails, taskDetails, type Detail } from './Details';
 import { ChevronIcon, ClockIcon, DelegateIcon, Grip, LinkIcon, PlusIcon } from './icons';
 import { keySx } from './key';
 import { LibraryButtons } from './Library';
@@ -344,6 +344,7 @@ function SessionBranch(props: BranchProps) {
           </Typography>
           <SessionSubtitle session={session} />
         </ButtonBase>
+        {session.external && <ExternalMark />}
         {link &&
           (delegated ? (
             <DelegateIcon role="img" aria-label={t.delegate} size={14} style={{ flex: 'none', color: v.primary }} />
@@ -356,30 +357,35 @@ function SessionBranch(props: BranchProps) {
       </Box>
       <Collapse in={open} unmountOnExit>
         <Details page items={details} inset={22 + depth * INDENT}>
-          {canResume(session) && (
-            <Button size="small" color="inherit" onClick={() => onResume(session.id)} sx={actionButton}>
-              {t.resumeSession}
-            </Button>
-          )}
-          {link ? (
-            <Button size="small" color="inherit" onClick={() => onLink(session.id, null)} sx={actionButton}>
-              {t.toTop}
-            </Button>
-          ) : (
-            !node.children.length &&
-            candidates.length > 0 && (
-              <NestMenu session={session} candidates={candidates} onLink={onLink} />
-            )
-          )}
-          {/* What ends or removes the session stands apart, at the other end of the line: of a line of its own when the others fill one. */}
-          {session.state === 'running' ? (
-            <Button size="small" color="inherit" onClick={() => onEnd(session.id)} sx={{ ...actionButton, ml: 'auto', color: v.error }}>
-              {t.endSession}
-            </Button>
-          ) : (
-            <Button size="small" color="inherit" onClick={() => onRemove(session.id)} sx={{ ...actionButton, ml: 'auto' }}>
-              {t.removeSession}
-            </Button>
+          {/* A session only watched is read and nothing more: its details have no keys. */}
+          {session.external ? undefined : (
+            <>
+              {canResume(session) && (
+                <Button size="small" color="inherit" onClick={() => onResume(session.id)} sx={actionButton}>
+                  {t.resumeSession}
+                </Button>
+              )}
+              {link ? (
+                <Button size="small" color="inherit" onClick={() => onLink(session.id, null)} sx={actionButton}>
+                  {t.toTop}
+                </Button>
+              ) : (
+                !node.children.length &&
+                candidates.length > 0 && (
+                  <NestMenu session={session} candidates={candidates} onLink={onLink} />
+                )
+              )}
+              {/* What ends or removes the session stands apart, at the other end of the line: of a line of its own when the others fill one. */}
+              {session.state === 'running' ? (
+                <Button size="small" color="inherit" onClick={() => onEnd(session.id)} sx={{ ...actionButton, ml: 'auto', color: v.error }}>
+                  {t.endSession}
+                </Button>
+              ) : (
+                <Button size="small" color="inherit" onClick={() => onRemove(session.id)} sx={{ ...actionButton, ml: 'auto' }}>
+                  {t.removeSession}
+                </Button>
+              )}
+            </>
           )}
         </Details>
       </Collapse>
@@ -445,7 +451,8 @@ export function SessionTree({ sessions, links, state, dispatch, dnd, onNew, onEn
   const groups = sessionTree(sessions, links);
   const shown = new Set(state.panes.filter((p) => !p.agentId).map((p) => p.sessionId));
   const byId = new Map(sessions.map((s) => [s.id, s]));
-  const tops = groups.flatMap((g) => g.nodes.map((n) => n.session));
+  // What a session can be placed under: one at the top that AgentHouse runs itself.
+  const tops = groups.flatMap((g) => g.nodes.map((n) => n.session)).filter((s) => !s.external);
   const root = { type: 'root' as const };
   const toTop = dnd.canDrop(root);
   const branch = { tops, shown, byId, state, dispatch, dnd, onEnd, onResume, onRemove, onLink };

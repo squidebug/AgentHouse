@@ -13,6 +13,8 @@ export function useSessions(onSessions?: (sessions: SessionInfo[]) => void): {
   limits: AccountLimits[];
   links: SessionLink[];
   delegations: DelegationInfo[];
+  /** The sessions started outside AgentHouse are watched (the server's setting). */
+  external: boolean;
   connected: boolean;
   loaded: boolean;
 } {
@@ -22,6 +24,7 @@ export function useSessions(onSessions?: (sessions: SessionInfo[]) => void): {
   const [limits, setLimits] = useState<AccountLimits[]>([]);
   const [links, setLinks] = useState<SessionLink[]>([]);
   const [delegations, setDelegations] = useState<DelegationInfo[]>([]);
+  const [external, setExternal] = useState(true);
   const [connected, setConnected] = useState(true);
   const [loaded, setLoaded] = useState(false);
 
@@ -49,6 +52,8 @@ export function useSessions(onSessions?: (sessions: SessionInfo[]) => void): {
           setLinks(message.links);
         } else if (message.type === 'delegations') {
           setDelegations(message.delegations);
+        } else if (message.type === 'external') {
+          setExternal(message.on);
         }
       };
       ws.onclose = () => {
@@ -68,7 +73,7 @@ export function useSessions(onSessions?: (sessions: SessionInfo[]) => void): {
     };
   }, []);
 
-  return { sessions, limits, links, delegations, connected, loaded };
+  return { sessions, limits, links, delegations, external, connected, loaded };
 }
 
 export function useEnv(): { env: EnvReport | null; refresh: () => Promise<void>; loading: boolean } {

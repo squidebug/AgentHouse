@@ -26,7 +26,9 @@ export function libraryFolders(sessions: SessionInfo[]): LibraryFolder[] {
   }
   return [...byFolder].map(([cwd, list]) => {
     const latest = (candidates: SessionInfo[]) => [...candidates].sort((a, b) => b.startedAt - a.startedAt)[0];
-    const through = latest(list.filter((session) => session.transcripts.length > 0)) ?? latest(list)!;
+    const talked = list.filter((session) => session.transcripts.length > 0);
+    // One of AgentHouse's own first: a session only watched names its transcript before it is written.
+    const through = latest(talked.filter((session) => !session.external)) ?? latest(talked) ?? latest(list)!;
     return { cwd, label: folderName(cwd), sessionId: through.id, used: [...new Set(list.flatMap((session) => session.invoked))] };
   });
 }

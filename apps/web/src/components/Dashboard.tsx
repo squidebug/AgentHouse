@@ -8,7 +8,7 @@ import { elapsedMs } from '../workspace/agents';
 import { clock, scheduleText, taskElapsedMs, taskTitle, taskType } from '../workspace/background';
 import { agentsAtWork, board, runningIn, SHOWN_RUNNING, span, type Running, type Standing } from '../workspace/dashboard';
 import { folderName, validLinks } from '../workspace/tree';
-import { activity, agentStatusText, agentTitle, modelLabel, statusText } from './Details';
+import { activity, agentStatusText, agentTitle, ExternalMark, modelLabel, statusText } from './Details';
 import { ChevronIcon, ClockIcon, DelegateIcon, LinkIcon, PlusIcon } from './icons';
 import { fresh, resetText, tone } from './LimitsChip';
 import { AgentStatusIcon, StatusIcon, TaskStatusIcon } from './StatusIcon';
@@ -230,9 +230,12 @@ const Card = memo(function Card({ session, parent, delegated, now, onOpen }: Car
           <StatusIcon status={status} />
         </Box>
         <Box sx={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-          <Typography noWrap sx={{ fontWeight: 600, color: ended ? v.on2 : v.on }}>
-            {session.title}
-          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
+            <Typography noWrap sx={{ minWidth: 0, fontWeight: 600, color: ended ? v.on2 : v.on }}>
+              {session.title}
+            </Typography>
+            {session.external && <ExternalMark />}
+          </Box>
           <Typography noWrap sx={{ color: v.on2, ...small }}>
             <Box component="span" sx={{ color: says.color, fontWeight: 500 }}>
               {says.text}
