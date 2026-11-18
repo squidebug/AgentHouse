@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
+import http from 'node:http';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { appSettingsFile } from '../src/web/app-settings';
@@ -10,7 +11,7 @@ import { HostClient } from '../src/web/host-client';
 import { isAlive } from '../src/shared/kill-tree';
 import { webLogFile } from '../src/shared/state';
 import { forgetWebServer, recordWebServer, runningWebServer, stopWebServer, webServerFile } from '../src/web/instance';
-import { login, openSocket, plain, request, screenText, sleep, startServer, tempStateDir, waitFor, type TestServer } from './helpers';
+import { login, openSocket, plain, request, screenText, sleep, startServer, tempStateDir, waitFor, type Reply, type TestServer } from './helpers';
 
 let app: TestServer;
 let authorization: string;
@@ -194,6 +195,21 @@ describe('staying up', () => {
     events.ws?.send('x'.repeat(3 * 1024 * 1024));
     assert.equal(await closed, 1009, 'too big');
     assert.equal((await request(app.port, 'GET', '/api/sessions', { headers: { authorization } })).status, 200, 'still serving');
+  });
+
+  test('a body far over what its route takes is refused, and its connection takes the next request', async () => {
+    // One connection, kept open: the second request has no other to go over.
+    const agent = new http.Agent({ keepAlive: true, maxSockets: 1 });
+    try {
+      const refused = await request(app.port, 'PUT', '/api/external', { headers: { authorization, origin }, body: { on: true, padding: 'x'.repeat(2 * 1024 * 1024) }, agent });
+      assert.equal(refused.status, 413);
+      let next: Reply | undefined;
+      request(app.port, 'GET', '/api/sessions', { headers: { authorization }, agent }).then((reply) => (next = reply), () => {});
+      assert.ok(await waitFor(() => next !== undefined, 3000), 'answered');
+      assert.deepEqual([next?.status, next?.reused], [200, true], 'over the same connection');
+    } finally {
+      agent.destroy();
+    }
   });
 
   test("a fault of the server's own is answered without its cause, which goes to the log", async () => {

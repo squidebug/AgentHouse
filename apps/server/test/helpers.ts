@@ -97,16 +97,19 @@ export interface Reply {
   headers: http.IncomingHttpHeaders;
   text: string;
   json: unknown;
+  /** It went over a connection that an earlier request of its `agent` had opened. */
+  reused: boolean;
 }
 
+/** A request, over a connection of its own unless an `agent` keeps some open for the requests given it. */
 export function request(
   port: number,
   method: string,
   pathname: string,
-  { headers = {}, body }: { headers?: Record<string, string>; body?: unknown } = {},
+  { headers = {}, body, agent }: { headers?: Record<string, string>; body?: unknown; agent?: http.Agent } = {},
 ): Promise<Reply> {
   return new Promise((resolve, reject) => {
-    const req = http.request({ host: '127.0.0.1', port, method, path: pathname, headers: { host: `127.0.0.1:${port}`, ...headers } }, (res) => {
+    const req = http.request({ host: '127.0.0.1', port, method, path: pathname, headers: { host: `127.0.0.1:${port}`, ...headers }, ...(agent ? { agent } : {}) }, (res) => {
       const chunks: Buffer[] = [];
       res.on('data', (c: Buffer) => chunks.push(c));
       res.on('end', () => {
@@ -117,7 +120,7 @@ export function request(
         } catch {
           // not JSON
         }
-        resolve({ status: res.statusCode ?? 0, headers: res.headers, text, json });
+        resolve({ status: res.statusCode ?? 0, headers: res.headers, text, json, reused: req.reusedSocket });
       });
     });
     req.on('error', reject);

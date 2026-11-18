@@ -43,15 +43,19 @@ interface Schema<T> {
   safeParse(value: unknown): { success: true; data: T } | { success: false };
 }
 
-/** A request's body as JSON, as its schema lets it through; no body is an empty object. Refused when larger than `limit` bytes. */
+/**
+ * A request's body as JSON, as its schema lets it through; no body is an empty object. Refused when
+ * larger than `limit` bytes, once all of it has come: what is over the limit is read and dropped, since
+ * a body left unread keeps its connection from taking the next request.
+ */
 export async function readBody<T>(req: IncomingMessage, schema: Schema<T>, limit = BODY_BYTES): Promise<T> {
   let size = 0;
   const chunks: Buffer[] = [];
   for await (const chunk of req) {
     size += (chunk as Buffer).length;
-    if (size > limit) throw new HttpError(413, '요청이 너무 큽니다.');
-    chunks.push(chunk as Buffer);
+    if (size <= limit) chunks.push(chunk as Buffer);
   }
+  if (size > limit) throw new HttpError(413, '요청이 너무 큽니다.');
   let value: unknown = {};
   if (chunks.length) {
     try {
