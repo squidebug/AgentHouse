@@ -1,7 +1,9 @@
-import http, { type IncomingMessage, type ServerResponse } from 'node:http';
-import type { Duplex } from 'node:stream';
-import { WebSocketServer, type WebSocket } from 'ws';
-import { AUTH_REQUIRED, LOGIN_EXPIRED, SOCKET_PROTOCOL, type ApiError, type EventServerMessage, type LoginResult } from '@agenthouse/protocol';
+// The web server's door: who may ask (Host, login, Origin), the page's files,
+// and what a request that failed is told. Behind it are the API (routes.ts) and
+// the page's sockets (sockets.ts); this file makes what they work with and
+// connects them.
+import http, { type ServerResponse } from 'node:http';
+import { AUTH_REQUIRED, LOGIN_EXPIRED, type ApiError, type LoginResult } from '@agenthouse/protocol';
 import { webLogger } from '../../shared/state';
 import { readAppSettings, writeAppSettings } from '../app-settings';
 import { Conversations } from '../conversations';
@@ -11,7 +13,8 @@ import type { HostClient } from '../host-client';
 import { SessionManager } from '../manager';
 import { AccessControl } from './access';
 import { answer, apiRoutes, HttpError, readBody, refusal } from './routes';
-import { agentParam, LoginBody, TerminalClient } from './schemas';
+import { LoginBody } from './schemas';
+import { attachSockets } from './sockets';
 import { serveStatic } from './static';
 
 export interface ServerOptions {
@@ -47,12 +50,6 @@ export interface AgentHouseServer {
   close(): Promise<void>;
 }
 
-// A browser that falls behind stops being read for; the host's backlog for it
-// then grows and the host resyncs it from a snapshot. The PTY never waits.
-const RELAY_HIGH_WATER = 1024 * 1024;
-const RELAY_LOW_WATER = 256 * 1024;
-// A page's first list waits this long at most for Claude's own list of sessions (one call is about half a second).
-const FIRST_LOOK_MS = 2500;
 /** The code of a 500 that is a fault, not a refusal: its cause is in logs/web.log, never in the reply. */
 const SERVER_ERROR = 'SERVER_ERROR';
 
@@ -93,53 +90,6 @@ async function listenOn(server: http.Server, ports: number[]): Promise<number> {
   throw taken;
 }
 
-/** Relays one browser terminal socket to the session's terminal on the host. */
-function relayTerminal(browser: WebSocket, upstream: WebSocket): void {
-  const early: string[] = [];
-  let draining: NodeJS.Timeout | undefined;
-  const stopDraining = () => clearInterval(draining);
-
-  upstream.on('open', () => {
-    for (const text of early) upstream.send(text);
-    early.length = 0;
-  });
-  upstream.on('message', (data, isBinary) => {
-    if (browser.readyState !== browser.OPEN) return;
-    browser.send(data, { binary: isBinary });
-    if (browser.bufferedAmount > RELAY_HIGH_WATER && !upstream.isPaused) {
-      upstream.pause();
-      draining = setInterval(() => {
-        if (browser.readyState === browser.OPEN && browser.bufferedAmount > RELAY_LOW_WATER) return;
-        stopDraining();
-        upstream.resume();
-      }, 50);
-    }
-  });
-  // The session was removed or the host went away; the browser reconnects by itself.
-  const end = () => {
-    stopDraining();
-    browser.close();
-  };
-  upstream.on('close', end);
-  upstream.on('error', end);
-
-  browser.on('message', (raw) => {
-    let message;
-    try {
-      message = TerminalClient.parse(JSON.parse(raw.toString()));
-    } catch {
-      return;
-    }
-    const text = JSON.stringify(message);
-    if (upstream.readyState === upstream.OPEN) upstream.send(text);
-    else if (upstream.readyState === upstream.CONNECTING) early.push(text);
-  });
-  browser.on('close', () => {
-    stopDraining();
-    upstream.terminate();
-  });
-}
-
 export async function createAgentHouseServer(options: ServerOptions): Promise<AgentHouseServer> {
   // The host keeps its login secret for as long as it runs, so logins outlive web server restarts.
   const access = new AccessControl(options.host.webToken, options.devOrigins ?? []);
@@ -162,39 +112,8 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
     ...(options.fakeAgentPath ? { fakeAgentPath: options.fakeAgentPath } : {}),
     ...(options.claudeSessions !== undefined ? { claudeSessions: options.claudeSessions } : {}),
   });
-  // The pages that are open, and those of them that have their first lists and get every change.
-  const pages = new Set<WebSocket>();
-  const eventClients = new Set<WebSocket>();
-  // The sessions started outside AgentHouse are looked for while a page is open, unless the user turned that off.
-  let external = readAppSettings(host.stateDir).external;
-  const watchExternal = () => manager.watchExternal(external && pages.size > 0);
-  const terminals = new Set<WebSocket>();
   const conversations = new Conversations(manager);
   const delegations = new Delegations(manager, delegationsFile(host.stateDir));
-  const conversationSockets = new Set<WebSocket>();
-
-  const broadcast = (message: EventServerMessage) => {
-    const text = JSON.stringify(message);
-    for (const ws of eventClients) if (ws.readyState === ws.OPEN) ws.send(text);
-  };
-  const broadcastSessions = () => broadcast({ type: 'sessions', sessions: manager.list() });
-  const broadcastLimits = () => broadcast({ type: 'limits', limits: manager.limits() });
-  const broadcastLinks = () => broadcast({ type: 'links', links: manager.links() });
-  const broadcastDelegations = () => broadcast({ type: 'delegations', delegations: delegations.list() });
-  delegations.on('change', broadcastDelegations);
-  manager.on('change', broadcastSessions);
-  manager.on('limits', broadcastLimits);
-  manager.on('links', broadcastLinks);
-
-  // The user's choice to watch the sessions started outside AgentHouse, or not: kept in settings.json.
-  const setExternal = (on: boolean) => {
-    writeAppSettings(host.stateDir, { ...readAppSettings(host.stateDir), external: on });
-    external = on;
-    watchExternal();
-    if (!on) manager.forgetExternal();
-    broadcast({ type: 'external', on });
-  };
-  const routes = apiRoutes({ env, manager, conversations, delegations, setExternal });
 
   const server = http.createServer(async (req, res) => {
     try {
@@ -252,102 +171,32 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
     }
   });
 
-  // A page offers `agenthouse` and its token as subprotocols; the server answers with `agenthouse`, never the token.
-  const wss = new WebSocketServer({
-    noServer: true,
-    maxPayload: 2 * 1024 * 1024,
-    handleProtocols: (protocols) => (protocols.has(SOCKET_PROTOCOL) ? SOCKET_PROTOCOL : false),
-  });
-  // A socket's error (a frame over maxPayload, a peer gone mid-frame) closes that socket only: ws closes
-  // it by itself (1009 for a frame too big). Without a listener it would be thrown, and the web server
-  // with every tab would go.
-  const accept = (ws: WebSocket) => ws.on('error', () => {});
+  // The sessions started outside AgentHouse are looked for while a page is open, unless the user turned
+  // that off: a choice kept in settings.json, the same for every page.
+  let external = readAppSettings(host.stateDir).external;
+  const watchExternal = () => manager.watchExternal(external && sockets.pages() > 0);
+  const sockets = attachSockets(server, { access, manager, conversations, delegations, openTerminal: (sessionId) => host.openTerminal(sessionId), external: () => external, onPages: watchExternal });
+  const setExternal = (on: boolean) => {
+    writeAppSettings(host.stateDir, { ...readAppSettings(host.stateDir), external: on });
+    external = on;
+    watchExternal();
+    if (!on) manager.forgetExternal();
+    sockets.broadcast({ type: 'external', on });
+  };
+  const routes = apiRoutes({ env, manager, conversations, delegations, setExternal });
 
-  server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
-    socket.on('error', () => socket.destroy());
-    const reject = (status: number) => {
-      socket.write(`HTTP/1.1 ${status} ${http.STATUS_CODES[status]}\r\nConnection: close\r\n\r\n`);
-      socket.destroy();
-    };
-    if (!access.hostAllowed(req) || !access.originAllowed(req)) return reject(403);
-    if (!access.authenticated(req)) return reject(401);
-    const url = new URL(req.url ?? '/', 'http://localhost');
-    if (url.pathname === '/ws/conversation') {
-      // A session's conversation, or with agent=<id> one of its sub-agents'.
-      const id = url.searchParams.get('id') ?? '';
-      const agent = agentParam(url);
-      if (agent === undefined || !conversations.available(id, agent)) return reject(404);
-      wss.handleUpgrade(req, socket, head, (ws) => {
-        accept(ws);
-        // turns=only: the turns without the entries, for a view that only shows when the session worked.
-        const turnsOnly = url.searchParams.get('turns') === 'only';
-        const unsubscribe = conversations.subscribe(
-          id,
-          (message) => {
-            if (ws.readyState !== ws.OPEN) return;
-            if (!turnsOnly) return ws.send(JSON.stringify(message));
-            if (message.type === 'update' && !message.turns.length) return;
-            ws.send(JSON.stringify({ ...message, entries: [] }));
-          },
-          agent,
-        );
-        if (!unsubscribe) return ws.close();
-        conversationSockets.add(ws);
-        ws.on('close', () => {
-          conversationSockets.delete(ws);
-          unsubscribe();
-        });
-      });
-      return;
-    }
-    if (url.pathname === '/ws/events') {
-      wss.handleUpgrade(req, socket, head, (ws) => {
-        accept(ws);
-        pages.add(ws);
-        ws.on('close', () => {
-          pages.delete(ws);
-          eventClients.delete(ws);
-          watchExternal();
-        });
-        watchExternal();
-        // The first list a page gets has the sessions started elsewhere in it: a pane restored to one
-        // of them would close on a list without it. Until Claude has been asked once, the page gets
-        // no list at all.
-        const looked = manager.externalReady(FIRST_LOOK_MS).catch(() => {});
-        void looked.then(() => {
-          if (ws.readyState !== ws.OPEN) return;
-          eventClients.add(ws);
-          const first: EventServerMessage[] = [
-            { type: 'sessions', sessions: manager.list() },
-            { type: 'limits', limits: manager.limits() },
-            { type: 'links', links: manager.links() },
-            { type: 'delegations', delegations: delegations.list() },
-            { type: 'external', on: external },
-          ];
-          for (const message of first) ws.send(JSON.stringify(message));
-        });
-      });
-      return;
-    }
-    const sessionId = url.pathname === '/ws/session' ? (url.searchParams.get('id') ?? '') : '';
-    // Only the session host has terminals; an ended session from an earlier host has none.
-    if (!sessionId || !manager.get(sessionId)?.screen) return reject(404);
-    wss.handleUpgrade(req, socket, head, (ws) => {
-      accept(ws);
-      terminals.add(ws);
-      ws.on('close', () => terminals.delete(ws));
-      relayTerminal(ws, options.host.openTerminal(sessionId));
-    });
-  });
-
+  // Nothing of this server may stay behind, still taking host events and writing its files.
+  const closeServices = () => {
+    sockets.close();
+    delegations.close();
+    manager.close();
+    conversations.close();
+  };
   let port: number;
   try {
     port = await listenOn(server, [options.port, ...(options.fallbackPorts ?? [])]);
   } catch (error) {
-    // Nothing of this server may stay behind, still taking host events and writing its files.
-    delegations.close();
-    manager.close();
-    conversations.close();
+    closeServices();
     throw error;
   }
   access.bind(port);
@@ -360,17 +209,7 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
     loginUrl: () => loginAddress(access.issueCode()),
     manager,
     async close() {
-      manager.off('change', broadcastSessions);
-      manager.off('limits', broadcastLimits);
-      manager.off('links', broadcastLinks);
-      delegations.off('change', broadcastDelegations);
-      delegations.close();
-      manager.close();
-      conversations.close();
-      for (const ws of conversationSockets) ws.terminate();
-      for (const ws of pages) ws.close();
-      for (const ws of terminals) ws.terminate();
-      wss.close();
+      closeServices();
       const closed = new Promise<void>((resolve) => server.close(() => resolve()));
       // Keep-alive connections (the default since Node 19) would hold close() open.
       server.closeAllConnections();
