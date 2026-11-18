@@ -192,8 +192,15 @@ function DelegationCard({ task, title, onDeliver }: { task: DelegationInfo; titl
   );
 }
 
+/** An entry's full content as far as it has come: there, on its way, or not come (`retry` asks again). */
+interface Detail {
+  detail: EntryDetail | null;
+  failed: boolean;
+  retry: () => void;
+}
+
 /** The full content of an entry, loaded the first time it is opened (again if its state changed). */
-function useDetail(source: ConversationSource, entry: ConversationEntry, open: boolean): { detail: EntryDetail | null; failed: boolean } {
+function useDetail(source: ConversationSource, entry: ConversationEntry, open: boolean): Detail {
   const { sessionId, agentId } = source;
   const [loaded, setLoaded] = useState<{ key: string; detail: EntryDetail | null; failed: boolean } | null>(null);
   const key = `${entry.id}:${'state' in entry ? entry.state : ''}`;
@@ -208,11 +215,26 @@ function useDetail(source: ConversationSource, entry: ConversationEntry, open: b
       current = false;
     };
   }, [open, key, sessionId, agentId, entry.id, loaded?.key]);
-  return loaded?.key === key ? loaded : { detail: null, failed: false };
+  // Forgetting what came (or did not) asks for it again while the entry is open.
+  const retry = () => setLoaded(null);
+  return loaded?.key === key ? { detail: loaded.detail, failed: loaded.failed, retry } : { detail: null, failed: false, retry };
 }
 
 function Loading() {
   return <CircularProgress size={14} sx={{ color: v.on2, m: '4px' }} />;
+}
+
+/** In the place of an opened entry's content until it is there: on its way, or that it did not come, with a way to ask again. */
+function Pending({ failed, retry }: Pick<Detail, 'failed' | 'retry'>) {
+  if (!failed) return <Loading />;
+  return (
+    <Box role="status" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+      <Typography sx={{ fontSize: 12, color: v.error }}>{t.failure.load}</Typography>
+      <Button size="small" color="inherit" onClick={retry} sx={{ minHeight: 24, px: 1, fontSize: 12 }}>
+        {t.loadAgain}
+      </Button>
+    </Box>
+  );
 }
 
 function Pre({ children }: { children: React.ReactNode }) {
@@ -282,7 +304,7 @@ function StateDot({ state }: { state: ToolState }) {
 /** One tool call or one thought in an opened work row. */
 function WorkItem({ entry, source }: { entry: WorkEntry; source: ConversationSource }) {
   const [open, setOpen] = useOpen(source, entry.id);
-  const { detail, failed } = useDetail(source, entry, open);
+  const { detail, ...pending } = useDetail(source, entry, open);
   const label = entry.kind === 'tool' ? entry.name : t.thinking;
   const summary = entry.kind === 'tool' ? entry.summary : entry.chars ? t.chars(compactCount(entry.chars)) : '';
   return (
@@ -317,8 +339,10 @@ function WorkItem({ entry, source }: { entry: WorkEntry; source: ConversationSou
               </Box>
             </Box>
           )
-        ) : failed ? null : (
-          <Loading />
+        ) : (
+          <Box sx={{ pl: '18px' }}>
+            <Pending {...pending} />
+          </Box>
         ))}
     </Box>
   );
@@ -367,7 +391,7 @@ function WorkRow({ entries, source }: { entries: WorkEntry[]; source: Conversati
 
 function Prompt({ entry, source }: { entry: Extract<ConversationEntry, { kind: 'prompt' }>; source: ConversationSource }) {
   const [full, setFull] = useOpen(source, `full:${entry.id}`);
-  const { detail } = useDetail(source, entry, full);
+  const { detail, ...pending } = useDetail(source, entry, full);
   // Not typed by the user: another agent's message, or a prompt the CLI gave the session on a schedule.
   const sender = entry.from ?? (entry.scheduled ? t.scheduledPrompt : null);
   return (
@@ -398,18 +422,22 @@ function Prompt({ entry, source }: { entry: Extract<ConversationEntry, { kind: '
           </Box>
         )}
       </Box>
-      {entry.truncated && !detail && (
-        <Button size="small" onClick={() => setFull(true)} sx={{ minHeight: 24, px: 1, fontSize: 12 }}>
-          {t.showAll}
-        </Button>
-      )}
+      {entry.truncated &&
+        !detail &&
+        (full ? (
+          <Pending {...pending} />
+        ) : (
+          <Button size="small" onClick={() => setFull(true)} sx={{ minHeight: 24, px: 1, fontSize: 12 }}>
+            {t.showAll}
+          </Button>
+        ))}
     </Box>
   );
 }
 
 function Notice({ entry, source }: { entry: Extract<ConversationEntry, { kind: 'notice' }>; source: ConversationSource }) {
   const [open, setOpen] = useOpen(source, entry.id);
-  const { detail } = useDetail(source, entry, open);
+  const { detail, ...pending } = useDetail(source, entry, open);
   const error = entry.notice === 'api_error';
   const label = error && entry.text ? `${t.notice.api_error} · ${entry.text}` : t.notice[entry.notice];
   const line = <Box component="span" sx={{ flex: 1, height: '1px', bgcolor: v.outline }} />;
@@ -428,7 +456,7 @@ function Notice({ entry, source }: { entry: Extract<ConversationEntry, { kind: '
         </Box>
         {line}
       </ButtonBase>
-      {open && (detail ? <Pre>{detail.text}</Pre> : <Loading />)}
+      {open && (detail ? <Pre>{detail.text}</Pre> : <Pending {...pending} />)}
     </Box>
   );
 }
@@ -447,7 +475,7 @@ function Command({ entry }: { entry: Extract<ConversationEntry, { kind: 'command
 /** A sub-agent the model started: opened, what it reported; its own conversation is a click away. */
 function Agent({ entry, source }: { entry: Extract<ConversationEntry, { kind: 'agent' }>; source: ConversationSource }) {
   const [open, setOpen] = useOpen(source, entry.id);
-  const { detail, failed } = useDetail(source, entry, open);
+  const { detail, ...pending } = useDetail(source, entry, open);
   const { onOpenAgent } = source;
   return (
     <Box sx={{ position: 'relative', border: `1px solid ${v.outline}`, borderRadius: '12px', overflow: 'hidden' }}>
@@ -485,7 +513,7 @@ function Agent({ entry, source }: { entry: Extract<ConversationEntry, { kind: 'a
           <ChevronIcon open={open} size={14} />
         </Box>
       </ButtonBase>
-      {open && <Box sx={{ p: '0 12px 10px 12px' }}>{detail ? detail.text ? <MarkdownText text={detail.text} /> : null : failed ? null : <Loading />}</Box>}
+      {open && <Box sx={{ p: '0 12px 10px 12px' }}>{detail ? detail.text ? <MarkdownText text={detail.text} /> : null : <Pending {...pending} />}</Box>}
     </Box>
   );
 }
@@ -493,8 +521,8 @@ function Agent({ entry, source }: { entry: Extract<ConversationEntry, { kind: 'a
 /** A background agent reported back; its report opens below. */
 function Task({ entry, source }: { entry: Extract<ConversationEntry, { kind: 'task' }>; source: ConversationSource }) {
   const [open, setOpen] = useOpen(source, entry.id);
-  const { detail, failed } = useDetail(source, entry, open);
-  const facts = [entry.tokens ? `${t.tokens} ${compactCount(entry.tokens)}` : null, entry.durationMs ? duration(entry.durationMs) : null].filter(Boolean).join(' · ');
+  const { detail, ...pending } = useDetail(source, entry, open);
+  const facts =[entry.tokens ? `${t.tokens} ${compactCount(entry.tokens)}` : null, entry.durationMs ? duration(entry.durationMs) : null].filter(Boolean).join(' · ');
   return (
     <Box>
       <ButtonBase
@@ -513,7 +541,7 @@ function Task({ entry, source }: { entry: Extract<ConversationEntry, { kind: 'ta
         </Box>
         <ChevronIcon open={open} size={14} />
       </ButtonBase>
-      {open && <Box sx={{ p: '2px 4px 6px 26px' }}>{detail ? detail.text ? <MarkdownText text={detail.text} /> : null : failed ? null : <Loading />}</Box>}
+      {open && <Box sx={{ p: '2px 4px 6px 26px' }}>{detail ? detail.text ? <MarkdownText text={detail.text} /> : null : <Pending {...pending} />}</Box>}
     </Box>
   );
 }

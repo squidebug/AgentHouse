@@ -108,8 +108,12 @@ try {
   await page.emulateMedia({ colorScheme: 'dark' });
   // The terminal draws on a canvas (WebGL); its text is checked on the server side by the tests.
   const terminalShown = () => page.locator('.xterm-screen').first().waitFor({ timeout: 10_000 });
-  // A refused choice of executable is a 400 the check provokes on purpose; Chrome logs it as an error.
-  const provoked = (message) => message.location().url.includes('/api/cli/') && /status of 400/.test(message.text());
+  // What the check provokes on purpose, and Chrome logs as errors: a refused choice of executable (a 400),
+  // and the content of a conversation entry whose first request is cut off.
+  const provoked = (message) => {
+    const from = message.location().url;
+    return (from.includes('/api/cli/') && /status of 400/.test(message.text())) || (from.includes('/conversation/') && /ERR_FAILED/.test(message.text()));
+  };
   page.on('console', (message) => message.type() === 'error' && !provoked(message) && errors.push(message.text()));
   page.on('pageerror', (error) => errors.push(error.message));
   const workspace = page.getByRole('heading', { name: 'AgentHouse' });
@@ -243,10 +247,15 @@ try {
   const work_ = page.getByRole('button', { name: /도구 1/ });
   check(await work_.isVisible(), 'the tool call is folded into one row');
   await work_.click();
+  // The first request for what the tool call holds is cut off: the row says so, and asks again when told to.
+  await page.route('**/api/sessions/*/conversation/*', (route) => route.abort(), { times: 1 });
   // The tool's row; the session's row may still read "작업 중 · Bash" for a moment.
   await page.getByRole('button', { name: /Bash echo/ }).click();
+  await page.getByText('불러오기 실패', { exact: true }).waitFor({ timeout: 5000 });
+  check(true, 'an opened tool call whose content did not come says so');
+  await page.getByRole('button', { name: '다시 불러오기' }).click();
   await page.getByText('fake-tool-output', { exact: true }).waitFor({ timeout: 5000 });
-  check(true, 'an opened tool call shows its output');
+  check(true, 'asked again, it shows its output');
   check(await page.getByText(/fake-model · low · 입력/).isVisible(), 'the turn shows model, effort and tokens');
 
   await settle();

@@ -118,7 +118,7 @@ export function NoteEditor({ title, load, save, onClose }: Props) {
           {problem && <Typography sx={{ fontSize: 12, color: v.error }}>{problem}</Typography>}
           {stale && (
             <Button size="small" color="inherit" onClick={read} sx={{ minHeight: 28, px: 1.5, fontSize: 12 }}>
-              {t.reloadNote}
+              {t.loadAgain}
             </Button>
           )}
         </Box>

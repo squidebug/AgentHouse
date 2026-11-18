@@ -203,7 +203,8 @@ export const t = {
   memoryScope: { user: '사용자', project: '프로젝트', local: '로컬' } satisfies Record<MemoryFile['scope'], string>,
   edit: (name: string) => `${name} 편집`,
   changedOnDisk: '디스크에서 바뀜',
-  reloadNote: '다시 불러오기',
+  // A note that changed on disk, or anything that did not load: asked for again.
+  loadAgain: '다시 불러오기',
   loading: '불러오는 중',
   parentAgent: '상위',
   session: '세션',
