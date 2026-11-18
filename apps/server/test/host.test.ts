@@ -13,12 +13,12 @@ import { createSessionHost } from '../src/host/server';
 import { readState, runDir, writeState } from '../src/shared/state';
 import { createAgentHouseServer } from '../src/web/http/server';
 import { isAlive, killTree } from '../src/shared/kill-tree';
-import { fakeAgentPath, fakeSpec, login, openSocket, plain, request, screenText, sleep, tempStateDir, waitFor, type Socket } from './helpers';
+import { fakeAgentPath, fakeSpec, login, noRealCli, openSocket, plain, request, screenText, sleep, tempStateDir, waitFor, type Socket } from './helpers';
 
 /** A web server on the host of `stateDir`. Stopping it twice is fine: a test stops it where it means to, and again when it ends. */
 async function webServer(stateDir: string, port = 0) {
   const client = await HostClient.connect({ stateDir, spawn: false });
-  const app = await createAgentHouseServer({ port, fakeAgentPath, host: client, claudeSessions: null });
+  const app = await createAgentHouseServer({ port, fakeAgentPath, host: client, ...noRealCli });
   const authorization = await login(app);
   let stopped = false;
   return {

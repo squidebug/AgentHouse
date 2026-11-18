@@ -31,6 +31,11 @@ export interface ServerOptions {
   fakeAgentPath?: string;
   /** Claude Code's own list of sessions, for the ones started outside AgentHouse (ManagerOptions.claudeSessions). */
   claudeSessions?: (() => Promise<unknown>) | null;
+  /**
+   * Where the CLIs are looked for, written as a PATH; by default this process's own. A check names
+   * the folders of its stand-ins, or none (''), so that it never runs the CLIs installed on the machine.
+   */
+  cliPath?: string;
   /** How the user ends the session host, for the environment check (default `pnpm stop`). */
   stopCommand?: string;
   /** How the user gets a new login address, for a page that is not logged in (default `pnpm start`). */
@@ -98,13 +103,18 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
   const loginAddress = (code: string) => `http://127.0.0.1:${port}/?code=${code}`;
   const defaultCwd = options.defaultCwd ?? process.cwd();
   const { host } = options;
-  const env = new EnvService(defaultCwd, {
-    get build() {
-      return host.build;
+  const env = new EnvService(
+    defaultCwd,
+    {
+      get build() {
+        return host.build;
+      },
+      stateDir: host.stateDir,
+      stopCommand: options.stopCommand ?? 'pnpm stop',
     },
-    stateDir: host.stateDir,
-    stopCommand: options.stopCommand ?? 'pnpm stop',
-  });
+    host.stateDir,
+    options.cliPath,
+  );
   const manager = new SessionManager({
     env,
     defaultCwd,

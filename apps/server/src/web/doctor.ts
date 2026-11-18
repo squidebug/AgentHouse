@@ -42,9 +42,11 @@ const unusable = (file: string) => (existsSync(file) ? '실행할 수 있는 프
  * The installs of a CLI: those on PATH, in PATH order (the first is the one the
  * user's shell runs), then the file the user chose if it is not one of them.
  * The chosen one is launched; one that cannot run launches nothing.
+ * `searchPath` stands in for PATH where a check names its own folders.
  */
-async function probeCli(vendor: Vendor, chosen: string | null): Promise<CliStatus> {
-  const found: Array<ResolvedCommand & { onPath: boolean }> = resolveCli(vendor).map((r) => ({ ...r, onPath: true }));
+async function probeCli(vendor: Vendor, chosen: string | null, searchPath?: string): Promise<CliStatus> {
+  const onPath = resolveCli(vendor, searchPath === undefined ? process.env : { ...process.env, PATH: searchPath });
+  const found: Array<ResolvedCommand & { onPath: boolean }> = onPath.map((r) => ({ ...r, onPath: true }));
   let selected: number | null = found.length ? 0 : null;
   let chosenError: string | undefined;
   if (chosen) {
@@ -165,6 +167,8 @@ export class EnvService {
     private readonly host?: HostFacts,
     /** Where the user's choice of executables is kept; none, no choices. */
     private readonly stateDir: string | undefined = host?.stateDir,
+    /** Where the CLIs are looked for, written as a PATH: this process's own, unless a check names its folders. */
+    private readonly searchPath?: string,
   ) {}
 
   async report(refresh = false): Promise<EnvReport> {
@@ -214,7 +218,7 @@ export class EnvService {
   private async build(): Promise<EnvReport> {
     const major = Number(process.versions.node.split('.')[0]);
     const chosen = this.stateDir ? readAppSettings(this.stateDir).cli : {};
-    const [claude, codex] = await Promise.all([probeCli('claude', chosen.claude ?? null), probeCli('codex', chosen.codex ?? null)]);
+    const [claude, codex] = await Promise.all([probeCli('claude', chosen.claude ?? null, this.searchPath), probeCli('codex', chosen.codex ?? null, this.searchPath)]);
     const base = {
       node: { version: process.versions.node, major, supported: major >= 18, eol: EOL_MAJORS.has(major) },
       platform: process.platform,

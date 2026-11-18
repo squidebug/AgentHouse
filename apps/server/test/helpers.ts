@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
@@ -41,28 +41,18 @@ export function fakeSpec(extra: Partial<SpawnSpec> = {}): SpawnSpec {
   };
 }
 
-/**
- * Removes a temporary folder, and again while something is still put into it:
- * the environment check a starting server runs asks the installed CLI for its
- * version and login, and Claude Code then writes its own files into the config
- * folder the test gave it, sometimes after the test is over.
- */
-export async function removeTemp(dir: string): Promise<void> {
-  for (let tries = 0; ; tries += 1) {
-    try {
-      rmSync(dir, { recursive: true, force: true });
-      return;
-    } catch (error) {
-      if (tries >= 20) throw error;
-      await sleep(250);
-    }
-  }
-}
-
 /** A state folder of the test's own, so tests never touch ~/.agenthouse or each other. */
 export function tempStateDir(): Promise<string> {
   return mkdtemp(path.join(os.tmpdir(), 'agenthouse-test-'));
 }
+
+/**
+ * What every web server of a test is made with: the CLIs the developer has installed are not run.
+ * They are looked for nowhere, so the environment check finds none to ask for its version and login
+ * (asked with the config folder a test gave, Claude Code would write its own files there), and
+ * Claude Code's list of sessions is not asked for (it would list the sessions the developer has open).
+ */
+export const noRealCli = { cliPath: '', claudeSessions: null } as const;
 
 export interface TestServer extends AgentHouseServer {
   stateDir: string;
@@ -71,14 +61,14 @@ export interface TestServer extends AgentHouseServer {
 
 /**
  * A web server and a session host of its own, both in this process. close() ends both.
- * `claudeSessions` stands in for Claude Code's own list of sessions; without it nothing is asked
- * (the real CLI never is: it would list the sessions the developer has open).
+ * `claudeSessions` stands in for Claude Code's own list of sessions, and `cliPath` names the folders
+ * a stand-in CLI is in; without them nothing is asked and no CLI is found (`noRealCli`).
  */
-export async function startServer(options: { claudeSessions?: () => Promise<unknown> } = {}): Promise<TestServer> {
+export async function startServer(options: { claudeSessions?: () => Promise<unknown>; cliPath?: string } = {}): Promise<TestServer> {
   const stateDir = await tempStateDir();
   const host = await createSessionHost({ stateDir, idleExitMs: null });
   const client = await HostClient.connect({ stateDir, spawn: false });
-  const app = await createAgentHouseServer({ port: 0, fakeAgentPath, host: client, claudeSessions: options.claudeSessions ?? null });
+  const app = await createAgentHouseServer({ port: 0, fakeAgentPath, host: client, ...noRealCli, ...options });
   return {
     ...app,
     stateDir,

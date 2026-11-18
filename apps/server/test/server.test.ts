@@ -11,7 +11,7 @@ import { HostClient } from '../src/web/host-client';
 import { isAlive } from '../src/shared/kill-tree';
 import { webLogFile } from '../src/shared/state';
 import { forgetWebServer, recordWebServer, runningWebServer, stopWebServer, webServerFile } from '../src/web/instance';
-import { login, openSocket, plain, request, screenText, sleep, startServer, tempStateDir, waitFor, type Reply, type TestServer } from './helpers';
+import { login, noRealCli, openSocket, plain, request, screenText, sleep, startServer, tempStateDir, waitFor, type Reply, type TestServer } from './helpers';
 
 let app: TestServer;
 let authorization: string;
@@ -103,7 +103,7 @@ describe('access control', () => {
     const webDist = await tempStateDir();
     writeFileSync(path.join(webDist, 'index.html'), '<!doctype html><title>AgentHouse</title>');
     const client = await HostClient.connect({ stateDir: app.stateDir, spawn: false });
-    const site = await createAgentHouseServer({ port: 0, host: client, webDist, claudeSessions: null });
+    const site = await createAgentHouseServer({ port: 0, host: client, webDist, ...noRealCli });
     try {
       const page = await request(site.port, 'GET', '/');
       assert.equal(page.status, 200);
@@ -229,10 +229,10 @@ describe('staying up', () => {
   test('a taken port falls back to the next; with none left, nothing of the server stays behind', async () => {
     const client = await HostClient.connect({ stateDir: app.stateDir, spawn: false });
     try {
-      const other = await createAgentHouseServer({ port: app.port, fallbackPorts: [0], host: client, claudeSessions: null });
+      const other = await createAgentHouseServer({ port: app.port, fallbackPorts: [0], host: client, ...noRealCli });
       assert.notEqual(other.port, app.port);
       await other.close();
-      await assert.rejects(createAgentHouseServer({ port: app.port, host: client, claudeSessions: null }), { code: 'EADDRINUSE' });
+      await assert.rejects(createAgentHouseServer({ port: app.port, host: client, ...noRealCli }), { code: 'EADDRINUSE' });
     } finally {
       client.close();
     }

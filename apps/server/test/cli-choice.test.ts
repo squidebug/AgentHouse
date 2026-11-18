@@ -13,20 +13,34 @@ const isWindows = process.platform === 'win32';
 let app: TestServer;
 let headers: Record<string, string>;
 let scratch: string;
-const savedPath = process.env.PATH;
 
 before(async () => {
-  // No real CLI on PATH: what is found is what the tests put there, and probing stays quick.
   scratch = await mkdtemp(path.join(os.tmpdir(), 'agenthouse-cli-choice-'));
-  process.env.PATH = path.join(scratch, 'empty');
   app = await startServer();
   headers = { authorization: await login(app), origin: `http://127.0.0.1:${app.port}` };
 });
 
 after(async () => {
   await app.close();
-  process.env.PATH = savedPath;
   await rm(scratch, { recursive: true, force: true });
+});
+
+test('the CLIs are looked for where the server was told: nowhere for a test, unless it names the folder of a stand-in', async () => {
+  // Told of no folder, it finds none of the CLIs installed on this machine, and so runs none.
+  const none = (await request(app.port, 'GET', '/api/env', { headers })).json as EnvReport;
+  assert.deepEqual([none.clis.claude.installs, none.clis.codex.installs], [[], []]);
+  assert.ok(none.messages.some((m) => m.id === 'ENV_NO_CLI'), JSON.stringify(none.messages));
+
+  const bin = path.join(scratch, 'on-path');
+  const fake = installFakeClaude(bin, '2.1.401');
+  const own = await startServer({ cliPath: [path.join(scratch, 'empty'), bin].join(path.delimiter) });
+  try {
+    const { claude, codex } = ((await request(own.port, 'GET', '/api/env', { headers: { authorization: `Bearer ${own.key}` } })).json as EnvReport).clis;
+    assert.deepEqual(claude.installs.map((install) => [install.shim, install.version, install.onPath]), [[fake, '2.1.401', true]]);
+    assert.deepEqual([claude.selected, claude.loggedIn, claude.chosen, codex.installs], [0, true, null, []]);
+  } finally {
+    await own.close();
+  }
 });
 
 test('the settings file keeps a full path per CLI; anything else reads as no choice', () => {

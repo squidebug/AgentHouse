@@ -71,11 +71,11 @@ export function resolveShim(candidate: string, shimText?: string): Omit<Resolved
 /** What makes two installs one: the program and script they run. */
 export const installKey = (install: Pick<ResolvedCommand, 'file' | 'args'>) => [install.file, ...install.args].join('\0').toLowerCase();
 
-/** Distinct installs of `name`; the first is the one the user's shell runs. */
-export function resolveCli(name: string): ResolvedCommand[] {
+/** Distinct installs of `name` on the PATH of `env`; the first is the one the user's shell runs. */
+export function resolveCli(name: string, env: NodeJS.ProcessEnv = process.env): ResolvedCommand[] {
   const installs: ResolvedCommand[] = [];
   const seen = new Set<string>();
-  for (const hit of findOnPath(name)) {
+  for (const hit of findOnPath(name, env)) {
     const resolved = resolveShim(hit);
     if (!resolved) continue;
     const key = installKey(resolved);

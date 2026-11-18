@@ -10,7 +10,7 @@ import { HostClient, stopHosts } from '../src/web/host-client';
 import { createAgentHouseServer } from '../src/web/http/server';
 import { registryFile, SessionRegistry } from '../src/web/registry';
 import { LimitsLog } from '../src/web/usage-log';
-import { fakeAgentPath, login, openSocket, request, tempStateDir, waitFor } from './helpers';
+import { fakeAgentPath, login, noRealCli, openSocket, request, tempStateDir, waitFor } from './helpers';
 
 function readRegistry(stateDir: string): SessionInfo[] {
   try {
@@ -53,7 +53,7 @@ describe('session registry', () => {
   test('sessions outlive their session host in the list, as ended, until removed', async () => {
     const stateDir = await tempStateDir();
     const client = await HostClient.connect({ stateDir, spawn: true, hostArgs: ['--idle-exit-ms', '60000'] });
-    const app = await createAgentHouseServer({ port: 0, fakeAgentPath, host: client, claudeSessions: null });
+    const app = await createAgentHouseServer({ port: 0, fakeAgentPath, host: client, ...noRealCli });
     let open = true;
     try {
       const authorization = await login(app);
