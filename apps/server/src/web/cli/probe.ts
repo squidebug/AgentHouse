@@ -1,15 +1,20 @@
 import { execFile } from 'node:child_process';
 import type { CliInstall } from '@agenthouse/protocol';
+import { childEnv } from '../../shared/child-env';
 
 interface QuickResult {
   code: number | null;
   stdout: string;
 }
 
-/** Runs a short-lived CLI command (version, login status) without a console window. */
+/**
+ * Runs a short-lived CLI command (version, login status) without a console window, in the
+ * environment a session gets: started from inside an agent's session, AgentHouse would else
+ * ask the CLI as that session's child.
+ */
 export function runQuick(file: string, args: string[], timeoutMs = 10_000): Promise<QuickResult> {
   return new Promise((resolve) => {
-    execFile(file, args, { timeout: timeoutMs, windowsHide: true, encoding: 'utf8', maxBuffer: 1024 * 1024 }, (error, stdout) => {
+    execFile(file, args, { env: childEnv(), timeout: timeoutMs, windowsHide: true, encoding: 'utf8', maxBuffer: 1024 * 1024 }, (error, stdout) => {
       const code = error ? (typeof error.code === 'number' ? error.code : null) : 0;
       resolve({ code, stdout: String(stdout ?? '') });
     });
