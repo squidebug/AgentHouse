@@ -130,6 +130,35 @@ describe('session registry', () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  test('an entry of the file that is not what was written costs that entry, not the start', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'agenthouse-registry-'));
+    const file = registryFile(dir);
+    try {
+      // What the server or the page reads of an entry without a check. With the first, and with the
+      // missing sub-agent, the web server did not start: ending such a session read what is not there.
+      const broken = [
+        { ...info('no-status'), status: null },
+        { ...info('status-without-time'), status: { value: 'idle' } },
+        { ...info('exit-as-text'), exit: 'yesterday' },
+        { ...info('no-telemetry'), telemetry: null },
+        { ...info('transcript-without-path'), transcripts: [{ vendorSessionId: null, since: 1 }] },
+        { ...info('agent-missing'), agents: [null] },
+        null,
+        'text',
+      ];
+      // One from before sub-agents and background work were tracked has none of their lists.
+      const { agents: _agents, tasks: _tasks, schedules: _schedules, invoked: _invoked, ...old } = info('old');
+      writeFileSync(file, JSON.stringify({ version: 1, sessions: [...broken, old, info('good')] }));
+      const registry = new SessionRegistry(file);
+      registry.record([]);
+      const kept = registry.past([]);
+      assert.deepEqual(kept.map((s) => s.id), ['old', 'good']);
+      assert.deepEqual([kept[0]?.agents, kept[0]?.tasks, kept[0]?.schedules, kept[0]?.invoked], [[], [], [], []]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('usage log', () => {

@@ -33,16 +33,36 @@ function withDefaults(entry: SessionInfo): SessionInfo {
   return { ...entry, agents: list(entry.agents), tasks: list(entry.tasks), schedules: list(entry.schedules), invoked: list(entry.invoked) };
 }
 
+const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+/** A list of things, which an entry from before they were tracked does not have. */
+const things = (value: unknown): boolean => value === undefined || (Array.isArray(value) && value.every(isObject));
+
+/**
+ * Whether a saved entry has what is read of it without a check, here and in the
+ * page: its status and since when, when it ended, what it ran with, where its
+ * transcripts are, the things that ran in it. The file is this server's own, but
+ * one edited by hand or cut short must cost that entry, not the server's start.
+ */
 function isEntry(value: unknown): value is SessionInfo {
-  const s = value as Partial<SessionInfo> | null;
+  if (!isObject(value)) return false;
+  const { status, exit, transcripts } = value;
   return (
-    typeof s?.id === 'string' &&
-    typeof s.vendor === 'string' &&
-    typeof s.title === 'string' &&
-    typeof s.cwd === 'string' &&
-    typeof s.startedAt === 'number' &&
-    typeof s.status === 'object' &&
-    Array.isArray(s.transcripts)
+    typeof value.id === 'string' &&
+    typeof value.vendor === 'string' &&
+    typeof value.title === 'string' &&
+    typeof value.cwd === 'string' &&
+    typeof value.startedAt === 'number' &&
+    isObject(status) &&
+    typeof status.value === 'string' &&
+    typeof status.at === 'number' &&
+    (exit === null || (isObject(exit) && typeof exit.at === 'number')) &&
+    isObject(value.cli) &&
+    isObject(value.telemetry) &&
+    Array.isArray(transcripts) &&
+    transcripts.every((segment) => isObject(segment) && typeof segment.path === 'string') &&
+    things(value.agents) &&
+    things(value.tasks) &&
+    things(value.schedules)
   );
 }
 
