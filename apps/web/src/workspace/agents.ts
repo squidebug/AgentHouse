@@ -11,11 +11,23 @@ export interface AgentRow {
   depth: number;
 }
 
+/** The agents by the one that started them (null: the main conversation), each list oldest first. */
+function byParent(agents: AgentInfo[]): Map<string | null, AgentInfo[]> {
+  const ids = new Set(agents.map((a) => a.id));
+  const children = new Map<string | null, AgentInfo[]>();
+  for (const agent of agents) {
+    // An agent whose parent is not listed (a missed start) shows at the top level.
+    const parentId = agent.parentId !== null && ids.has(agent.parentId) ? agent.parentId : null;
+    const siblings = children.get(parentId);
+    if (siblings) siblings.push(agent);
+    else children.set(parentId, [agent]);
+  }
+  return children;
+}
+
 /** The agents an agent (or, for null, the main conversation) started, oldest first. */
 export function childAgents(agents: AgentInfo[], parentId: string | null): AgentInfo[] {
-  const ids = new Set(agents.map((a) => a.id));
-  // An agent whose parent is not listed (a missed start) shows at the top level.
-  return agents.filter((a) => (a.parentId !== null && ids.has(a.parentId) ? a.parentId : null) === parentId);
+  return byParent(agents).get(parentId) ?? [];
 }
 
 /**
@@ -37,8 +49,10 @@ export function agentRows(agents: AgentInfo[], all: boolean): { rows: AgentRow[]
   }
   const rows: AgentRow[] = [];
   const seen = new Set<string>();
+  // Sorted out once: asked of the whole list at every agent, a long list took its length squared.
+  const children = byParent(agents);
   const walk = (parentId: string | null, depth: number) => {
-    for (const agent of childAgents(agents, parentId)) {
+    for (const agent of children.get(parentId) ?? []) {
       if (seen.has(agent.id)) continue; // a parent loop in bad data
       seen.add(agent.id);
       if (!fold || shown.has(agent.id)) rows.push({ agent, depth });
