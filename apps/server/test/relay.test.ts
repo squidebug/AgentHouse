@@ -104,6 +104,18 @@ describe('hook relay', () => {
     assert.ok(received.some((r) => r.path === '/status' && r.body === input), 'the status line input also reaches the host');
   });
 
+  test('on Windows without SHELL it runs what the user named as Git Bash for Claude, before the one Git installed', { skip: process.platform !== 'win32' || !shell }, async () => {
+    const config = { port, token: 'secret', statusCommand: 'printf installed-bash' };
+    const installed = await runRelay('status', config, '{}', { SHELL: undefined, CLAUDE_CODE_GIT_BASH_PATH: undefined });
+    assert.deepEqual([installed.code, installed.stdout], [0, 'installed-bash']);
+    // Which one ran is told by naming a program that is no shell: node takes `-c` as "check this file" and prints nothing.
+    // (The usual places cannot be hidden instead: Windows sets ProgramFiles again for every new process.)
+    const named = await runRelay('status', config, '{}', { SHELL: undefined, CLAUDE_CODE_GIT_BASH_PATH: process.execPath });
+    assert.deepEqual([named.code, named.stdout], [0, '']);
+    const bare = await runRelay('status', config, '{}', { SHELL: undefined, CLAUDE_CODE_GIT_BASH_PATH: path.basename(process.execPath) });
+    assert.deepEqual([bare.code, bare.stdout], [0, 'installed-bash'], 'a bare name is not run: it could be a file of the current folder');
+  });
+
   test('without a status line of the user it prints nothing', async () => {
     const result = await runRelay('status', { port, token: 'secret' }, '{}');
     assert.deepEqual([result.code, result.stdout], [0, '']);

@@ -53,14 +53,17 @@ function post(path, body) {
   });
 }
 
-// The shell Claude Code runs commands with: Git Bash on Windows (PowerShell
-// when it is missing), sh elsewhere. Always by absolute path, never a bare name
-// that could run a same-named file from the current folder.
+// The shell Claude Code runs commands with: Git Bash on Windows (the one the
+// user named for Claude in CLAUDE_CODE_GIT_BASH_PATH, else where Git installs
+// it; PowerShell when it is missing), sh elsewhere. Always by absolute path,
+// never a bare name that could run a same-named file from the current folder.
 function shellFor(command) {
   if (process.env.SHELL && path.isAbsolute(process.env.SHELL)) return [process.env.SHELL, ['-c', command]];
   if (process.platform !== 'win32') return ['/bin/sh', ['-c', command]];
+  const named = process.env.CLAUDE_CODE_GIT_BASH_PATH;
   const bases = [process.env.ProgramFiles, process.env['ProgramFiles(x86)'], process.env.LOCALAPPDATA && `${process.env.LOCALAPPDATA}\\Programs`];
-  const bash = bases.filter(Boolean).map((base) => `${base}\\Git\\bin\\bash.exe`).find((file) => fs.existsSync(file));
+  const installed = bases.filter(Boolean).map((base) => `${base}\\Git\\bin\\bash.exe`);
+  const bash = [...(named && path.isAbsolute(named) ? [named] : []), ...installed].find((file) => fs.existsSync(file));
   if (bash) return [bash, ['-c', command]];
   const powershell = `${process.env.SystemRoot || 'C:\\Windows'}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
   return [powershell, ['-NoProfile', '-NonInteractive', '-Command', command]];
