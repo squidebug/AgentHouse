@@ -3,12 +3,14 @@ import {
   SOCKET_PROTOCOL,
   TOKEN_PROTOCOL_PREFIX,
   type ApiError,
+  type ChooseCliRequest,
   type CliStatus,
   type ComposeRequest,
   type ComposeResult,
   type DelegationInfo,
   type EntryDetail,
   type EnvReport,
+  type ExternalRequest,
   type LatestWords,
   type LaunchOptions,
   type LinkKind,
@@ -58,7 +60,7 @@ export const api = {
   auth: () => call<unknown>('GET', '/api/auth'),
   env: (refresh = false) => call<EnvReport>('GET', refresh ? '/api/env?refresh=1' : '/api/env'),
   /** Runs this file for the CLI from now on (null: the one the user's shell runs); refused with the reason if it is not that program. */
-  chooseCli: (vendor: Vendor, path: string | null) => call<CliStatus>('PUT', `/api/cli/${vendor}`, { path }),
+  chooseCli: (vendor: Vendor, path: string | null) => call<CliStatus>('PUT', `/api/cli/${vendor}`, { path } satisfies ChooseCliRequest),
   launch: (opts: LaunchOptions) => call<SessionInfo>('POST', '/api/sessions', opts),
   /** Ends the CLI; the session stays listed, ended. */
   end: (id: string) => call<unknown>('POST', `/api/sessions/${encodeURIComponent(id)}/end`),
@@ -75,7 +77,7 @@ export const api = {
   /** Hands a delegate's answer back to its parent, now or once the parent is idle. */
   deliver: (id: string, header: string) => call<DelegationInfo>('POST', `/api/delegations/${encodeURIComponent(id)}/deliver`, { header }),
   /** Watches the sessions started outside AgentHouse from now on, or stops: the same for every page. */
-  watchExternal: (on: boolean) => call<{ on: boolean }>('PUT', '/api/external', { on }),
+  watchExternal: (on: boolean) => call<{ on: boolean }>('PUT', '/api/external', { on } satisfies ExternalRequest),
   /** What a session was last asked and what it last said, as a few plain words. */
   latest: (id: string) => call<LatestWords>('GET', `/api/sessions/${encodeURIComponent(id)}/latest`),
   /** The skills a session's conversation was given, with the ones it ran marked. */

@@ -1,4 +1,4 @@
-import { LOGIN_EXPIRED, type ApiError, type LoginResult } from '@agenthouse/protocol';
+import { LOGIN_EXPIRED, type ApiError, type LoginRequest, type LoginResult } from '@agenthouse/protocol';
 
 // The page's token. Browsers keep storage apart per port, so no other server on 127.0.0.1 can read it.
 const KEY = 'ah-token';
@@ -81,7 +81,7 @@ async function redeem(): Promise<void> {
   url.searchParams.delete('code');
   history.replaceState(history.state, '', url.pathname + url.search + url.hash);
   try {
-    const res = await fetch('/api/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code }) });
+    const res = await fetch('/api/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code } satisfies LoginRequest) });
     const data = (await res.json().catch(() => null)) as (LoginResult & Partial<ApiError>) | null;
     if (res.ok && data?.token) {
       setToken(data.token);
