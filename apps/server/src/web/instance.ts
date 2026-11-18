@@ -96,7 +96,7 @@ export function forgetWebServer(stateDir: string, pid = process.pid): void {
  * would start a new host the moment the old one is gone. True if one ran.
  */
 export async function stopWebServer(stateDir: string): Promise<boolean> {
-  const running = await runningWebServer(stateDir);
+  const running = await webServerAnswering(stateDir);
   if (!running) return false;
   try {
     process.kill(running.pid);

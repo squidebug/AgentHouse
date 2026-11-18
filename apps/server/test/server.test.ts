@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import path from 'node:path';
@@ -8,7 +9,7 @@ import { createAgentHouseServer } from '../src/web/http/server';
 import { HostClient } from '../src/web/host-client';
 import { isAlive } from '../src/shared/kill-tree';
 import { webLogFile } from '../src/shared/state';
-import { forgetWebServer, recordWebServer, runningWebServer, webServerFile } from '../src/web/instance';
+import { forgetWebServer, recordWebServer, runningWebServer, stopWebServer, webServerFile } from '../src/web/instance';
 import { login, openSocket, plain, request, screenText, sleep, startServer, tempStateDir, waitFor, type TestServer } from './helpers';
 
 let app: TestServer;
@@ -241,6 +242,36 @@ describe('staying up', () => {
       forgetWebServer(dir);
       assert.equal(existsSync(webServerFile(dir)), false);
     } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('--stop ends the web server of the state folder, asking it only whether it is there', async () => {
+    const dir = await tempStateDir();
+    // A stand-in web server in a process of its own: it prints what it is asked, and takes one key.
+    const standIn = [
+      "const server = require('node:http').createServer((req, res) => {",
+      "  console.log(req.method + ' ' + req.url);",
+      "  res.writeHead(req.headers.authorization === 'Bearer its-key' ? 200 : 401);",
+      "  res.end('{}');",
+      '});',
+      "server.listen(0, '127.0.0.1', () => console.log('port ' + server.address().port));",
+    ].join('\n');
+    const child = spawn(process.execPath, ['-e', standIn], { stdio: ['ignore', 'pipe', 'ignore'] });
+    let printed = '';
+    child.stdout.on('data', (chunk: Buffer) => (printed += chunk.toString('utf8')));
+    try {
+      assert.ok(await waitFor(() => /port \d+/.test(printed), 10_000), 'the stand-in listens');
+      const port = Number(printed.match(/port (\d+)/)?.[1]);
+      writeFileSync(webServerFile(dir), JSON.stringify({ pid: child.pid, port, url: `http://127.0.0.1:${port}/`, key: 'its-key' }));
+      assert.equal(await stopWebServer(dir), true);
+      assert.ok(await waitFor(() => child.exitCode !== null || child.signalCode !== null, 5000), 'its process has ended');
+      assert.equal(existsSync(webServerFile(dir)), false, 'and its record is gone');
+      const asked = printed.split(/\r?\n/).filter((line) => /^[A-Z]+ \//.test(line));
+      assert.deepEqual(asked, ['GET /api/auth'], 'no login code was made just to see that it runs');
+      assert.equal(await stopWebServer(dir), false, 'none left to end');
+    } finally {
+      child.kill();
       await rm(dir, { recursive: true, force: true });
     }
   });
