@@ -4,7 +4,6 @@ import type { LinkKind, SessionLink } from '@agenthouse/protocol';
 import { notSaved, writeJsonFile } from '../shared/state';
 
 const FILE_VERSION = 1;
-const KINDS: readonly LinkKind[] = ['group', 'delegate'];
 
 export const linksFile = (stateDir: string) => path.join(stateDir, 'state.json');
 
@@ -59,7 +58,6 @@ export class LinkStore {
       this.save();
       return true;
     }
-    if (!KINDS.includes(kind)) throw new LinkError('지원하지 않는 연결입니다.', 'INVALID_REQUEST');
     if (parentId === childId || !known(parentId)) throw new LinkError('묶을 세션을 찾을 수 없습니다.', 'INVALID_REQUEST');
     if (this.links.has(parentId)) throw new LinkError('묶인 세션 아래에는 묶을 수 없습니다.', 'INVALID_REQUEST');
     if ([...this.links.values()].some((l) => l.parentId === childId)) throw new LinkError('아래에 묶인 세션이 있는 세션은 옮길 수 없습니다.', 'INVALID_REQUEST');

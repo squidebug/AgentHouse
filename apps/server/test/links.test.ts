@@ -24,16 +24,15 @@ describe('session links', () => {
       assert.equal(store.set('b', 'a', 'group', all), true);
       assert.equal(store.set('b', 'a', 'group', all), false, 'the same link twice changes nothing');
       assert.equal(store.set('c', 'a', 'group', all), true);
-      const refused = (child: string, parent: string | null, kind: string = 'group') =>
+      const refused = (child: string, parent: string | null) =>
         assert.throws(
-          () => store.set(child, parent, kind as 'group', all),
+          () => store.set(child, parent, 'group', all),
           (error: unknown) => error instanceof LinkError,
         );
       refused('d', 'b'); // b is under a
       refused('a', 'd'); // a has sessions under it
       refused('d', 'd');
       refused('d', 'gone');
-      refused('d', 'a', 'teammate'); // no such kind
       assert.throws(() => store.set('gone', null, 'group', all), (error: unknown) => error instanceof LinkError && error.code === 'NOT_FOUND');
       assert.deepEqual(pairs(store.list()), ['b<a', 'c<a']);
 

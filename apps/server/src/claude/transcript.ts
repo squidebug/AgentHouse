@@ -126,8 +126,6 @@ function taskReport(content: string): TaskReport | null {
   };
 }
 
-const contentText = (content: unknown): string => (typeof content === 'string' ? content : resultText(content));
-
 /** A file path relative to the session's folder, when it is inside it. */
 function shortPath(file: string, cwd: string | null): string {
   if (!cwd) return file;
@@ -175,6 +173,7 @@ export function toolSummary(name: string, input: Json, cwd: string | null): stri
   }
 }
 
+/** What a record's content says as text: the string it is, or its text blocks joined, an image as `[image]`. */
 function resultText(content: unknown): string {
   if (typeof content === 'string') return content;
   if (!Array.isArray(content)) return '';
@@ -330,7 +329,7 @@ export class ConversationBuilder {
     const message = obj(r.message);
     const content = message?.content;
     if (obj(r.origin)?.kind === 'task-notification') {
-      const report = taskReport(contentText(content));
+      const report = taskReport(resultText(content));
       if (report) return this.report(report, r, at, line);
     }
     // The CLI's own notes are skipped, but not a prompt it gave itself on a schedule: that is what the turn answers.
@@ -607,7 +606,7 @@ export function entryDetail(entry: ConversationEntry, records: unknown[]): Entry
   const text = (value: string) => clip(value, state) as string;
   const [first, second] = records.map(obj);
   const blocks = (r: Json | null | undefined) => (Array.isArray(obj(r?.message)?.content) ? (obj(r?.message)!.content as unknown[]).map(obj) : []);
-  const reportIn = (r: Json | null | undefined) => (obj(r?.origin)?.kind === 'task-notification' ? taskReport(contentText(obj(r?.message)?.content)) : null);
+  const reportIn = (r: Json | null | undefined) => (obj(r?.origin)?.kind === 'task-notification' ? taskReport(resultText(obj(r?.message)?.content)) : null);
   switch (entry.kind) {
     case 'tool':
     case 'agent': {
@@ -650,14 +649,9 @@ export function entryDetail(entry: ConversationEntry, records: unknown[]): Entry
       const block = blocks(first).find((b) => b?.type === 'text');
       return { text: text(str(block?.text) ?? ''), truncated: state.truncated };
     }
-    case 'prompt': {
-      const content = obj(first?.message)?.content;
-      return { text: text(typeof content === 'string' ? content : resultText(content)), truncated: state.truncated };
-    }
-    case 'notice': {
-      const content = obj(first?.message)?.content;
-      return { text: text(typeof content === 'string' ? content : resultText(content)), truncated: state.truncated };
-    }
+    case 'prompt':
+    case 'notice':
+      return { text: text(resultText(obj(first?.message)?.content)), truncated: state.truncated };
     default:
       return { truncated: false };
   }
