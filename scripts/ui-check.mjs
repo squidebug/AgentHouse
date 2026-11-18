@@ -428,8 +428,19 @@ try {
   await page.getByRole('menuitem', { name: '묶기' }).click();
   await row('ui-agents').getByRole('img', { name: '묶음' }).waitFor({ timeout: 5000 });
   check(true, 'grouped without dragging, from the menu');
-  await page.getByRole('button', { name: '최상위로' }).click();
+  // Dragged, it goes back to the top where the foot of the tree says so: a place that shows once the drag is under way.
+  const grabbed = await row('ui-agents').boundingBox();
+  await row('ui-agents').hover();
+  await page.mouse.down();
+  await page.mouse.move(grabbed.x + grabbed.width / 2, grabbed.y + grabbed.height + 30, { steps: 4 });
+  const toTop = tree.locator('div:text-is("최상위로")');
+  await toTop.waitFor({ timeout: 5000 });
+  // Twice: the second move is what tells the place that something is over it.
+  await toTop.hover();
+  await toTop.hover();
+  await page.mouse.up();
   await row('ui-agents').getByRole('img', { name: '묶음' }).waitFor({ state: 'detached', timeout: 5000 });
+  check((await left('ui-agents')) === (await left('ui-check')), 'dragged to the foot of the tree, a placed session goes back to the top');
 
   // The bell at the top: how many sessions wait for the user, with the list of them, and whether
   // finished work is announced too. A stand-in records what the page hands the browser's

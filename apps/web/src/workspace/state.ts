@@ -218,6 +218,25 @@ export function accepts(state: WorkspaceState, target: DropTarget, ctx: DropCont
   return drag.kind === 'session' && ctx.runningIds.includes(drag.id) && !state.targets.includes(drag.id);
 }
 
+/**
+ * What a drop asks of the server, besides what it does to the layout (`drop`,
+ * below): a placed session let go over the top of the tree goes back to the top,
+ * and a piece of a conversation let go over a delegate, its chip or its pane, is
+ * work for that session.
+ */
+export type DropEffect = { type: 'unlink'; childId: string } | { type: 'delegate'; parentId: string; childId: string; text: string };
+
+/** The effect of dropping what is dragged on a target, told before the drop ends the drag; null when it asks nothing, or is not taken. */
+export function dropEffect(state: WorkspaceState, target: DropTarget, ctx: DropContext): DropEffect | null {
+  const drag = state.drag;
+  if (!drag || !accepts(state, target, ctx)) return null;
+  if (drag.kind === 'session') return target.type === 'root' ? { type: 'unlink', childId: drag.id } : null;
+  if (drag.kind !== 'item') return null;
+  // Taken, so the target is a session delegated under the one the piece comes from: by its chip, or by its pane.
+  const childId = target.type === 'delegate' ? target.id : target.type === 'pane' ? state.panes.find((p) => p.id === target.id)?.sessionId : undefined;
+  return childId ? { type: 'delegate', parentId: drag.sessionId, childId, text: drag.text } : null;
+}
+
 function addPane(state: WorkspaceState, target: Target): WorkspaceState {
   const id = `p${state.nextPane}`;
   return { ...state, panes: [...state.panes, paneOf(id, target)], nextPane: state.nextPane + 1, active: id };
@@ -281,9 +300,9 @@ function drop(state: WorkspaceState, target: DropTarget): WorkspaceState {
   const drag = state.drag;
   if (!drag) return state;
   if (drag.kind === 'pane') return target.type === 'pane' ? swap(state, drag.id, target.id) : state;
-  // Handing work over is done by whoever handles the drop; the layout stays.
+  // Handing work over is asked of the server (dropEffect); the layout stays.
   if (drag.kind === 'item') return state;
-  // Linking asks first (nest); going back to the top is done by whoever handles the drop (root).
+  // Linking asks the user first (nest); going back to the top is asked of the server (dropEffect).
   if (target.type === 'nest') return { ...state, pending: { childId: drag.id, parentId: target.id } };
   if (target.type === 'root') return state;
   const shown = dragTarget(drag)!;

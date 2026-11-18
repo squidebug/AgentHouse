@@ -1,7 +1,7 @@
 import { Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, Snackbar, Typography } from '@mui/material';
 import { useColorScheme } from '@mui/material/styles';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import { isAsking, takesInput, type DelegationInfo, type SessionInfo, type StatusValue, type ThemeMode } from '@agenthouse/protocol';
+import { isAsking, takesInput, type DelegationInfo, type LinkKind, type SessionInfo, type StatusValue, type ThemeMode } from '@agenthouse/protocol';
 import { api, RequestError } from './api/client';
 import { useEnv, useSessions } from './api/hooks';
 import { Composer } from './components/Composer';
@@ -148,7 +148,6 @@ export function App() {
     return () => window.removeEventListener('keydown', onKey, true);
   }, []);
 
-  const dnd = makeDnd(state, dispatch, ctxRef.current);
   const activePane = state.panes.find((p) => p.id === state.active);
   const activeSession = activePane ? byId.get(activePane.sessionId) : undefined;
   const noCli = env?.messages.find((m) => m.id === 'ENV_NO_CLI');
@@ -159,6 +158,9 @@ export function App() {
   const failed = useCallback((label: string) => (error: unknown) => setProblem(error instanceof RequestError ? `${label} · ${error.message}` : label), []);
   const onDelegate = useCallback((parentId: string, childId: string, text: string) => void api.delegate(parentId, childId, text).catch(failed(t.failure.delegate)), [failed]);
   const onDeliver = useCallback((task: DelegationInfo, header: string) => void api.deliver(task.id, header).catch(failed(t.failure.deliver)), [failed]);
+  const onLink = useCallback((childId: string, parentId: string | null, kind?: LinkKind) => void api.link(childId, parentId, kind).catch(failed(t.failure.link)), [failed]);
+  // What a drop asks of the server is asked the way a button or a menu asks the same.
+  const dnd = makeDnd(state, dispatch, ctxRef.current, { onUnlink: (childId) => onLink(childId, null), onDelegate });
 
   const endSession = async (session: SessionInfo) => {
     setEnding(null);
@@ -221,7 +223,7 @@ export function App() {
           <SessionTree
             sessions={[...byId.values()]}
             links={links}
-            onLink={(childId, parentId, kind) => api.link(childId, parentId, kind).catch(failed(t.failure.link))}
+            onLink={onLink}
             state={state}
             dispatch={dispatch}
             dnd={dnd}

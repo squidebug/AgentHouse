@@ -528,11 +528,7 @@ export function SessionTree({ sessions, links, state, dispatch, dnd, onNew, onEn
           // While a placed session is dragged: drop it here to bring it back to the top.
           <Box
             onDragOver={dnd.over(root)}
-            onDrop={(event) => {
-              const moving = dnd.dragging;
-              dnd.drop(root)(event);
-              if (moving?.kind === 'session') onLink(moving.id, null);
-            }}
+            onDrop={dnd.drop(root)}
             sx={{
               mt: '6px',
               minHeight: 44,

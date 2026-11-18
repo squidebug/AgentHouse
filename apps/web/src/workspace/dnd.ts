@@ -1,17 +1,26 @@
 import type { DragEvent } from 'react';
-import { accepts, type Action, type Drag, type DropContext, type DropTarget, type WorkspaceState } from './state';
+import { accepts, dropEffect, type Action, type Drag, type DropContext, type DropTarget, type WorkspaceState } from './state';
 
 /** Native HTML drag-and-drop wired to the workspace reducer. */
 export interface Dnd {
   dragging: Drag | null;
   start: (drag: Drag) => (event: DragEvent) => void;
   over: (target: DropTarget) => (event: DragEvent) => void;
+  /** Everything a drop on this target does: to the layout, and what it asks of the server. */
   drop: (target: DropTarget) => (event: DragEvent) => void;
   isOver: (target: DropTarget) => boolean;
   canDrop: (target: DropTarget) => boolean;
 }
 
-export function makeDnd(state: WorkspaceState, dispatch: (action: Action) => void, ctx: DropContext): Dnd {
+/** What a drop asks of the server (DropEffect), as the page asks it. */
+export interface DropRequests {
+  /** A placed session goes back to the top. */
+  onUnlink: (childId: string) => void;
+  /** A piece of a conversation is work for a session delegated under the one it comes from. */
+  onDelegate: (parentId: string, childId: string, text: string) => void;
+}
+
+export function makeDnd(state: WorkspaceState, dispatch: (action: Action) => void, ctx: DropContext, requests: DropRequests): Dnd {
   const isOver = (target: DropTarget) => {
     const over = state.over;
     if (!over || over.type !== target.type) return false;
@@ -41,7 +50,11 @@ export function makeDnd(state: WorkspaceState, dispatch: (action: Action) => voi
     drop: (target) => (event) => {
       event.preventDefault();
       event.stopPropagation();
+      // Told from the state as it is: the drop ends the drag it is told from.
+      const effect = dropEffect(state, target, ctx);
       dispatch({ type: 'drop', target });
+      if (effect?.type === 'unlink') requests.onUnlink(effect.childId);
+      else if (effect?.type === 'delegate') requests.onDelegate(effect.parentId, effect.childId, effect.text);
     },
   };
 }

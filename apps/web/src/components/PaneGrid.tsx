@@ -157,7 +157,7 @@ function ModeSwitch({ mode, modes, onChange }: { mode: PaneMode; modes: PaneMode
 const chipSx = { height: 28, display: 'inline-flex', alignItems: 'center', gap: '6px', px: '10px', borderRadius: '8px', bgcolor: v.surface2, fontSize: 12, fontWeight: 500, transition: `background-color ${motion.fast}`, '&:hover': { bgcolor: v.surface3 } } as const;
 
 /** The sessions delegated under a pane's session: open one, or drop a piece of the conversation on it to hand it over. */
-function DelegateChips({ delegates, dispatch, dnd, onDropText }: { delegates: SessionInfo[]; dispatch: (action: Action) => void; dnd: Dnd; onDropText: (childId: string, text: string) => void }) {
+function DelegateChips({ delegates, dispatch, dnd }: { delegates: SessionInfo[]; dispatch: (action: Action) => void; dnd: Dnd }) {
   if (!delegates.length) return null;
   return (
     <Box role="group" aria-label={t.delegate} sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px', p: '0 12px 8px 36px' }}>
@@ -170,12 +170,7 @@ function DelegateChips({ delegates, dispatch, dnd, onDropText }: { delegates: Se
             draggable
             onDragStart={dnd.start({ kind: 'session', id: child.id })}
             onDragOver={dnd.over(target)}
-            onDrop={(event) => {
-              const moving = dnd.dragging;
-              const accepted = dnd.canDrop(target);
-              dnd.drop(target)(event);
-              if (accepted && moving?.kind === 'item') onDropText(child.id, moving.text);
-            }}
+            onDrop={dnd.drop(target)}
             onClick={() => dispatch({ type: 'openNew', sessionId: child.id })}
             aria-label={`${child.title} ${t.delegate}`}
             sx={{ ...chipSx, boxShadow: over ? `0 0 0 2px ${v.primary}` : 'none', bgcolor: over ? v.dropBg : v.surface2 }}
@@ -288,13 +283,9 @@ function PaneView({ pane, wide, session, state, dispatch, dnd, theme, windowsBui
       component="section"
       aria-label={title}
       onDragOver={dnd.over(target)}
-      onDrop={(event) => {
-        // A piece of a parent's conversation dropped on its delegate's pane is work for it.
-        const moving = dnd.dragging;
-        const accepted = dnd.canDrop(target);
-        dnd.drop(target)(event);
-        if (accepted && moving?.kind === 'item') onDelegate(moving.sessionId, session.id, moving.text);
-      }}
+      // A session or a sub-agent shows here, a pane changes places with this one, and a piece of a
+      // parent's conversation dropped on its delegate's pane is work for it.
+      onDrop={dnd.drop(target)}
       sx={{
         position: 'relative',
         display: 'flex',
@@ -358,7 +349,7 @@ function PaneView({ pane, wide, session, state, dispatch, dnd, theme, windowsBui
           <Details items={agent ? agentDetails(agent, session.agents, session) : sessionDetails(session)} />
         </Box>
       )}
-      <DelegateChips delegates={delegates} dispatch={dispatch} dnd={dnd} onDropText={handOver} />
+      <DelegateChips delegates={delegates} dispatch={dispatch} dnd={dnd} />
       <AgentChips session={session} parentId={agentId} dispatch={dispatch} dnd={dnd} />
       <Box
         onPointerDown={mode !== 'terminal' ? focus : undefined}
