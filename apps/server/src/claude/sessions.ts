@@ -91,9 +91,3 @@ export function listedStatus(entry: ListedState, before: SessionStatus | null, a
   if (before?.value === value && before.reason === reason) return before;
   return { value, reason, tool: null, error: false, at };
 }
-
-/** Claude's folder for a project's transcripts and memory: every character of its path that is no letter or digit becomes a dash. */
-export const projectDir = (configDir: string, cwd: string): string => path.join(configDir, 'projects', cwd.replace(/[^A-Za-z0-9]/g, '-'));
-
-/** Where the transcript of a conversation is, by the name of its project's folder. */
-export const transcriptFile = (configDir: string, cwd: string, sessionId: string): string => path.join(projectDir(configDir, cwd), `${sessionId}.jsonl`);

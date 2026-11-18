@@ -4,10 +4,11 @@ import { existsSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import path from 'node:path';
 import { VENDOR_NAMES, type AccountLimits, type CliStatus, type ComposeRequest, type LaunchOptions, type LinkKind, type SessionInfo, type SessionLink, type Vendor } from '@agenthouse/protocol';
+import { askSessions } from '../claude/sessions';
 import { claudeConfigDir } from '../claude/settings';
+import { AGENTS_JSON_SINCE, SUBAGENT_STATUS_LINE_SINCE, versionAtLeast } from '../claude/versions';
 import { buildLaunch, LaunchError } from './cli/launch';
 import { EnvService, INSTALL_COMMAND } from './doctor';
-import { askSessions } from '../claude/sessions';
 import { ExternalSessions } from './external';
 import type { HostClient } from './host-client';
 import { HostRequestError, type CloseResult, type ComposeOutcome } from '../shared/host-protocol';
@@ -33,24 +34,6 @@ export interface ManagerOptions {
    * CLI's `agents --json`; a check gives its own; null when nothing is to be asked.
    */
   claudeSessions?: (() => Promise<unknown>) | null;
-}
-
-// `claude agents --json` (lists sessions as idle, busy or waiting) arrived in 2.1.145.
-export const AGENTS_JSON_SINCE = [2, 1, 145];
-// The sub-agent status line (each sub-agent's model and tokens), first checked on
-// 2.1.322; older versions may have it too, but an unknown settings key is not risked.
-export const SUBAGENT_STATUS_LINE_SINCE = [2, 1, 322];
-
-/** Compares the first x.y.z in a CLI's version text; an unknown version counts as recent enough. */
-export function versionAtLeast(version: string | null, minimum: number[]): boolean {
-  const parts = version?.match(/(\d+)\.(\d+)\.(\d+)/)?.slice(1).map(Number);
-  if (!parts) return true;
-  for (let i = 0; i < minimum.length; i += 1) {
-    const a = parts[i] ?? 0;
-    const b = minimum[i] ?? 0;
-    if (a !== b) return a > b;
-  }
-  return true;
 }
 
 /** The install the check picked is still there to run: its program and the script it runs. */

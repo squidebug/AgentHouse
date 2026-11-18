@@ -8,12 +8,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { VENDOR_NAMES, type CliStatus, type EnvReport } from '@agenthouse/protocol';
 import { gitBashPath } from '../claude/settings';
+import { AGENTS_JSON_SINCE, SUBAGENT_STATUS_LINE_SINCE, versionAtLeast } from '../claude/versions';
 import { hostBuildId } from '../shared/build';
 import { findOnPath } from './cli/resolve';
 import { EnvService, INSTALL_COMMAND, LOGIN_COMMAND } from './doctor';
 import { hostSummary, olderHosts } from './host-client';
 import { webServerAnswering } from './instance';
-import { AGENTS_JSON_SINCE, SUBAGENT_STATUS_LINE_SINCE, versionAtLeast } from './manager';
 import { stateDirProblem } from './state-dir';
 
 export type CheckLevel = 'ok' | 'info' | 'warn' | 'error';

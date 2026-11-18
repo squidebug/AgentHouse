@@ -2,8 +2,8 @@ import { readdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import type { MemoryFile, SessionInfo } from '@agenthouse/protocol';
 import { noteHeader, noteInside, noteStart } from './notes';
-import { projectDir } from './sessions';
 import { isClaudeTranscript } from './status';
+import { projectDir } from './transcript';
 
 // What Claude Code reads into a session by itself, besides the prompt:
 //  - Instructions the user wrote: CLAUDE.md in the config folder (every

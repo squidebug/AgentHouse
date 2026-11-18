@@ -1,3 +1,5 @@
+import { readdir, stat } from 'node:fs/promises';
+import path from 'node:path';
 import type { ConversationEntry, ConversationTurn, EntryDetail, LatestWords, ToolState } from '@agenthouse/protocol';
 import { AGENT_TOOLS } from './agents';
 import { obj, tag, type Json } from './json';
@@ -21,6 +23,35 @@ import { isInterruptText } from './status';
 //    local_command holds a slash command or its output.
 // Everything else (attachments, file history, API request copies, titles) is
 // skipped. Unknown records change nothing.
+
+/** Claude's folder for a project's transcripts and memory: every character of its path that is no letter or digit becomes a dash. */
+export const projectDir = (configDir: string, cwd: string): string => path.join(configDir, 'projects', cwd.replace(/[^A-Za-z0-9]/g, '-'));
+
+/** Where the transcript of a conversation is, by the name of its project's folder. */
+export const transcriptFile = (configDir: string, cwd: string, sessionId: string): string => path.join(projectDir(configDir, cwd), `${sessionId}.jsonl`);
+
+// A config folder has a project folder for every folder Claude was ever started in.
+const SEARCH_FOLDERS = 1000;
+
+/** A conversation's transcript in whichever project folder has it, for one that is not where its folder's name says; null when none does. */
+export async function findTranscript(configDir: string, sessionId: string): Promise<string | null> {
+  const projects = path.join(configDir, 'projects');
+  let folders: string[];
+  try {
+    folders = await readdir(projects);
+  } catch {
+    return null;
+  }
+  for (const folder of folders.slice(0, SEARCH_FOLDERS)) {
+    const file = path.join(projects, folder, `${sessionId}.jsonl`);
+    const there = await stat(file).then(
+      (info) => info.isFile(),
+      () => false,
+    );
+    if (there) return file;
+  }
+  return null;
+}
 
 const PROMPT_CHARS = 20_000;
 const TEXT_CHARS = 100_000;
@@ -536,6 +567,19 @@ export function latestRun(records: unknown[]): LatestRun {
     return { model: model.slice(0, NAME_CHARS), effort: short(record.effort), version: short(record.version) };
   }
   return { model: null, effort: null, version: null };
+}
+
+/** The text blocks of an assistant record that holds an answer (not an API error), joined; null for any other record. */
+export function answerText(record: unknown): string | null {
+  const r = obj(record);
+  if (r?.type !== 'assistant' || r.isApiErrorMessage === true) return null;
+  const content = obj(r.message)?.content;
+  if (!Array.isArray(content)) return null;
+  const text = content
+    .map((block) => (obj(block)?.type === 'text' ? String(obj(block)!.text ?? '') : ''))
+    .join('\n')
+    .trim();
+  return text || null;
 }
 
 /** A value to show, cut where it is too long, too many or too deep; `state.truncated` says that something was left out. */

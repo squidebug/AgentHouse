@@ -1,10 +1,10 @@
 import { EventEmitter } from 'node:events';
-import { readdir, stat } from 'node:fs/promises';
+import { stat } from 'node:fs/promises';
 import path from 'node:path';
 import type { SessionInfo, TranscriptSegment } from '@agenthouse/protocol';
-import { listedSessions, listedStatus, transcriptFile, type ListedSession } from '../claude/sessions';
+import { listedSessions, listedStatus, type ListedSession } from '../claude/sessions';
 import { initialTelemetry } from '../claude/status';
-import { latestRun, type LatestRun } from '../claude/transcript';
+import { findTranscript, latestRun, transcriptFile, type LatestRun } from '../claude/transcript';
 import { readTail, tailLines } from '../shared/tail';
 
 /**
@@ -20,7 +20,6 @@ const TAIL_BYTES = 256 * 1024;
 // A transcript that is not where its folder's name says is looked for in the other projects' folders:
 // at once, then at every so many answers (a session nobody has asked anything has none anywhere).
 const SEARCH_EVERY = 6;
-const SEARCH_FOLDERS = 1000;
 // A session of AgentHouse's own that just ended may still be in Claude's list for a moment.
 const JUST_ENDED_MS = 60_000;
 
@@ -56,22 +55,6 @@ async function tailRecords(file: string): Promise<unknown[]> {
     }
   }
   return records;
-}
-
-/** A conversation's transcript in whichever project folder has it; null when none does. */
-async function findTranscript(configDir: string, sessionId: string): Promise<string | null> {
-  const projects = path.join(configDir, 'projects');
-  let folders: string[];
-  try {
-    folders = await readdir(projects);
-  } catch {
-    return null;
-  }
-  for (const folder of folders.slice(0, SEARCH_FOLDERS)) {
-    const file = path.join(projects, folder, `${sessionId}.jsonl`);
-    if (await fileState(file)) return file;
-  }
-  return null;
 }
 
 export interface ExternalOptions {

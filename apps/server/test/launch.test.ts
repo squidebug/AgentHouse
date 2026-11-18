@@ -6,7 +6,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { buildLaunch, HOOK_EVENTS, LaunchError, sessionTitle, stateFolderRules } from '../src/web/cli/launch';
 import { STATUS_EVENTS } from '../src/claude/status';
-import { versionAtLeast } from '../src/web/manager';
+import { versionAtLeast } from '../src/claude/versions';
 
 const install = { file: 'claude.exe', args: [] };
 const cwd = process.cwd();

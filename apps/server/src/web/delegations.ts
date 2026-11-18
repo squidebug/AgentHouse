@@ -4,9 +4,9 @@ import { readFileSync } from 'node:fs';
 import { open, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { isAsking, isHeld, type DelegationInfo, type SessionInfo } from '@agenthouse/protocol';
-import { obj } from '../claude/json';
 import { claudeConfigDir } from '../claude/settings';
 import { isClaudeTranscript } from '../claude/status';
+import { answerText } from '../claude/transcript';
 import { notSaved, writeJsonFile } from '../shared/state';
 import { MAX_LINE_BYTES, readTail, tailLines } from '../shared/tail';
 import type { SessionManager } from './manager';
@@ -65,20 +65,6 @@ interface Task {
   enterPending?: boolean;
   /** The same for the answer in the parent's input. */
   pasted?: boolean;
-}
-
-
-/** The text blocks of an assistant record that holds an answer (not an API error), joined. */
-function answerText(record: unknown): string | null {
-  const r = obj(record);
-  if (r?.type !== 'assistant' || r.isApiErrorMessage === true) return null;
-  const content = obj(r.message)?.content;
-  if (!Array.isArray(content)) return null;
-  const text = content
-    .map((block) => (obj(block)?.type === 'text' ? String(obj(block)!.text ?? '') : ''))
-    .join('\n')
-    .trim();
-  return text || null;
 }
 
 /** The last answer written to a transcript from a byte offset on (where a line begins). */
