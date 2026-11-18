@@ -34,7 +34,6 @@ export function saveScreen(screen: Screen, storage: Pick<Storage, 'setItem' | 'r
  * (a loop); idle; ended.
  */
 export type Standing = 'asking' | 'working' | 'scheduled' | 'idle' | 'ended';
-export const STANDINGS: readonly Standing[] = ['asking', 'working', 'scheduled', 'idle', 'ended'];
 
 /** Its own conversation is idle while its sub-agents work: Claude runs them in the background. */
 export const agentsAtWork = (session: Pick<SessionInfo, 'state' | 'agents'>): boolean => session.state === 'running' && session.agents.some(isAgentBusy);
