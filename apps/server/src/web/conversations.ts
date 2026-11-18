@@ -1,4 +1,4 @@
-import { open } from 'node:fs/promises';
+import { open, stat } from 'node:fs/promises';
 import type { ConversationEntry, ConversationServerMessage, EntryDetail, LatestWords, SessionInfo, TranscriptSegment } from '@agenthouse/protocol';
 import { claudeConfigDir } from '../claude/settings';
 import { isClaudeTranscript } from '../claude/status';
@@ -67,6 +67,8 @@ class SegmentReader {
 // For a glance at a session: the end of its transcript, this much at first and more while no prompt is in it.
 const TAIL_BYTES = 256 * 1024;
 const TAIL_MAX_BYTES = 4 * 1024 * 1024;
+// What was read for a glance is kept until its transcript changes, for this many transcripts (a few words each).
+const GLANCES_KEPT = 200;
 
 /**
  * The entries of the end of a transcript: as much of it as holds its latest
@@ -263,6 +265,8 @@ ${agentId ?? ''}`;
  */
 export class Conversations {
   private readonly open = new Map<string, { sessionId: string; agentId: string | null; conversation: Conversation }>();
+  /** What `latest` read, by transcript, with the file's size and time of change then; the ones asked for longest ago go first. */
+  private readonly glances = new Map<string, { state: string; words: Promise<LatestWords> }>();
   private readonly onChange = () => {
     for (const [key, { sessionId, agentId, conversation }] of this.open) {
       const session = this.manager.get(sessionId);
@@ -311,8 +315,31 @@ export class Conversations {
    */
   async latest(sessionId: string): Promise<LatestWords> {
     const session = this.manager.get(sessionId);
-    const last = session ? transcriptsOf(session, null).at(-1) : undefined;
-    return latestWords(last ? await tailEntries(last.path) : []);
+    const file = session ? transcriptsOf(session, null).at(-1)?.path : undefined;
+    const state = file
+      ? await stat(file).then(
+          (info) => `${info.size}:${info.mtimeMs}`,
+          () => null,
+        )
+      : null;
+    if (!file || state === null) return latestWords([]);
+    // A file as it was when its end was last read says nothing new: every card of a dashboard asks each time it is come to.
+    let glance = this.glances.get(file);
+    this.glances.delete(file);
+    if (glance?.state !== state) {
+      const read = { state, words: tailEntries(file).then(latestWords) };
+      // A read that failed is not what the file says: the next one reads again.
+      read.words.catch(() => {
+        if (this.glances.get(file) === read) this.glances.delete(file);
+      });
+      glance = read;
+    }
+    this.glances.set(file, glance);
+    for (const oldest of this.glances.keys()) {
+      if (this.glances.size <= GLANCES_KEPT) break;
+      this.glances.delete(oldest);
+    }
+    return glance.words;
   }
 
   /** The full content of one entry of a conversation being viewed. */
@@ -324,5 +351,6 @@ export class Conversations {
     this.manager.off('change', this.onChange);
     for (const { conversation } of this.open.values()) conversation.dispose();
     this.open.clear();
+    this.glances.clear();
   }
 }

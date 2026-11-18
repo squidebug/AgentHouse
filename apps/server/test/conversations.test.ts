@@ -207,6 +207,12 @@ describe('conversations', () => {
       appendFileSync(second, `${line.slice(30)}\n`);
       assert.deepEqual(await words(cleared.info.id), ['After', 'New']);
 
+      // A transcript that has not changed is not read again: what was found is what is given.
+      const found = await conversations.latest(many.info.id);
+      assert.equal(await conversations.latest(many.info.id), found, 'the very same words');
+      appendFileSync(many.file, jsonl([prompt('One more'), assistant('msg_more', text('Done.'))]));
+      assert.deepEqual(await words(many.info.id), ['One more', 'Done.'], 'read again once it has grown');
+
       // Nothing to read: no session, no transcript, a file that is gone, a path outside Claude's projects folder.
       const none = { prompt: null, promptAt: null, answer: null };
       assert.deepEqual(await conversations.latest('nobody'), none);
