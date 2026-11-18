@@ -12,6 +12,7 @@ import { LaunchError } from '../cli/launch';
 import { CliChoiceError, EnvService } from '../doctor';
 import { HostUnavailableError, type HostClient } from '../host-client';
 import { HostRequestError } from '../../shared/host-protocol';
+import { webLogger } from '../../shared/state';
 import { Conversations } from '../conversations';
 import { DelegationError, Delegations, delegationsFile } from '../delegations';
 import { LinkError } from '../links';
@@ -75,6 +76,8 @@ const TEXT_BODY_BYTES = 1024 * 1024;
 const NOTE_BODY_BYTES = MAX_FILE_BYTES * 6 + 1024;
 // A page's first list waits this long at most for Claude's own list of sessions (one call is about half a second).
 const FIRST_LOOK_MS = 2500;
+/** The code of a 500 that is a fault, not a refusal: its cause is in logs/web.log, never in the reply. */
+const SERVER_ERROR = 'SERVER_ERROR';
 
 /** A part of the address as it was before it was encoded for one; empty when it is not valid. */
 function segment(value: string): string {
@@ -457,11 +460,16 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
         send(res, 503, { error: error.message, code: 'HOST_UNAVAILABLE' } satisfies ApiError);
         return;
       }
-      if (error instanceof HostRequestError) {
-        send(res, error.code === 'NOT_FOUND' ? 404 : 500, { error: error.message, ...(error.code ? { code: error.code } : {}) } satisfies ApiError);
+      // What the host refused, in its own words.
+      if (error instanceof HostRequestError && error.code) {
+        send(res, error.code === 'NOT_FOUND' ? 404 : 500, { error: error.message, code: error.code } satisfies ApiError);
         return;
       }
-      send(res, 500, { error: (error as Error).message });
+      // A fault of this server's own, or of the host's. What it says may name files of this machine, and a
+      // page file that cannot be read fails for someone who has not logged in: the reply says only that it
+      // failed, and the log has the rest (without the query, where a login code may be).
+      webLogger(host.stateDir)(`${req.method} ${(req.url ?? '').split('?')[0]}: ${(error as Error)?.stack ?? error}`);
+      send(res, 500, { error: '서버 오류가 발생했습니다.', code: SERVER_ERROR } satisfies ApiError);
     }
   });
 

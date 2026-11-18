@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
-import { existsSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
+import { appSettingsFile } from '../src/web/app-settings';
 import { createAgentHouseServer } from '../src/web/http/server';
 import { HostClient } from '../src/web/host-client';
 import { isAlive } from '../src/shared/kill-tree';
+import { webLogFile } from '../src/shared/state';
 import { forgetWebServer, recordWebServer, runningWebServer, webServerFile } from '../src/web/instance';
 import { login, openSocket, plain, request, screenText, sleep, startServer, tempStateDir, waitFor, type TestServer } from './helpers';
 
@@ -199,6 +201,20 @@ describe('staying up', () => {
     events.ws?.send('x'.repeat(3 * 1024 * 1024));
     assert.equal(await closed, 1009, 'too big');
     assert.equal((await request(app.port, 'GET', '/api/sessions', { headers: { authorization } })).status, 200, 'still serving');
+  });
+
+  test("a fault of the server's own is answered without its cause, which goes to the log", async () => {
+    const own = await startServer();
+    try {
+      // The settings cannot be saved: a folder is where their file goes. The error names both by their full paths.
+      mkdirSync(appSettingsFile(own.stateDir));
+      const res = await request(own.port, 'PUT', '/api/external', { headers: { authorization: `Bearer ${own.key}`, origin: `http://127.0.0.1:${own.port}` }, body: { on: false } });
+      assert.equal(res.status, 500);
+      assert.deepEqual(res.json, { error: '서버 오류가 발생했습니다.', code: 'SERVER_ERROR' });
+      assert.match(readFileSync(webLogFile(own.stateDir), 'utf8'), /PUT \/api\/external: .*settings\.json/);
+    } finally {
+      await own.close();
+    }
   });
 
   test('a taken port falls back to the next; with none left, nothing of the server stays behind', async () => {
