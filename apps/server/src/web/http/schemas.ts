@@ -1,5 +1,8 @@
+// What the web server takes from a request: the bodies of the API, the address
+// of a sub-agent, and the messages of a terminal socket.
 import { z } from 'zod';
 import type { ChooseCliRequest, ComposeRequest, ExternalRequest, LaunchOptions, LoginRequest, TerminalClientMessage } from '@agenthouse/protocol';
+import { AGENT_ID } from '../../claude/agents';
 
 /**
  * The fields of a request's schema, held to the type the browser sends it as
@@ -58,6 +61,16 @@ export const NoteBody = z.object({
   text: z.string().max(600_000),
   version: z.string().min(1).max(64),
 });
+
+/**
+ * The sub-agent an address asks about (`?agent=`): its id as Claude writes it,
+ * null without one, undefined for anything else, which names no transcript.
+ */
+export function agentParam(url: URL): string | null | undefined {
+  const value = url.searchParams.get('agent');
+  if (value === null) return null;
+  return AGENT_ID.test(value) ? value : undefined;
+}
 
 // Each message of the protocol as the host may get it: what parses here is passed on, anything else is dropped.
 export const TerminalClient = z.discriminatedUnion('type', [

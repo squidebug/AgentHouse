@@ -1,24 +1,17 @@
 import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { AUTH_REQUIRED, LOGIN_EXPIRED, SOCKET_PROTOCOL, type ApiError, type ComposeResult, type EventServerMessage, type LoginResult, type TextFile } from '@agenthouse/protocol';
-import { AGENT_ID } from '../../claude/agents';
-import { claudeConfigDir } from '../../claude/settings';
-import { memoryFiles } from '../../claude/memory';
-import { FileError, MAX_FILE_BYTES, readText, writeText } from '../../claude/notes';
-import { skillFile, skillsOf } from '../../claude/skills';
-import { readAppSettings, writeAppSettings } from '../app-settings';
-import { LaunchError } from '../cli/launch';
-import { CliChoiceError, EnvService } from '../doctor';
-import { HostUnavailableError, type HostClient } from '../host-client';
-import { HostRequestError } from '../../shared/host-protocol';
+import { AUTH_REQUIRED, LOGIN_EXPIRED, SOCKET_PROTOCOL, type ApiError, type EventServerMessage, type LoginResult } from '@agenthouse/protocol';
 import { webLogger } from '../../shared/state';
+import { readAppSettings, writeAppSettings } from '../app-settings';
 import { Conversations } from '../conversations';
-import { DelegationError, Delegations, delegationsFile } from '../delegations';
-import { LinkError } from '../links';
+import { Delegations, delegationsFile } from '../delegations';
+import { EnvService } from '../doctor';
+import type { HostClient } from '../host-client';
 import { SessionManager } from '../manager';
 import { AccessControl } from './access';
-import { ChooseCliBody, ComposeBody, DelegateBody, DeliverBody, ExternalBody, LaunchBody, LinkBody, LoginBody, NoteBody, ResumeBody, TerminalClient } from './schemas';
+import { answer, apiRoutes, HttpError, readBody, refusal } from './routes';
+import { agentParam, LoginBody, TerminalClient } from './schemas';
 import { serveStatic } from './static';
 
 export interface ServerOptions {
@@ -54,39 +47,14 @@ export interface AgentHouseServer {
   close(): Promise<void>;
 }
 
-class HttpError extends Error {
-  constructor(
-    readonly status: number,
-    message: string,
-    readonly code?: string,
-    readonly command?: string,
-  ) {
-    super(message);
-  }
-}
-
 // A browser that falls behind stops being read for; the host's backlog for it
 // then grows and the host resyncs it from a snapshot. The PTY never waits.
 const RELAY_HIGH_WATER = 1024 * 1024;
 const RELAY_LOW_WATER = 256 * 1024;
-// A message or delegated work is 200,000 characters at most (schemas.ts): up to four bytes each in
-// UTF-8, more where JSON escapes them. The default limit refused Korean text from about 85,000 on.
-const TEXT_BODY_BYTES = 1024 * 1024;
-// A note is MAX_FILE_BYTES at most on disk; as JSON every byte of it can take six.
-const NOTE_BODY_BYTES = MAX_FILE_BYTES * 6 + 1024;
 // A page's first list waits this long at most for Claude's own list of sessions (one call is about half a second).
 const FIRST_LOOK_MS = 2500;
 /** The code of a 500 that is a fault, not a refusal: its cause is in logs/web.log, never in the reply. */
 const SERVER_ERROR = 'SERVER_ERROR';
-
-/** A part of the address as it was before it was encoded for one; empty when it is not valid. */
-function segment(value: string): string {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return '';
-  }
-}
 
 function send(res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}): void {
   // A reply already under way (it failed halfway) can only be cut off; writing headers again would throw.
@@ -102,35 +70,6 @@ function send(res: ServerResponse, status: number, body: unknown, headers: Recor
     ...headers,
   });
   res.end(isText ? body : JSON.stringify(body));
-}
-
-async function readJson(req: IncomingMessage, limit = 256 * 1024): Promise<unknown> {
-  let size = 0;
-  const chunks: Buffer[] = [];
-  for await (const chunk of req) {
-    size += (chunk as Buffer).length;
-    if (size > limit) throw new HttpError(413, '요청이 너무 큽니다.');
-    chunks.push(chunk as Buffer);
-  }
-  if (!chunks.length) return {};
-  try {
-    return JSON.parse(Buffer.concat(chunks).toString('utf8'));
-  } catch {
-    throw new HttpError(400, 'JSON 형식이 올바르지 않습니다.');
-  }
-}
-
-// A sub-agent's id as Claude writes it (AGENT_ID); anything else names no transcript.
-const agentParam = (url: URL): string | null | undefined => {
-  const value = url.searchParams.get('agent');
-  if (value === null) return null;
-  return AGENT_ID.test(value) ? value : undefined;
-};
-
-function parse<T>(schema: { safeParse(v: unknown): { success: true; data: T } | { success: false } }, value: unknown): T {
-  const result = schema.safeParse(value);
-  if (!result.success) throw new HttpError(400, '요청 값이 올바르지 않습니다.', 'INVALID_REQUEST');
-  return result.data;
 }
 
 /** Listens on the first of these ports that is free; any other error, or none free, fails. */
@@ -247,161 +186,15 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
   manager.on('limits', broadcastLimits);
   manager.on('links', broadcastLinks);
 
-  async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
-    if (req.method !== 'GET' && !access.originAllowed(req)) throw new HttpError(403, '허용되지 않은 출처입니다.');
-    const parts = url.pathname.split('/').filter(Boolean); // ['api', 'sessions', id, action]
-
-    // The page's token is good: a page that lost its sockets tells a server restart from a lost login.
-    if (url.pathname === '/api/auth' && req.method === 'GET') {
-      send(res, 200, {});
-      return;
-    }
-    if (url.pathname === '/api/env' && req.method === 'GET') {
-      send(res, 200, await env.report(url.searchParams.has('refresh')));
-      return;
-    }
-    // Which executable runs a CLI: one picked or typed in the environment check, or null for the shell's.
-    if (parts[0] === 'api' && parts[1] === 'cli' && parts.length === 3 && req.method === 'PUT') {
-      const vendor = parts[2];
-      if (vendor !== 'claude' && vendor !== 'codex') throw new HttpError(404, '찾을 수 없습니다.');
-      const { path: chosen } = parse(ChooseCliBody, await readJson(req, 8192));
-      try {
-        send(res, 200, await env.choose(vendor, chosen));
-      } catch (error) {
-        if (error instanceof CliChoiceError) throw new HttpError(400, error.message, 'INVALID_CLI');
-        throw error;
-      }
-      return;
-    }
-    // Watching the sessions started outside AgentHouse, on or off: kept in settings.json, the same for every page.
-    if (url.pathname === '/api/external' && req.method === 'PUT') {
-      const { on } = parse(ExternalBody, await readJson(req, 1024));
-      writeAppSettings(host.stateDir, { ...readAppSettings(host.stateDir), external: on });
-      external = on;
-      watchExternal();
-      if (!on) manager.forgetExternal();
-      broadcast({ type: 'external', on });
-      send(res, 200, { on });
-      return;
-    }
-    if (url.pathname === '/api/sessions' && req.method === 'GET') {
-      send(res, 200, manager.list());
-      return;
-    }
-    // Hands a delegate's answer back to the session that delegated the work.
-    if (parts[0] === 'api' && parts[1] === 'delegations' && parts[2] && parts[3] === 'deliver' && parts.length === 4 && req.method === 'POST') {
-      const body = parse(DeliverBody, await readJson(req));
-      send(res, 200, await delegated(() => delegations.deliver(parts[2]!, body.header)));
-      return;
-    }
-    if (url.pathname === '/api/sessions' && req.method === 'POST') {
-      const body = parse(LaunchBody, await readJson(req));
-      send(res, 201, await manager.create(body));
-      return;
-    }
-    if (parts[0] === 'api' && parts[1] === 'sessions' && parts[2]) {
-      const session = manager.get(parts[2]);
-      if (!session) throw new HttpError(404, '세션을 찾을 수 없습니다.');
-      if (parts.length === 3 && req.method === 'DELETE') {
-        send(res, 200, await manager.remove(session.id));
-        return;
-      }
-      // Ends the CLI; the session stays listed, ended.
-      if (parts[3] === 'end' && parts.length === 4 && req.method === 'POST') {
-        send(res, 200, await manager.end(session.id));
-        return;
-      }
-      // Starts an ended session again where its conversation stopped.
-      if (parts[3] === 'resume' && parts.length === 4 && req.method === 'POST') {
-        const body = parse(ResumeBody, await readJson(req));
-        send(res, 201, await manager.resume(session.id, body.theme));
-        return;
-      }
-      if (parts[3] === 'conversation' && parts[4] && parts.length === 5 && req.method === 'GET') {
-        const agent = agentParam(url);
-        const detail = agent === undefined ? null : await conversations.detail(session.id, parts[4], agent);
-        if (!detail) throw new HttpError(404, '찾을 수 없습니다.');
-        send(res, 200, detail);
-        return;
-      }
-      // What it was last asked and what it last said, for a glance: read from the end of its transcript when asked for.
-      if (parts[3] === 'latest' && parts.length === 4 && req.method === 'GET') {
-        send(res, 200, await conversations.latest(session.id));
-        return;
-      }
-      // The skills its conversation was given, read from its transcript when asked for.
-      if (parts[3] === 'skills' && parts.length === 4 && req.method === 'GET') {
-        send(res, 200, { skills: await skillsOf(session, claudeConfigDir()) });
-        return;
-      }
-      // One of the project's or the user's own skills, to read and to save.
-      if (parts[3] === 'skills' && parts[4] && parts.length === 5 && (req.method === 'GET' || req.method === 'PUT')) {
-        const file = await skillFile(session.cwd, claudeConfigDir(), segment(parts[4]));
-        if (!file) throw new HttpError(404, '편집할 수 있는 스킬이 아닙니다.');
-        send(res, 200, await note(req, file.path));
-        return;
-      }
-      // What Claude reads into the session by itself: the user's instructions and the project's memory notes.
-      if (parts[3] === 'memory' && parts.length === 4 && req.method === 'GET') {
-        send(res, 200, { files: await memoryFiles(session, claudeConfigDir()) });
-        return;
-      }
-      if (parts[3] === 'memory' && parts[4] && parts.length === 5 && (req.method === 'GET' || req.method === 'PUT')) {
-        // Looked up in the list as it is now: a request names a file of it, never a path.
-        const id = segment(parts[4]);
-        const file = (await memoryFiles(session, claudeConfigDir())).find((entry) => entry.id === id);
-        if (!file) throw new HttpError(404, '찾을 수 없습니다.');
-        send(res, 200, await note(req, file.path));
-        return;
-      }
-      // Sends work from this session to the session delegated under it.
-      if (parts[3] === 'delegations' && parts.length === 4 && req.method === 'POST') {
-        const body = parse(DelegateBody, await readJson(req, TEXT_BODY_BYTES));
-        send(res, 201, await delegated(() => delegations.delegate(session.id, body.childId, body.text)));
-        return;
-      }
-      // Places the session under another one (grouping), or back at the top.
-      if (parts[3] === 'link' && parts.length === 4 && req.method === 'PUT') {
-        const body = parse(LinkBody, await readJson(req));
-        try {
-          send(res, 200, { links: manager.link(session.id, body.parentId, body.kind ?? 'group') });
-        } catch (error) {
-          if (error instanceof LinkError) throw new HttpError(error.code === 'NOT_FOUND' ? 404 : 400, error.message, error.code);
-          throw error;
-        }
-        return;
-      }
-      if (parts[3] === 'compose' && parts.length === 4 && req.method === 'POST') {
-        const body = parse(ComposeBody, await readJson(req, TEXT_BODY_BYTES));
-        const result: ComposeResult = { sessionId: session.id, ...(await manager.compose(session.id, body)) };
-        send(res, 200, result);
-        return;
-      }
-    }
-    throw new HttpError(404, '찾을 수 없습니다.');
-  }
-
-  /** A note of the user's: read (GET), or saved over the version the page loaded (PUT). */
-  async function note(req: IncomingMessage, file: string): Promise<TextFile> {
-    try {
-      if (req.method === 'GET') return await readText(file);
-      const body = parse(NoteBody, await readJson(req, NOTE_BODY_BYTES));
-      return await writeText(file, body.text, body.version);
-    } catch (error) {
-      if (error instanceof FileError) throw new HttpError({ NOT_FOUND: 404, CHANGED: 409, TOO_LARGE: 413, NOT_TEXT: 415 }[error.code], error.message, error.code);
-      throw error;
-    }
-  }
-
-  /** A delegation call, its refusals as HTTP errors. */
-  async function delegated<T>(run: () => Promise<T>): Promise<T> {
-    try {
-      return await run();
-    } catch (error) {
-      if (error instanceof DelegationError) throw new HttpError(error.code === 'NOT_FOUND' ? 404 : error.code === 'BUSY' ? 409 : 400, error.message, error.code);
-      throw error;
-    }
-  }
+  // The user's choice to watch the sessions started outside AgentHouse, or not: kept in settings.json.
+  const setExternal = (on: boolean) => {
+    writeAppSettings(host.stateDir, { ...readAppSettings(host.stateDir), external: on });
+    external = on;
+    watchExternal();
+    if (!on) manager.forgetExternal();
+    broadcast({ type: 'external', on });
+  };
+  const routes = apiRoutes({ env, manager, conversations, delegations, setExternal });
 
   const server = http.createServer(async (req, res) => {
     try {
@@ -422,7 +215,7 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
       }
       if (url.pathname === '/api/login' && req.method === 'POST') {
         if (!access.originAllowed(req)) throw new HttpError(403, '허용되지 않은 출처입니다.');
-        const { code } = parse(LoginBody, await readJson(req, 4096));
+        const { code } = await readBody(req, LoginBody, 4096);
         const token = access.redeem(code);
         if (!token) {
           send(res, 401, { error: '로그인 링크가 만료되었습니다.', code: LOGIN_EXPIRED, command: startCommand } satisfies ApiError);
@@ -436,25 +229,19 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
           send(res, 401, { error: '로그인이 필요합니다.', code: AUTH_REQUIRED, command: startCommand } satisfies ApiError);
           return;
         }
-        await handleApi(req, res, url);
+        // Whatever changes anything comes from the page itself, not from another site open in the same browser.
+        if (req.method !== 'GET' && !access.originAllowed(req)) throw new HttpError(403, '허용되지 않은 출처입니다.');
+        const { status, body } = await answer(routes, req, url);
+        send(res, status, body);
         return;
       }
       // The page holds no secret; what it shows comes from the API.
       if (req.method === 'GET' && options.webDist && (await serveStatic(options.webDist, url.pathname, res))) return;
       send(res, 404, '찾을 수 없습니다.');
     } catch (error) {
-      if (error instanceof HttpError || error instanceof LaunchError) {
-        const body: ApiError = { error: error.message, ...(error.code ? { code: error.code } : {}), ...(error.command ? { command: error.command } : {}) };
-        send(res, error.status, body);
-        return;
-      }
-      if (error instanceof HostUnavailableError) {
-        send(res, 503, { error: error.message, code: 'HOST_UNAVAILABLE' } satisfies ApiError);
-        return;
-      }
-      // What the host refused, in its own words.
-      if (error instanceof HostRequestError && error.code) {
-        send(res, error.code === 'NOT_FOUND' ? 404 : 500, { error: error.message, code: error.code } satisfies ApiError);
+      const refused = refusal(error);
+      if (refused) {
+        send(res, refused.status, refused.body);
         return;
       }
       // A fault of this server's own, or of the host's. What it says may name files of this machine, and a
