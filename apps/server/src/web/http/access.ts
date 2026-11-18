@@ -8,10 +8,6 @@ export const CODE_TTL_MS = 5 * 60_000;
 // Codes nobody used are dropped oldest first beyond this many.
 const MAX_CODES = 20;
 
-// The cookie the login used before one-time codes. Cookies do not tell ports apart, so it went to every
-// other server on 127.0.0.1 too; a page that still sends it is told to drop it.
-const OLD_COOKIE = 'ah_token';
-
 const mac = (secret: string, text: string) => createHmac('sha256', secret).update(text).digest('base64url');
 
 function bearer(req: IncomingMessage): string | null {
@@ -109,10 +105,4 @@ export class AccessControl {
     const presented = bearer(req);
     return req.headers.origin === undefined && presented !== null && sameSecret(presented, this.key);
   }
-
-  sendsOldCookie(req: IncomingMessage): boolean {
-    return (req.headers.cookie ?? '').split(';').some((part) => part.trim().startsWith(`${OLD_COOKIE}=`));
-  }
-
-  static readonly clearOldCookie = `${OLD_COOKIE}=; Max-Age=0; Path=/; HttpOnly; SameSite=Strict`;
 }

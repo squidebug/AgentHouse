@@ -439,16 +439,8 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
         await handleApi(req, res, url);
         return;
       }
-      // The address of the old login: the page now logs itself in.
-      if (url.pathname === '/auth') {
-        send(res, 302, '', { location: '/' });
-        return;
-      }
       // The page holds no secret; what it shows comes from the API.
-      if (req.method === 'GET' && options.webDist) {
-        if (access.sendsOldCookie(req)) res.setHeader('set-cookie', AccessControl.clearOldCookie);
-        if (await serveStatic(options.webDist, url.pathname, res)) return;
-      }
+      if (req.method === 'GET' && options.webDist && (await serveStatic(options.webDist, url.pathname, res))) return;
       send(res, 404, '찾을 수 없습니다.');
     } catch (error) {
       if (error instanceof HttpError || error instanceof LaunchError) {

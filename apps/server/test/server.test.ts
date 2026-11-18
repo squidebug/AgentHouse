@@ -82,12 +82,6 @@ describe('access control', () => {
     assert.equal(res.status, 403);
   });
 
-  test('the address of the old login leads to the page', async () => {
-    const res = await request(app.port, 'GET', `/auth?token=${app.key}`);
-    assert.equal(res.status, 302);
-    assert.equal(res.headers.location, '/');
-  });
-
   test('state changes from another origin are refused', async () => {
     const res = await request(app.port, 'POST', '/api/sessions', { headers: { authorization, origin: 'http://evil.example' }, body: { vendor: 'fake' } });
     assert.equal(res.status, 403);
@@ -103,7 +97,7 @@ describe('access control', () => {
     assert.equal(res.status, 400);
   });
 
-  test('the page is served without a token, and a browser still sending the old cookie is told to drop it', async () => {
+  test('the page is served without a token; the API behind it is not', async () => {
     const webDist = await tempStateDir();
     writeFileSync(path.join(webDist, 'index.html'), '<!doctype html><title>AgentHouse</title>');
     const client = await HostClient.connect({ stateDir: app.stateDir, spawn: false });
@@ -112,10 +106,8 @@ describe('access control', () => {
       const page = await request(site.port, 'GET', '/');
       assert.equal(page.status, 200);
       assert.match(page.text, /AgentHouse/);
-      assert.equal(page.headers['set-cookie'], undefined);
-      const old = await request(site.port, 'GET', '/', { headers: { cookie: 'ah_token=something' } });
-      assert.match(String(old.headers['set-cookie']?.[0]), /^ah_token=; Max-Age=0/);
-      assert.equal((await request(site.port, 'GET', '/api/sessions')).status, 401, 'the API behind it is not public');
+      assert.equal(page.headers['set-cookie'], undefined, 'no cookie is set: one would reach every port of 127.0.0.1');
+      assert.equal((await request(site.port, 'GET', '/api/sessions')).status, 401);
     } finally {
       await site.close();
       client.close();
