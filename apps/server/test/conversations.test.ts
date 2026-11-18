@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, describe, test } from 'node:test';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
 import type { ConversationServerMessage, SessionInfo } from '@agenthouse/protocol';
-import { Conversations } from '../src/web/conversations';
+import type { LineRange } from '../src/claude/transcript';
+import { Conversations, SegmentReader } from '../src/web/conversations';
 import type { SessionManager } from '../src/web/manager';
 import { assistant, jsonl, noise, prompt, system, text, thinking, toolResult, toolUse, usage } from './fixtures/transcript';
 import { waitFor } from './helpers';
@@ -228,6 +229,28 @@ describe('conversations', () => {
       conversations.close();
       rmSync(outside, { recursive: true, force: true });
     }
+  });
+
+  test('a line too long to read as one is left out, and the lines after it are where they are said to be', async () => {
+    const file = path.join(projects, 'long-line.jsonl');
+    const before = JSON.stringify(prompt('Before'));
+    // Three pieces of the file long, with a limit it passes in its second piece.
+    const long = JSON.stringify(prompt('x'.repeat(700 * 1024)));
+    const after = [JSON.stringify(prompt('After')), JSON.stringify(assistant('msg_1', text('Still here')))];
+    writeFileSync(file, `${before}\n${long}\n${after.join('\n')}\n`);
+    const reader = new SegmentReader(file, 300 * 1024);
+    const lines: Array<{ text: string; range: LineRange }> = [];
+    const read = async () => {
+      lines.length = 0;
+      assert.equal(await reader.read((line, range) => lines.push({ text: line, range })), 'read');
+      const bytes = readFileSync(file);
+      for (const line of lines) assert.equal(bytes.toString('utf8', line.range[0], line.range[1]), line.text, 'a line is read back from its range');
+      return lines.map((line) => line.text);
+    };
+    assert.deepEqual(await read(), [before, ...after]);
+    // From there it goes on as the file grows, as after any other line.
+    appendFileSync(file, `${before}\n`);
+    assert.deepEqual(await read(), [before]);
   });
 
   test('only Claude transcripts are read; a file that was replaced is read again', async () => {

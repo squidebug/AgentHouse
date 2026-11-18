@@ -19,16 +19,25 @@ const yieldToOthers = () => new Promise<void>((resolve) => setImmediate(resolve)
 
 type Listener = (message: ConversationServerMessage) => void;
 
-/** One transcript file, read from where it left off, one complete line at a time with its byte range. */
-class SegmentReader {
+/**
+ * One transcript file, read from where it left off, one complete line at a time
+ * with its byte range. A line that is not complete after `maxLineBytes` is left
+ * out whole; the lines after it are where their ranges say.
+ */
+export class SegmentReader {
   /** File offset of the first byte not yet handed out as part of a line. */
   private offset = 0;
   private carry = Buffer.alloc(0);
+  /** Inside a line that was too long to keep: up to its end, nothing is a line. */
+  private skipping = false;
   /** An earlier conversation, read to its end: it no longer grows. */
   done = false;
   started = false;
 
-  constructor(readonly path: string) {}
+  constructor(
+    readonly path: string,
+    private readonly maxLineBytes = MAX_LINE_BYTES,
+  ) {}
 
   async read(onLine: (text: string, range: LineRange) => void): Promise<'read' | 'missing' | 'shrunk'> {
     let handle;
@@ -48,13 +57,24 @@ class SegmentReader {
         position += bytesRead;
         const data = this.carry.length ? Buffer.concat([this.carry, chunk.subarray(0, bytesRead)]) : chunk.subarray(0, bytesRead);
         let start = 0;
-        for (let newline = data.indexOf(10); newline !== -1; newline = data.indexOf(10, start)) {
+        if (this.skipping) {
+          const end = data.indexOf(10);
+          start = end === -1 ? data.length : end + 1;
+          this.skipping = end === -1;
+        }
+        for (let newline = data.indexOf(10, start); newline !== -1; newline = data.indexOf(10, start)) {
           const end = newline > start && data[newline - 1] === 13 ? newline - 1 : newline;
           if (end > start) onLine(data.toString('utf8', start, end), [this.offset + start, this.offset + end]);
           start = newline + 1;
         }
+        // What is left is the start of a line still to come. Too long, it is dropped, and with it the rest
+        // of that line: the offset moves past what was dropped, or every later range would be off by it.
+        if (data.length - start > this.maxLineBytes) {
+          start = data.length;
+          this.skipping = true;
+        }
         this.offset += start;
-        this.carry = data.length - start > MAX_LINE_BYTES ? Buffer.alloc(0) : Buffer.from(data.subarray(start));
+        this.carry = Buffer.from(data.subarray(start));
         await yieldToOthers();
       }
       return 'read';
