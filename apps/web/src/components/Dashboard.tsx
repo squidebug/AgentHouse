@@ -10,7 +10,8 @@ import { agentsAtWork, board, runningIn, SHOWN_RUNNING, span, type Running, type
 import { folderName, validLinks } from '../workspace/tree';
 import { activity, agentStatusText, agentTitle, ExternalMark, modelLabel, statusText } from './Details';
 import { ChevronIcon, ClockIcon, DelegateIcon, LinkIcon, PlusIcon } from './icons';
-import { fresh, resetText, tone } from './LimitsChip';
+import { fresh, Gauge, resetText, tone } from './LimitsChip';
+import { useNow } from './now';
 import { AgentStatusIcon, StatusIcon, TaskStatusIcon } from './StatusIcon';
 
 // How long things have been as they are is told to the minute: often enough to keep that true.
@@ -19,15 +20,6 @@ const TICK_MS = 15_000;
 const LATE_MS = 2000;
 // While a session works, a prompt that was waiting may take over without the session ever being idle.
 const WORKING_MS = 20_000;
-
-function useNow(everyMs: number): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), everyMs);
-    return () => clearInterval(timer);
-  }, [everyMs]);
-  return now;
-}
 
 const sameWords = (a: LatestWords | null, b: LatestWords) => a !== null && a.prompt === b.prompt && a.promptAt === b.promptAt && a.answer === b.answer;
 
@@ -74,17 +66,8 @@ const oneLine = { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whi
 // A few words of a prompt or an answer: two lines of them at most.
 const twoLines = { display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2, overflow: 'hidden', overflowWrap: 'anywhere' } as const;
 
-/** A share of something as a thin bar. */
-function Gauge({ label, pct, width, height, track }: { label: string; pct: number; width: number; height: number; track: string }) {
-  return (
-    <Box role="meter" aria-label={label} aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} sx={{ flex: 'none', width, height, borderRadius: `${height / 2}px`, bgcolor: track, overflow: 'hidden' }}>
-      <Box sx={{ width: `${Math.min(100, pct)}%`, height: '100%', borderRadius: 'inherit', bgcolor: tone(pct) }} />
-    </Box>
-  );
-}
-
 /** Plan usage, both windows at a glance with when they start over: what the top bar's chip shows one number of. */
-function Usage({ limits, now }: { limits: AccountLimits[]; now: number }) {
+function UsageLine({ limits, now }: { limits: AccountLimits[]; now: number }) {
   const claude = limits.find((one) => one.vendor === 'claude');
   const windows: Array<{ label: string; window: RateWindow }> = [];
   for (const [label, window] of [
@@ -329,7 +312,7 @@ export function Dashboard({ sessions, links, limits, onOpen, onNew }: Props) {
   return (
     <Box component="section" aria-label={t.screen.dashboard} sx={{ minHeight: '100%', display: 'flex', flexDirection: 'column', gap: 3, p: '12px 16px 24px' }}>
       <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px 20px', minHeight: 36, pl: '6px' }}>
-        <Usage limits={limits} now={now} />
+        <UsageLine limits={limits} now={now} />
         <Box sx={{ flex: 1 }} />
         <Button variant="contained" startIcon={<PlusIcon />} onClick={onNew}>
           {t.newSession}

@@ -21,6 +21,15 @@ export function resetText(at: number, now: number): string {
   return `${day}${time} ${t.resetsAt} · ${t.later(left)}`;
 }
 
+/** A share of something as a thin bar, in the color of how near its limit it is; as wide as its row unless given a width. */
+export function Gauge({ label, pct, width, height, track }: { label: string; pct: number; width?: number; height: number; track: string }) {
+  return (
+    <Box role="meter" aria-label={label} aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} sx={{ flex: 'none', width, height, borderRadius: `${height / 2}px`, bgcolor: track, overflow: 'hidden' }}>
+      <Box sx={{ width: `${Math.min(100, pct)}%`, height: '100%', borderRadius: 'inherit', bgcolor: tone(pct) }} />
+    </Box>
+  );
+}
+
 function WindowRow({ label, window, now }: { label: string; window: RateWindow | null; now: number }) {
   if (!window) return null;
   const pct = Math.round(window.usedPct);
@@ -31,9 +40,7 @@ function WindowRow({ label, window, now }: { label: string; window: RateWindow |
         <Box sx={{ flex: 1 }} />
         <Typography sx={{ fontWeight: 600, color: tone(pct) }}>{pct}%</Typography>
       </Box>
-      <Box role="meter" aria-label={label} aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} sx={{ height: 6, borderRadius: 3, bgcolor: v.surface3, overflow: 'hidden' }}>
-        <Box sx={{ width: `${Math.min(100, pct)}%`, height: '100%', borderRadius: 3, bgcolor: tone(pct) }} />
-      </Box>
+      <Gauge label={label} pct={pct} height={6} track={v.surface3} />
       {window.resetsAt !== null && <Typography sx={{ fontSize: 12, lineHeight: '16px', color: v.on2 }}>{resetText(window.resetsAt, now)}</Typography>}
     </Box>
   );
