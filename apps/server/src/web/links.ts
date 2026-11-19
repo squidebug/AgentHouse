@@ -2,14 +2,15 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import type { LinkKind, SessionLink } from '@agenthouse/protocol';
 import { notSaved, writeJsonFile } from '../shared/state';
+import { Told, words, type Words } from './words';
 
 const FILE_VERSION = 1;
 
 export const linksFile = (stateDir: string) => path.join(stateDir, 'state.json');
 
-export class LinkError extends Error {
+export class LinkError extends Told {
   constructor(
-    message: string,
+    message: Words | string,
     readonly code: 'NOT_FOUND' | 'INVALID_REQUEST',
   ) {
     super(message);
@@ -52,15 +53,15 @@ export class LinkStore {
    * `known` tells which sessions exist. Returns whether anything changed.
    */
   set(childId: string, parentId: string | null, kind: LinkKind, known: (id: string) => boolean): boolean {
-    if (!known(childId)) throw new LinkError('세션을 찾을 수 없습니다.', 'NOT_FOUND');
+    if (!known(childId)) throw new LinkError(words('세션을 찾을 수 없습니다.', 'The session was not found.'), 'NOT_FOUND');
     if (parentId === null) {
       if (!this.links.delete(childId)) return false;
       this.save();
       return true;
     }
-    if (parentId === childId || !known(parentId)) throw new LinkError('묶을 세션을 찾을 수 없습니다.', 'INVALID_REQUEST');
-    if (this.links.has(parentId)) throw new LinkError('묶인 세션 아래에는 묶을 수 없습니다.', 'INVALID_REQUEST');
-    if ([...this.links.values()].some((l) => l.parentId === childId)) throw new LinkError('아래에 묶인 세션이 있는 세션은 옮길 수 없습니다.', 'INVALID_REQUEST');
+    if (parentId === childId || !known(parentId)) throw new LinkError(words('묶을 세션을 찾을 수 없습니다.', 'The session to go under was not found.'), 'INVALID_REQUEST');
+    if (this.links.has(parentId)) throw new LinkError(words('묶인 세션 아래에는 묶을 수 없습니다.', 'Nothing goes under a session that is under another.'), 'INVALID_REQUEST');
+    if ([...this.links.values()].some((l) => l.parentId === childId)) throw new LinkError(words('아래에 묶인 세션이 있는 세션은 옮길 수 없습니다.', 'A session with sessions under it cannot be moved.'), 'INVALID_REQUEST');
     const current = this.links.get(childId);
     if (current?.parentId === parentId && current.kind === kind) return false;
     this.links.set(childId, { childId, parentId, kind });

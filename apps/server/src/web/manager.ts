@@ -17,10 +17,13 @@ import { childEnv } from '../shared/child-env';
 import { LinkError, LinkStore, linksFile } from './links';
 import { registryFile, SessionRegistry } from './registry';
 import { LimitsLog, stillValid } from './usage-log';
+import { words, type Words } from './words';
 
-const MISSING_TEXT: Record<Vendor, string> = {
-  claude: 'Claude Code가 설치되어 있지 않습니다.',
-  codex: 'Codex CLI가 설치되어 있지 않습니다.',
+const NOT_OURS = words('AgentHouse가 띄운 세션이 아닙니다.', 'Not a session AgentHouse started.');
+
+const MISSING_TEXT: Record<Vendor, Words> = {
+  claude: words('Claude Code가 설치되어 있지 않습니다.', 'Claude Code is not installed.'),
+  codex: words('Codex CLI가 설치되어 있지 않습니다.', 'Codex CLI is not installed.'),
 };
 
 export interface ManagerOptions {
@@ -49,7 +52,7 @@ async function resolveCwd(requested: string | undefined, fallback: string): Prom
   } catch {
     // reported below
   }
-  throw new LaunchError(`작업 폴더를 찾을 수 없습니다: ${cwd}`, 'CWD_NOT_FOUND');
+  throw new LaunchError(words(`작업 폴더를 찾을 수 없습니다: ${cwd}`, `The folder was not found: ${cwd}`), 'CWD_NOT_FOUND');
 }
 
 /**
@@ -126,7 +129,7 @@ export class SessionManager extends EventEmitter {
 
   /** Refuses what only a session of AgentHouse's own can do. */
   private ours(id: string): void {
-    if (this.external?.get(id)) throw new LaunchError('AgentHouse가 띄운 세션이 아닙니다.', 'EXTERNAL_SESSION', 409);
+    if (this.external?.get(id)) throw new LaunchError(NOT_OURS, 'EXTERNAL_SESSION', 409);
   }
 
   /** Plan usage per vendor account: the newest a session reported, or the log's; windows that reset since are dropped. */
@@ -155,15 +158,15 @@ export class SessionManager extends EventEmitter {
    */
   async resume(id: string, theme?: LaunchOptions['theme']): Promise<SessionInfo> {
     const ended = this.get(id);
-    if (!ended) throw new LaunchError('세션을 찾을 수 없습니다.', 'NOT_FOUND', 404);
-    if (ended.state !== 'exited') throw new LaunchError('실행 중인 세션입니다.', 'SESSION_RUNNING', 409);
+    if (!ended) throw new LaunchError(words('세션을 찾을 수 없습니다.', 'The session was not found.'), 'NOT_FOUND', 404);
+    if (ended.state !== 'exited') throw new LaunchError(words('실행 중인 세션입니다.', 'The session is running.'), 'SESSION_RUNNING', 409);
     // Codex has its own way (`codex resume`), not looked into yet.
-    if (ended.vendor === 'codex') throw new LaunchError(`${VENDOR_NAMES[ended.vendor]} 세션은 이어서 열 수 없습니다.`, 'RESUME_UNSUPPORTED');
+    if (ended.vendor === 'codex') throw new LaunchError(words(`${VENDOR_NAMES[ended.vendor]} 세션은 이어서 열 수 없습니다.`, `A ${VENDOR_NAMES[ended.vendor]} session cannot be resumed.`), 'RESUME_UNSUPPORTED');
     // The conversation it ended in: after /clear, the one that came last.
     const last = ended.transcripts.at(-1);
-    if (!last?.vendorSessionId || !existsSync(last.path)) throw new LaunchError('이어서 열 대화가 없습니다.', 'NO_CONVERSATION', 409);
+    if (!last?.vendorSessionId || !existsSync(last.path)) throw new LaunchError(words('이어서 열 대화가 없습니다.', 'There is no conversation to resume.'), 'NO_CONVERSATION', 409);
     // Asked twice in a row (a double click): the first is still on its way.
-    if (this.resuming.has(id)) throw new LaunchError('이미 여는 중입니다.', 'RESUME_IN_PROGRESS', 409);
+    if (this.resuming.has(id)) throw new LaunchError(words('이미 여는 중입니다.', 'It is being opened already.'), 'RESUME_IN_PROGRESS', 409);
     this.resuming.add(id);
     try {
       // A host that saw it end still holds it, for its last screen; it takes the id again once it let go.
@@ -193,14 +196,17 @@ export class SessionManager extends EventEmitter {
     const cwd = await resolveCwd(opts.cwd, this.options.defaultCwd);
     let install: { file: string; args: string[]; version: string | null };
     if (opts.vendor === 'fake') {
-      if (!this.options.fakeAgentPath) throw new LaunchError('알 수 없는 CLI입니다.', 'INVALID_OPTION');
+      if (!this.options.fakeAgentPath) throw new LaunchError(words('알 수 없는 CLI입니다.', 'Unknown CLI.'), 'INVALID_OPTION');
       install = { file: process.execPath, args: [this.options.fakeAgentPath], version: null };
     } else {
       let status = await this.options.env.cli(opts.vendor);
       // The check is a minute old at most: a CLI installed, removed or moved since is looked for again.
       if (!stillThere(status)) status = await this.options.env.cli(opts.vendor, true);
       if (status.chosenError) {
-        throw new LaunchError(`지정한 ${VENDOR_NAMES[opts.vendor]} 실행 파일을 쓸 수 없습니다. ${status.chosenError}`, 'ENV_CLI_CHOSEN_UNUSABLE', 409);
+        // Why it cannot, in both languages: the same look at the machine, said again.
+        const why = (await this.options.env.cli(opts.vendor, false, 'en')).chosenError ?? '';
+        const name = VENDOR_NAMES[opts.vendor];
+        throw new LaunchError(words(`지정한 ${name} 실행 파일을 쓸 수 없습니다. ${status.chosenError}`, `The file chosen for ${name} cannot be used. ${why}`), 'ENV_CLI_CHOSEN_UNUSABLE', 409);
       }
       const selected = status.selected === null ? undefined : status.installs[status.selected];
       if (!selected) throw new LaunchError(MISSING_TEXT[opts.vendor], 'ENV_CLI_MISSING', 409, INSTALL_COMMAND[opts.vendor]);
@@ -256,7 +262,7 @@ export class SessionManager extends EventEmitter {
   /** Places a session under another, or back at the top with null. Throws LinkError for what the tree cannot show. */
   link(childId: string, parentId: string | null, kind: LinkKind = 'group'): SessionLink[] {
     // A session only watched goes with its process: nothing is placed under it, and it under nothing.
-    if (this.external?.get(childId) || (parentId !== null && this.external?.get(parentId))) throw new LinkError('AgentHouse가 띄운 세션이 아닙니다.', 'INVALID_REQUEST');
+    if (this.external?.get(childId) || (parentId !== null && this.external?.get(parentId))) throw new LinkError(NOT_OURS, 'INVALID_REQUEST');
     if (this.linkStore.set(childId, parentId, kind, this.known)) this.emit('links');
     return this.links();
   }

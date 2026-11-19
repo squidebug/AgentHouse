@@ -113,6 +113,15 @@ test('a file chosen in the environment check is checked by running it, then laun
   const after = (await request(app.port, 'GET', '/api/env', { headers })).json as EnvReport;
   assert.deepEqual([after.clis.claude.selected, after.clis.claude.chosenError], [null, '파일이 없습니다.']);
   assert.ok(after.messages.some((m) => m.id === 'ENV_CLAUDE_CHOSEN_UNUSABLE' && m.level === 'error'));
+  // A page that speaks English is told the same in English: the check's sentences, and a refusal.
+  const english = { ...headers, 'accept-language': 'en' };
+  const said = (await request(app.port, 'GET', '/api/env', { headers: english })).json as EnvReport;
+  assert.equal(said.clis.claude.chosenError, 'There is no such file.');
+  assert.equal(said.messages.find((m) => m.id === 'ENV_CLAUDE_CHOSEN_UNUSABLE')?.text, 'The file chosen for Claude Code cannot be used. There is no such file.');
+  assert.equal(after.messages.find((m) => m.id === 'ENV_CLAUDE_CHOSEN_UNUSABLE')?.text, '지정한 Claude Code 실행 파일을 쓸 수 없습니다. 파일이 없습니다.');
+  const refusedInEnglish = await request(app.port, 'POST', '/api/sessions', { headers: english, body: { vendor: 'claude' } });
+  assert.deepEqual([refusedInEnglish.status, (refusedInEnglish.json as { error: string }).error], [409, 'The file chosen for Claude Code cannot be used. There is no such file.']);
+  assert.equal((launch.json as { error: string }).error, '지정한 Claude Code 실행 파일을 쓸 수 없습니다. 파일이 없습니다.');
 
   const reset = await choose({ path: null });
   assert.equal(reset.status, 200);

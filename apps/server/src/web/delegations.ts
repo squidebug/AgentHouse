@@ -10,6 +10,7 @@ import { answerText } from '../claude/transcript';
 import { notSaved, writeJsonFile } from '../shared/state';
 import { MAX_LINE_BYTES, readTail, tailLines } from '../shared/tail';
 import type { SessionManager } from './manager';
+import { Told, words, type Words } from './words';
 
 const FILE_VERSION = 1;
 // The newest this many are kept; older ones are history nobody shows.
@@ -30,9 +31,11 @@ const TYPING_RETRY_MS = 3000;
 
 export const delegationsFile = (stateDir: string) => path.join(stateDir, 'delegations.json');
 
-export class DelegationError extends Error {
+const ENDED = words('끝난 세션입니다.', 'The session has ended.');
+
+export class DelegationError extends Told {
   constructor(
-    message: string,
+    message: Words | string,
     readonly code: 'NOT_FOUND' | 'INVALID_REQUEST' | 'BUSY',
   ) {
     super(message);
@@ -128,8 +131,8 @@ function checked(task: Task): Task {
 const ready = (session: SessionInfo) =>
   session.state === 'running' && (session.status.value === 'idle' || (session.status.value === 'unobserved' && session.vendor !== 'claude'));
 
-const refusal = (reason: string | undefined) =>
-  reason === 'exited' ? '끝난 세션입니다.' : isAsking(reason) ? '승인이나 답을 기다리는 세션입니다.' : isHeld(reason) ? '아직 시작 중인 세션입니다.' : '보내지 못했습니다.';
+const refusal = (reason: string | undefined): Words =>
+  reason === 'exited' ? ENDED : isAsking(reason) ? words('승인이나 답을 기다리는 세션입니다.', 'The session is waiting for an approval or an answer.') : isHeld(reason) ? words('아직 시작 중인 세션입니다.', 'The session is still starting.') : words('보내지 못했습니다.', 'It could not be sent.');
 
 /**
  * Work handed from a session to the session delegated under it, followed
@@ -187,15 +190,15 @@ export class Delegations extends EventEmitter {
   async delegate(parentId: string, childId: string, text: string): Promise<DelegationInfo> {
     const parent = this.manager.get(parentId);
     const child = this.manager.get(childId);
-    if (!parent || !child) throw new DelegationError('세션을 찾을 수 없습니다.', 'NOT_FOUND');
+    if (!parent || !child) throw new DelegationError(words('세션을 찾을 수 없습니다.', 'The session was not found.'), 'NOT_FOUND');
     if (!this.manager.links().some((l) => l.childId === childId && l.parentId === parentId && l.kind === 'delegate')) {
-      throw new DelegationError('위임으로 연결된 세션이 아닙니다.', 'INVALID_REQUEST');
+      throw new DelegationError(words('위임으로 연결된 세션이 아닙니다.', 'The session is not delegated under that one.'), 'INVALID_REQUEST');
     }
-    if (child.state !== 'running') throw new DelegationError('끝난 세션입니다.', 'INVALID_REQUEST');
+    if (child.state !== 'running') throw new DelegationError(ENDED, 'INVALID_REQUEST');
     if (isAsking(child.status.value)) throw new DelegationError(refusal(child.status.value), 'BUSY');
     // A delegate in the middle of a turn would take the work after it, and the end of the turn
     // already under way would look like the end of the work.
-    if (child.status.value === 'working') throw new DelegationError('작업 중인 세션입니다.', 'BUSY');
+    if (child.status.value === 'working') throw new DelegationError(words('작업 중인 세션입니다.', 'The session is working.'), 'BUSY');
     const transcript = [...child.transcripts].reverse().find((t) => isClaudeTranscript(t.path, claudeConfigDir()))?.path ?? null;
     const from = transcript ? await stat(transcript).then((s) => s.size).catch(() => 0) : 0;
     const sentAt = Date.now();
@@ -227,11 +230,11 @@ export class Delegations extends EventEmitter {
   /** Hands the delegate's answer to the parent now, or once the parent is idle. */
   async deliver(id: string, header: string): Promise<DelegationInfo> {
     const task = this.tasks.get(id);
-    if (!task) throw new DelegationError('위임을 찾을 수 없습니다.', 'NOT_FOUND');
-    if (!task.answer) throw new DelegationError('전달할 결과가 없습니다.', 'INVALID_REQUEST');
+    if (!task) throw new DelegationError(words('위임을 찾을 수 없습니다.', 'The delegation was not found.'), 'NOT_FOUND');
+    if (!task.answer) throw new DelegationError(words('전달할 결과가 없습니다.', 'There is no result to deliver.'), 'INVALID_REQUEST');
     if (task.delivery === 'queued' || task.delivery === 'sent') return this.info(id);
     const parent = this.manager.get(task.parentId);
-    if (!parent || parent.state !== 'running') throw new DelegationError('끝난 세션입니다.', 'INVALID_REQUEST');
+    if (!parent || parent.state !== 'running') throw new DelegationError(ENDED, 'INVALID_REQUEST');
     task.header = header;
     task.delivery = 'queued';
     this.changed();

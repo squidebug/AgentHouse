@@ -16,13 +16,19 @@ import { CliChoiceError, type EnvService } from '../doctor';
 import { HostUnavailableError } from '../host-client';
 import { LinkError } from '../links';
 import type { SessionManager } from '../manager';
+import { langOf, Told, words, type Lang, type Words } from '../words';
 import { agentParam, ChooseCliBody, ComposeBody, DelegateBody, DeliverBody, ExternalBody, LaunchBody, LinkBody, NoteBody, ResumeBody, sinceParam } from './schemas';
 
 /** A request refused for what it asks, with the status that says so. */
-export class HttpError extends Error {
+const FILE_EN: Record<FileError['code'], string> = { NOT_FOUND: 'The file was not found.', CHANGED: 'The file has changed on disk.', TOO_LARGE: 'The file is too large.', NOT_TEXT: 'Not a text file.' };
+const HOST_EN: Record<string, string> = { NOT_FOUND: 'The session was not found.', INVALID_REQUEST: 'Not a valid session id.', DUPLICATE: 'The session exists already.', UNKNOWN_OP: 'Unknown request.' };
+const INVALID = words('요청 값이 올바르지 않습니다.', 'The request has a value that is not valid.');
+const NOT_FOUND = words('찾을 수 없습니다.', 'Not found.');
+
+export class HttpError extends Told {
   constructor(
     readonly status: number,
-    message: string,
+    message: Words | string,
     readonly code?: string,
     readonly command?: string,
   ) {
@@ -55,17 +61,17 @@ export async function readBody<T>(req: IncomingMessage, schema: Schema<T>, limit
     size += (chunk as Buffer).length;
     if (size <= limit) chunks.push(chunk as Buffer);
   }
-  if (size > limit) throw new HttpError(413, '요청이 너무 큽니다.');
+  if (size > limit) throw new HttpError(413, words('요청이 너무 큽니다.', 'The request is too large.'));
   let value: unknown = {};
   if (chunks.length) {
     try {
       value = JSON.parse(Buffer.concat(chunks).toString('utf8'));
     } catch {
-      throw new HttpError(400, 'JSON 형식이 올바르지 않습니다.');
+      throw new HttpError(400, words('JSON 형식이 올바르지 않습니다.', 'The request is not valid JSON.'));
     }
   }
   const result = schema.safeParse(value);
-  if (!result.success) throw new HttpError(400, '요청 값이 올바르지 않습니다.', 'INVALID_REQUEST');
+  if (!result.success) throw new HttpError(400, INVALID, 'INVALID_REQUEST');
   return result.data;
 }
 
@@ -75,6 +81,8 @@ type Named<Path extends string> = Path extends `${string}:${infer Name}/${infer 
 /** What a route gets of the request it answers. */
 interface Call<Names extends string = string> {
   url: URL;
+  /** The language the page that asks speaks: what the answer says to the user is in it. */
+  lang: Lang;
   /** The parts of the address its path names, as they were before they were encoded for an address. */
   params: Record<Names, string>;
   /** The body, held to a schema; `limit` in bytes for one that may be larger than most. */
@@ -124,10 +132,10 @@ export async function answer(routes: Route[], req: IncomingMessage, url: URL): P
   for (const candidate of routes) {
     const params = candidate.method === req.method ? named(candidate, parts) : null;
     if (!params) continue;
-    const body = await candidate.run({ url, params, body: (schema, limit) => readBody(req, schema, limit) });
+    const body = await candidate.run({ url, lang: langOf(req.headers['accept-language']), params, body: (schema, limit) => readBody(req, schema, limit) });
     return { status: candidate.status, body };
   }
-  throw new HttpError(404, '찾을 수 없습니다.');
+  throw new HttpError(404, NOT_FOUND);
 }
 
 /**
@@ -135,8 +143,17 @@ export async function answer(routes: Route[], req: IncomingMessage, url: URL): P
  * asked (the launcher, the links, a note's file, a delegation, the host). Null
  * for anything else, which is a fault of the server's and not the caller's to read.
  */
-export function refusal(error: unknown): { status: number; body: ApiError } | null {
-  const told = (status: number, code?: string, command?: string) => ({ status, body: { error: (error as Error).message, ...(code ? { code } : {}), ...(command ? { command } : {}) } });
+export function refusal(error: unknown, lang: Lang = 'ko'): { status: number; body: ApiError } | null {
+  const said = (): string => {
+    if (error instanceof Told) return error.in(lang);
+    const { message } = error as Error;
+    if (lang !== 'en') return message;
+    // What a note's file or the host refused is said in Korean where it is thrown: in English by its code.
+    if (error instanceof FileError) return FILE_EN[error.code];
+    if (error instanceof HostRequestError && error.code) return error.code === 'SPAWN_FAILED' ? `Could not start: ${message.replace(/^[^:]*:\s*/, '')}` : (HOST_EN[error.code] ?? message);
+    return message;
+  };
+  const told = (status: number, code?: string, command?: string) => ({ status, body: { error: said(), ...(code ? { code } : {}), ...(command ? { command } : {}) } });
   if (error instanceof HttpError || error instanceof LaunchError) return told(error.status, error.code, error.command);
   if (error instanceof CliChoiceError) return told(400, 'INVALID_CLI');
   if (error instanceof LinkError) return told(error.code === 'NOT_FOUND' ? 404 : 400, error.code);
@@ -162,19 +179,19 @@ export function apiRoutes({ env, manager, conversations, delegations, setExterna
   /** The session an address names; refused when there is none. */
   const sessionOf = (params: { session: string }): SessionInfo => {
     const session = manager.get(params.session);
-    if (!session) throw new HttpError(404, '세션을 찾을 수 없습니다.');
+    if (!session) throw new HttpError(404, words('세션을 찾을 수 없습니다.', 'The session was not found.'));
     return session;
   };
   // One of the project's or the user's own skills, and one of the files Claude reads into a session by
   // itself: looked up in the list as it is now. A request names a file of that list, never a path.
   const skillPath = async (params: { session: string; name: string }): Promise<string> => {
     const file = await skillFile(sessionOf(params).cwd, claudeConfigDir(), params.name);
-    if (!file) throw new HttpError(404, '편집할 수 있는 스킬이 아닙니다.');
+    if (!file) throw new HttpError(404, words('편집할 수 있는 스킬이 아닙니다.', 'Not a skill that can be edited.'));
     return file.path;
   };
   const memoryPath = async (params: { session: string; id: string }): Promise<string> => {
     const file = (await memoryFiles(sessionOf(params), claudeConfigDir())).find((entry) => entry.id === params.id);
-    if (!file) throw new HttpError(404, '찾을 수 없습니다.');
+    if (!file) throw new HttpError(404, NOT_FOUND);
     return file.path;
   };
   /** A note saved over the version the page loaded. */
@@ -186,11 +203,11 @@ export function apiRoutes({ env, manager, conversations, delegations, setExterna
   return [
     // The page's token is good: a page that lost its sockets tells a server restart from a lost login.
     route('GET', '/api/auth', () => ({})),
-    route('GET', '/api/env', ({ url }) => env.report(url.searchParams.has('refresh'))),
+    route('GET', '/api/env', ({ url, lang }) => env.report(url.searchParams.has('refresh'), lang)),
     // Which executable runs a CLI: one picked or typed in the environment check, or null for the shell's.
-    route('PUT', '/api/cli/:vendor', async ({ params: { vendor }, body }) => {
-      if (vendor !== 'claude' && vendor !== 'codex') throw new HttpError(404, '찾을 수 없습니다.');
-      return env.choose(vendor, (await body(ChooseCliBody, 8192)).path);
+    route('PUT', '/api/cli/:vendor', async ({ params: { vendor }, body, lang }) => {
+      if (vendor !== 'claude' && vendor !== 'codex') throw new HttpError(404, NOT_FOUND);
+      return env.choose(vendor, (await body(ChooseCliBody, 8192)).path, lang);
     }),
     // Watching the sessions started outside AgentHouse, on or off: the same for every page.
     route('PUT', '/api/external', async ({ body }) => {
@@ -201,7 +218,7 @@ export function apiRoutes({ env, manager, conversations, delegations, setExterna
     // Plan usage as it went since a time, from the usage log: what the usage screen draws.
     route('GET', '/api/usage', async ({ url }): Promise<UsageHistory> => {
       const since = sinceParam(url);
-      if (since === undefined) throw new HttpError(400, '요청 값이 올바르지 않습니다.', 'INVALID_REQUEST');
+      if (since === undefined) throw new HttpError(400, INVALID, 'INVALID_REQUEST');
       return { readings: await manager.usageSince(since) };
     }),
 
@@ -238,7 +255,7 @@ export function apiRoutes({ env, manager, conversations, delegations, setExterna
       const { id } = sessionOf(params);
       const agent = agentParam(url);
       const detail = agent === undefined ? null : await conversations.detail(id, params.entry, agent);
-      if (!detail) throw new HttpError(404, '찾을 수 없습니다.');
+      if (!detail) throw new HttpError(404, NOT_FOUND);
       return detail;
     }),
     // What it was last asked and what it last said, for a glance: read from the end of its transcript when asked for.

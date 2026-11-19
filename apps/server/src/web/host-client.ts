@@ -20,10 +20,11 @@ import {
 } from '../shared/host-protocol';
 import { hostAuth, openControl, probeHost, type ControlLink } from '../shared/host-link';
 import { logFile, readAllStates, readState, runDir } from '../shared/state';
+import { Told, words } from './words';
 
-export class HostUnavailableError extends Error {
+export class HostUnavailableError extends Told {
   constructor() {
-    super('세션 호스트에 연결할 수 없습니다.');
+    super(words('세션 호스트에 연결할 수 없습니다.', 'The session host cannot be reached.'));
   }
 }
 

@@ -10,6 +10,7 @@ import { CliChoiceError } from '../src/web/doctor';
 import { HostUnavailableError } from '../src/web/host-client';
 import { answer, apiRoutes, HttpError, refusal, type ApiServices } from '../src/web/http/routes';
 import { LinkError } from '../src/web/links';
+import { langOf, Told, words } from '../src/web/words';
 
 // What the routes ask, standing in for the real services: each says what it was asked.
 const asked: unknown[][] = [];
@@ -19,7 +20,7 @@ const note = (...call: unknown[]) => {
 };
 const sessions = new Map([['s1', { id: 's1', cwd: '/work/shop' }]]);
 const services = {
-  env: { report: async (refresh: boolean) => note('report', refresh), choose: async (vendor: string, path: string | null) => note('choose', vendor, path) },
+  env: { report: async (refresh: boolean, lang: string) => note('report', refresh, lang), choose: async (vendor: string, path: string | null) => note('choose', vendor, path) },
   manager: {
     get: (id: string) => sessions.get(id),
     list: () => [...sessions.values()],
@@ -33,15 +34,17 @@ const services = {
 } as unknown as ApiServices;
 const routes = apiRoutes(services);
 
-/** A request as a route sees it: its method, and its body as the bytes that came. */
-const request = (method: string, body?: unknown) => Object.assign(Readable.from(body === undefined ? [] : [Buffer.from(typeof body === 'string' ? body : JSON.stringify(body))]), { method }) as unknown as IncomingMessage;
-const ask = (method: string, address: string, body?: unknown) => answer(routes, request(method, body), new URL(address, 'http://localhost'));
+/** A request as a route sees it: its method, the language it says it speaks, and its body as the bytes that came. */
+const request = (method: string, body?: unknown, speaks?: string) =>
+  Object.assign(Readable.from(body === undefined ? [] : [Buffer.from(typeof body === 'string' ? body : JSON.stringify(body))]), { method, headers: speaks ? { 'accept-language': speaks } : {} }) as unknown as IncomingMessage;
+const ask = (method: string, address: string, body?: unknown, speaks?: string) => answer(routes, request(method, body, speaks), new URL(address, 'http://localhost'));
 const refused = (status: number, code?: string) => (error: unknown) => error instanceof HttpError && error.status === status && error.code === code;
 
 describe('the API as a table of routes', () => {
   test('a request is answered by the route of its method and path, with the status that route has', async () => {
     assert.deepEqual(await ask('GET', '/api/auth'), { status: 200, body: {} });
-    assert.deepEqual(await ask('GET', '/api/env?refresh=1'), { status: 200, body: ['report', true] });
+    assert.deepEqual(await ask('GET', '/api/env?refresh=1'), { status: 200, body: ['report', true, 'ko'] });
+    assert.deepEqual(await ask('GET', '/api/env', undefined, 'en'), { status: 200, body: ['report', false, 'en'] }, 'a route is given the language the page speaks');
     assert.deepEqual(await ask('GET', '/api/sessions'), { status: 200, body: [{ id: 's1', cwd: '/work/shop' }] });
     assert.deepEqual(await ask('POST', '/api/sessions', { vendor: 'fake', title: 'new' }), { status: 201, body: ['create', { vendor: 'fake', title: 'new' }] });
     assert.deepEqual(await ask('POST', '/api/sessions/s1/end'), { status: 200, body: ['end', 's1'] });
@@ -110,5 +113,24 @@ describe('what a refused request is told', () => {
     assert.equal(refusal(new HostRequestError('something broke in the host')), null, 'no code: not a refusal');
     assert.equal(refusal(new Error("EPERM: operation not permitted, rename 'C:\\\\Users\\\\someone\\\\settings.json'")), null);
     assert.equal(refusal('text'), null);
+  });
+
+  test('it is told in the language the page speaks; whoever names none is told in Korean', () => {
+    assert.deepEqual([langOf('en'), langOf('en-US,en;q=0.9'), langOf('ko'), langOf('ko-KR,ko;q=0.9,en;q=0.8'), langOf('*'), langOf(undefined), langOf(['en', 'ko'])], ['en', 'en', 'ko', 'ko', 'ko', 'ko', 'en']);
+    const both = words('찾을 수 없습니다.', 'Not found.');
+    assert.deepEqual([new Told(both).message, new Told(both).in('ko'), new Told(both).in('en'), new Told('a name').in('en')], ['찾을 수 없습니다.', '찾을 수 없습니다.', 'Not found.', 'a name']);
+    const said = (error: unknown, lang?: 'ko' | 'en') => refusal(error, lang)?.body.error;
+    assert.deepEqual([said(new HttpError(404, both)), said(new HttpError(404, both), 'ko'), said(new HttpError(404, both), 'en')], ['찾을 수 없습니다.', '찾을 수 없습니다.', 'Not found.']);
+    assert.equal(said(new LaunchError(words('실행 중인 세션입니다.', 'The session is running.'), 'SESSION_RUNNING', 409), 'en'), 'The session is running.');
+    assert.equal(said(new HostUnavailableError(), 'en'), 'The session host cannot be reached.');
+    // A note's file and the host say it in Korean where they refuse: in English by the code.
+    assert.deepEqual(
+      (['NOT_FOUND', 'CHANGED', 'TOO_LARGE', 'NOT_TEXT'] as const).map((code) => said(new FileError('파일', code), 'en')),
+      ['The file was not found.', 'The file has changed on disk.', 'The file is too large.', 'Not a text file.'],
+    );
+    assert.equal(said(new FileError('파일이 디스크에서 바뀌었습니다.', 'CHANGED')), '파일이 디스크에서 바뀌었습니다.');
+    assert.equal(said(new HostRequestError('세션을 찾을 수 없습니다.', 'NOT_FOUND'), 'en'), 'The session was not found.');
+    assert.equal(said(new HostRequestError('실행하지 못했습니다: spawn claude ENOENT', 'SPAWN_FAILED'), 'en'), 'Could not start: spawn claude ENOENT');
+    assert.equal(said(new HostRequestError('새로 생긴 거절', 'SOMETHING_NEW'), 'en'), '새로 생긴 거절', 'a code without English is said as the host said it');
   });
 });

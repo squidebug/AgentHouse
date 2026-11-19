@@ -12,6 +12,7 @@ import { EnvService } from '../doctor';
 import type { HostClient } from '../host-client';
 import { SessionManager } from '../manager';
 import { AccessControl } from './access';
+import { langOf, words } from '../words';
 import { answer, apiRoutes, HttpError, readBody, refusal } from './routes';
 import { LoginBody } from './schemas';
 import { attachSockets } from './sockets';
@@ -126,6 +127,8 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
   const delegations = new Delegations(manager, delegationsFile(host.stateDir));
 
   const server = http.createServer(async (req, res) => {
+    // What a refusal says is in the language of the page that asked.
+    const lang = langOf(req.headers['accept-language']);
     try {
       if (!access.hostAllowed(req)) {
         send(res, 403, 'host not allowed');
@@ -135,7 +138,7 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
       // A local tool (a second start) asks for an address to open.
       if (url.pathname === '/auth/code' && req.method === 'POST') {
         if (!access.isLocalTool(req)) {
-          send(res, 401, { error: '로그인 코드를 만들 수 없습니다.' } satisfies ApiError);
+          send(res, 401, { error: words('로그인 코드를 만들 수 없습니다.', 'A login code could not be made.')[lang] } satisfies ApiError);
           return;
         }
         const code = access.issueCode();
@@ -143,11 +146,11 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
         return;
       }
       if (url.pathname === '/api/login' && req.method === 'POST') {
-        if (!access.originAllowed(req)) throw new HttpError(403, '허용되지 않은 출처입니다.');
+        if (!access.originAllowed(req)) throw new HttpError(403, words('허용되지 않은 출처입니다.', 'The origin is not allowed.'));
         const { code } = await readBody(req, LoginBody, 4096);
         const token = access.redeem(code);
         if (!token) {
-          send(res, 401, { error: '로그인 링크가 만료되었습니다.', code: LOGIN_EXPIRED, command: startCommand } satisfies ApiError);
+          send(res, 401, { error: words('로그인 링크가 만료되었습니다.', 'The login link has expired.')[lang], code: LOGIN_EXPIRED, command: startCommand } satisfies ApiError);
           return;
         }
         send(res, 200, { token } satisfies LoginResult);
@@ -155,20 +158,20 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
       }
       if (url.pathname.startsWith('/api/')) {
         if (!access.authenticated(req)) {
-          send(res, 401, { error: '로그인이 필요합니다.', code: AUTH_REQUIRED, command: startCommand } satisfies ApiError);
+          send(res, 401, { error: words('로그인이 필요합니다.', 'Login needed.')[lang], code: AUTH_REQUIRED, command: startCommand } satisfies ApiError);
           return;
         }
         // Whatever changes anything comes from the page itself, not from another site open in the same browser.
-        if (req.method !== 'GET' && !access.originAllowed(req)) throw new HttpError(403, '허용되지 않은 출처입니다.');
+        if (req.method !== 'GET' && !access.originAllowed(req)) throw new HttpError(403, words('허용되지 않은 출처입니다.', 'The origin is not allowed.'));
         const { status, body } = await answer(routes, req, url);
         send(res, status, body);
         return;
       }
       // The page holds no secret; what it shows comes from the API.
       if (req.method === 'GET' && options.webDist && (await serveStatic(options.webDist, url.pathname, res))) return;
-      send(res, 404, '찾을 수 없습니다.');
+      send(res, 404, words('찾을 수 없습니다.', 'Not found.')[lang]);
     } catch (error) {
-      const refused = refusal(error);
+      const refused = refusal(error, lang);
       if (refused) {
         send(res, refused.status, refused.body);
         return;
@@ -177,7 +180,7 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
       // page file that cannot be read fails for someone who has not logged in: the reply says only that it
       // failed, and the log has the rest (without the query, where a login code may be).
       webLogger(host.stateDir)(`${req.method} ${(req.url ?? '').split('?')[0]}: ${(error as Error)?.stack ?? error}`);
-      send(res, 500, { error: '서버 오류가 발생했습니다.', code: SERVER_ERROR } satisfies ApiError);
+      send(res, 500, { error: words('서버 오류가 발생했습니다.', 'The server failed.')[lang], code: SERVER_ERROR } satisfies ApiError);
     }
   });
 

@@ -13,11 +13,12 @@ import { relayPath } from '../../relay/path';
 import { SESSION_ID } from '../../claude/sessions';
 import { STATUS_EVENTS } from '../../claude/status';
 import { userStatusLine } from '../../claude/settings';
+import { Told, words, type Words } from '../words';
 import { findOnPath } from './resolve';
 
-export class LaunchError extends Error {
+export class LaunchError extends Told {
   constructor(
-    message: string,
+    message: Words | string,
     readonly code: string,
     readonly status = 400,
     readonly command?: string,
@@ -38,15 +39,18 @@ export interface LaunchSpec {
 // Aliases (opus), full ids (claude-opus-5-5, gpt-6.1-sol) and variants like [1m].
 const MODEL_NAME = /^[A-Za-z0-9][\w.:\-[\]]{0,79}$/;
 
-function pick<T extends string>(value: string | undefined, allowed: readonly T[], label: string): T | undefined {
+// What a CLI calls it is its name in either language.
+const EFFORT = words('effort', 'effort');
+
+function pick<T extends string>(value: string | undefined, allowed: readonly T[], label: Words): T | undefined {
   if (!value) return undefined;
-  if (!(allowed as readonly string[]).includes(value)) throw new LaunchError(`${label} 값이 올바르지 않습니다: ${value}`, 'INVALID_OPTION');
+  if (!(allowed as readonly string[]).includes(value)) throw new LaunchError(words(`${label.ko} 값이 올바르지 않습니다: ${value}`, `Not a valid ${label.en}: ${value}`), 'INVALID_OPTION');
   return value as T;
 }
 
 function model(value: string | undefined): string | undefined {
   if (!value) return undefined;
-  if (!MODEL_NAME.test(value)) throw new LaunchError(`모델 이름이 올바르지 않습니다: ${value}`, 'INVALID_OPTION');
+  if (!MODEL_NAME.test(value)) throw new LaunchError(words(`모델 이름이 올바르지 않습니다: ${value}`, `Not a valid model name: ${value}`), 'INVALID_OPTION');
   return value;
 }
 
@@ -162,7 +166,7 @@ export async function buildLaunch(
 
   // The test double takes the same flags and reports the way Claude Code does.
   if (opts.vendor === 'claude' || opts.vendor === 'fake') {
-    if (resume !== undefined && !SESSION_ID.test(resume)) throw new LaunchError(`세션 id가 올바르지 않습니다: ${resume}`, 'INVALID_OPTION');
+    if (resume !== undefined && !SESSION_ID.test(resume)) throw new LaunchError(words(`세션 id가 올바르지 않습니다: ${resume}`, `Not a valid session id: ${resume}`), 'INVALID_OPTION');
     // A pre-chosen id makes the transcript path known before the CLI writes it. A conversation
     // resumed keeps the id it has (and the name Claude has for it), and its transcript goes on.
     const vendorSessionId = resume ?? randomUUID();
@@ -172,9 +176,9 @@ export async function buildLaunch(
     if (opts.title && !resume) args.push('--name', title.replace(/"/g, "'"));
     const chosenModel = model(opts.model);
     if (chosenModel) args.push('--model', chosenModel);
-    const effort = pick(opts.effort, CLAUDE_EFFORTS, 'effort');
+    const effort = pick(opts.effort, CLAUDE_EFFORTS, EFFORT);
     if (effort) args.push('--effort', effort);
-    const mode = pick(opts.permissionMode, CLAUDE_PERMISSION_MODES, '권한 모드');
+    const mode = pick(opts.permissionMode, CLAUDE_PERMISSION_MODES, words('권한 모드', 'permission mode'));
     if (mode) args.push('--permission-mode', mode);
 
     const tempPaths: string[] = [];
@@ -199,7 +203,7 @@ export async function buildLaunch(
   if (opts.vendor === 'codex') {
     const chosenModel = model(opts.model);
     if (chosenModel) args.push('-m', chosenModel);
-    const effort = pick(opts.effort, CODEX_EFFORTS, 'effort');
+    const effort = pick(opts.effort, CODEX_EFFORTS, EFFORT);
     if (effort) args.push('-c', `model_reasoning_effort="${effort}"`);
     return { file: install.file, args, title, vendorSessionId: null, tempPaths: [] };
   }
