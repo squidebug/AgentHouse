@@ -1,78 +1,74 @@
 # AgentHouse
 
-A local web console for running AI coding-agent CLIs — Claude Code and Codex — side by side in real browser terminals, and for seeing what each agent is doing.
+English · [한국어](README.ko.md)
 
-> **Status: pre-alpha.** Working today: real CLI terminals in the browser, several sessions at once, drag-and-drop layout, a Korean-safe composer, light/dark themes and an environment check. Sessions keep running while the server restarts, and Claude Code sessions show live status (working, waiting for approval, idle), plan usage, their sub-agents as they work, a flow view of who worked when, and a read-only conversation view with tokens per turn. Sessions can be grouped under one another in the tree, or delegated to: one session hands work to another and gets the answer back. A dashboard shows every session at once, by what it is doing, and Claude Code sessions started in a terminal or an editor show there too, read-only. A graph screen draws who runs under whom, and when each worked, for all sessions at once. A usage screen shows how the plan's 5-hour and weekly windows went over the last seven days. Next: Codex status, then the first public release. Codex runs in the terminal; its status view comes later and has not been tried with a real Codex install yet. The UI is in Korean for now; English is planned.
+A local web console that runs several Claude Code sessions side by side in real browser terminals and shows, at a glance, what each one is doing.
 
-- Runs only on your machine (`127.0.0.1`), behind a login, a Host allowlist and an Origin check. The address it opens carries a one-time code; the page trades it for a token of its own, which no other port of `127.0.0.1` can read.
-- Drives the CLIs exactly as installed, signed in with your own account. No reinstall, no PATH changes: Node 18 or newer and whatever Claude Code / Codex you already use.
-- AgentHouse never reads credential files or proxies model traffic.
-- Claude Code sessions are observed through hooks and a status line passed to that session with `--settings`. Your settings files are not changed, and your own status line keeps showing. The same `--settings` keep that session's file tools out of AgentHouse's state folder, next to your own permission rules.
-- Windows 11 first; macOS and Linux are kept working.
+![The workspace: the session tree on the left, one session's conversation in the middle, another session's terminal on the right](screenshots/workspace.png)
 
-AgentHouse is an independent project. It is not affiliated with or endorsed by Anthropic or OpenAI. "Claude Code" and "Codex" are used only to describe compatibility.
+## Features
+
+### Workspace
+
+- **Real terminals in the browser**: your installed Claude Code, as it is, signed in with your own account. As in Windows Terminal, `Ctrl+C` copies a selection and `Ctrl+V` pastes.
+- **Tabs and free splits**: a pane holds several sessions as tabs, and the room splits into up to six panes, side by side or one above the other. Drag a session to place it, and the gap between two panes to resize them.
+- **Session tree**: each session shows whether it is working, waiting for an approval or idle, and under it what it started: sub-agents, background commands and scheduled prompts (`/loop`).
+- **Conversation view**: instead of the terminal, the prompts, replies, tool calls and sub-agents, with model, effort and tokens per turn.
+- **Flow view**: when a session and each of its sub-agents worked, as bars over time.
+- **Message box**: Korean-safe typing, and one message to several sessions at once (drag them onto it, `Ctrl+Enter`). A session waiting for an approval or an answer is skipped, so a message never answers a dialog.
+- **Grouping and delegation**: put a session under another one, or hand one session's reply to another as work and get the answer back.
+- **Sessions that outlive the server**: they keep running while the server restarts, and an ended session resumes where its conversation stopped.
+
+### Dashboard
+
+![The dashboard: a card for each session, in the order waiting for you, working, scheduled, idle](screenshots/dashboard.png)
+
+Every session as a card, by what it is doing: waiting for you, working, on a schedule, idle, ended. A card says how long the session has been so, what it was last asked and answered, what runs in it now, and its folder, model, effort and context.
+
+### Graph
+
+![The graph: lines from each session to its sub-agents, its background commands and the session it delegated to](screenshots/graph.png)
+
+Draws what runs under which session. Map is a tree of sessions, sub-agents, background commands and scheduled prompts tied by lines (an arrow for a delegation, a dashed line for a group). Flow lays out when every session worked, on one sheet.
+
+### Usage
+
+![Usage: the 5-hour window, the weekly window and what each day took, over the last seven days](screenshots/usage.png)
+
+The Claude plan's 5-hour and weekly windows and what each day took, over the last seven days, as graphs or as a table, with where the week is heading at the pace so far.
+
+### Also
+
+- **Sessions started elsewhere**: a Claude Code session started in a terminal or an editor shows too, marked External, read-only.
+- **Notifications**: the bell at the top counts the sessions waiting for you, and a browser notification comes while the tab is in the background. Finished work can be announced as well.
+- **Skills and memory**: a folder's skills, CLAUDE.md and memory notes, listed and edited.
+- **Environment check**: at the start it checks the CLI, its login and the hooks, and says what to do when something is wrong.
+- **Korean and English, light and dark**
+
+## How it works
+
+- Runs only on your machine (`127.0.0.1`), behind a one-time login address, a Host allowlist and an Origin check.
+- Uses the CLI exactly as installed: no reinstall, no PATH changes.
+- Never reads credential files and never proxies model traffic.
+- Observes a Claude Code session through hooks and a status line passed to that session alone with `--settings`. Your settings files are not changed.
 
 ## Run
+
+Needs Node.js 20.19+ or 22.12+, pnpm, and Claude Code installed and logged in.
 
 ```sh
 pnpm install
 pnpm build
-pnpm start        # prints a login address (http://127.0.0.1:7357/?code=…, good once, for 5 minutes) and opens it; if it already runs, opens a new one for that
-pnpm stop         # ends the server, every session and the session host
-pnpm run doctor   # checks Node, node-pty, the CLIs it would run and their login, hooks, the state folder and the port, without starting anything (`pnpm doctor` is pnpm's own)
+pnpm start   # prints a login address and opens it in the browser
+pnpm stop    # ends every session and the session host
 ```
 
-Sessions run in a separate session host, so they keep running when the server stops or restarts, and an open page reconnects by itself. State lives in `~/.agenthouse`: the host's address, a log, per-session files, the session list and plan usage as it changed. Sessions from before a host restart (or a reboot), and sessions you end, stay listed as ended with their conversation until you remove them (the 50 newest ended ones are kept).
+Built and checked on Windows 11. It is written to run on macOS and Linux as well, but has not been checked there yet. Codex CLI can be started in a terminal too, without a status view, and has not been tried with a real Codex install.
 
-Development:
+The screenshots show the made-up sessions of the UI check, with the page in Korean (English is a button in the top bar). The sessions named `ui-…` or `Fake` run a stand-in agent used for testing.
 
-```sh
-pnpm dev          # open the printed http://localhost:5173/?code=… address
-pnpm dev:stop     # ends the dev sessions and the dev session host
-```
-
-`pnpm dev` has its own state folder (`~/.agenthouse-dev`) and port (7358), so it never touches sessions started with `pnpm start`. The server restarts on code changes, but code that runs in the session host (`apps/server/src/host` and what it loads: `src/shared`, `src/claude/status.ts`, `agents.ts`, `background.ts`, `json.ts`, `sessions.ts` and `settings.ts`, `packages/protocol/src`) takes effect only after `pnpm dev:stop`, which ends the dev sessions.
-
-## Use
-
-- **Start**: the page opens on a loading bar while it checks the environment, then shows the workspace. When something is wrong (no CLI, a CLI not logged in, hooks blocked) it stays and says what, with the fix. A warning you went on past with Continue does not stop it again, and a reload in the same tab goes straight to the workspace; the pulse icon at the top still marks what is wrong.
-- **Language**: the page speaks Korean or English: your browser's language at first (English for any language but Korean), and the language button in the top bar (한 or EN) changes it; the choice is remembered, and the page is read again in it while the sessions go on. What the server tells you on the page (the environment check, why something was refused) comes in the same language. What AgentHouse prints in a terminal is Korean.
-- **Which CLI runs**: the environment check (the pulse icon at the top) shows the Claude Code and Codex it runs: by default the first on your PATH, the one your shell runs. Change picks another install or a file of your own (an alias, a folder not on PATH); AgentHouse runs it once to check it is that CLI, and uses it for new sessions.
-- **New session**: the `+` next to "Sessions", or the empty area. Pick the CLI, folder, and optionally model, effort and permission mode; anything left as Default keeps your CLI's own setting.
-- **Open**: click a session in the tree, or drag it onto a pane: dropped in the middle it shows there, at a side it opens in a pane of its own on that side (up to 6 panes), and on the pane header it becomes a tab of that pane. A new session opens as a tab of the pane in use.
-- **Tabs and splits**: a pane holds any number of sessions as tabs; the one on top shows, and the others keep running. Drag a tab (or a pane with one session, by its header) onto another pane's header or to a side of a pane to move it. Drag the gap between two panes to resize them; a double click shares the room evenly. The layout is remembered by the browser.
-- **Group**: drag a session onto another one at the top of the tree and choose Group: it shows under that session from then on, in every browser and after restarts. Drag it onto "To the top" below the tree, or use "To the top" in its details, to bring it back; "Move under" in the details does it without dragging: pick the session to go under, then Group or Delegate. One level: a session with sessions under it stays at the top.
-- **Delegate**: choose Delegate instead of Group, and the session works for the one above it, which shows it as a chip in its pane header. A reply in the upper session's conversation shows a Delegate button when you point at it: drag the button onto that chip or the delegate's pane, or click it and pick the delegate. The reply's text goes to the delegate, and a card follows the work. When the delegate is done, the card shows the first line of its answer; Deliver hands the answer to the upper session as a message, right away or, if that session is busy or waiting for you, as soon as it is idle. To hand over your own words, make the delegate a recipient of the message box (drag it there, or select its pane): a Delegate button appears next to send, and it or `Ctrl+Shift+Enter` sends the text as work from the upper session, with the same card and Deliver. A delegate in the middle of a turn, or waiting for you, is not sent the work; the text stays in the box.
-- **Send to several sessions**: drag sessions onto the message box, type, `Ctrl+Enter`. With none added, the message goes to the focused pane. Sessions waiting for an approval or an answer, or still starting (Claude may be asking whether to trust the folder), are skipped, so a message never answers a dialog. While the active pane shows a terminal, where you type directly, the message box folds to one line; it opens for the conversation and the flow, for sessions dragged onto it, and when you click it. The panes above it never move or resize.
-- **Status**: working, waiting for approval (amber) and idle show on each session. A session nothing reports about (Codex for now, or Claude Code with its hooks blocked) shows a dashed ring and "Not observed": it may well be working. The tab title and the bell at the top count sessions waiting for you, and a browser notification appears while the tab is in the background. The bell opens the list of them; click one to show it. Its "Notify when done" switch also announces a session whose work has ended (working, then idle) while the tab is in the background; a session whose sub-agents still work is not done yet. The chip at the top shows Claude plan usage; open it for the 5-hour and weekly windows and their reset times.
-- **Dashboard**: Dashboard in the switch next to the name (Workspace | Dashboard | Graph | Usage) shows every session at once instead of the workspace, a card each, by what it is doing: waiting for you first, then working, then those with a scheduled prompt (a loop keeps its place there instead of going back and forth at every run), then idle, with the ended ones folded away. A card says how long the session has been so, what it was last asked and, once the turn is over, how its answer starts, and its folder, model, effort and context. What runs in a session shows in an area of its own in its card: scheduled prompts, sub-agents that work or wait for you with the tool they use, background commands. Click a card to show that session in the workspace, which stays as it was underneath.
-- **Graph**: Graph in the same switch draws every session with what runs under it, in two views. Map is a tree on its side: a card for each session, each sub-agent (under the one that started it), each command left running and each scheduled prompt, tied by a line to what it is under. A line to something at work is blue, to something waiting for you amber; a delegated session has an arrow with the state of the work handed to it (In progress, Done, Delivered), a grouped one a dashed line. Point at a card and only what is above and under it stays in full. Flow is the flow view for all sessions on one sheet: who is under whom on the left, and on the right a lane each over the same stretch of time (up to an hour). Running keeps only what runs now. Many finished sub-agents fold into "Done N" and ended sessions into "Ended N", as in the tree. Click a card or a lane to open it in the workspace: a session in its pane, a sub-agent in its session's flow. A graph wider than the window scrolls; there is no zoom.
-- **Usage**: Usage in the same switch shows how Claude plan usage went over the last seven days, a block each for the 5-hour window, the weekly window and what each day took of the weekly limit. On the left of a block is what it stands at now, as in the chip; on the right a graph. Each 5-hour window is a line that steps up as it was used, with a dot at its end when it came near its limit (amber from 75%, red from 90%); the weekly window fills up until it starts over; a day is a column. Point at a graph for what both windows stood at then, or switch to Table for the same as rows. The weekly block also says where it is heading at the rate so far ("At this pace N% at the reset", or about when it will be full). Usage is written down only when a session started in AgentHouse reports it: what was used elsewhere in the meantime shows as one step when the next reading comes, on that day, and a window's first reading is not counted for any day.
-- **Sessions started elsewhere**: a Claude Code session you started in a terminal or an editor, not in AgentHouse, shows too, marked External: in the tree under its folder and on the dashboard by what it is doing (idle, working, waiting for you), with its folder, model, effort and what it was last asked and said. Click it for its conversation or its flow, read-only: it has no terminal here and takes no messages, so approvals and answers are given where it runs. The bell counts it when it waits for you. AgentHouse asks Claude Code for its sessions (`claude agents --json`) every 10 seconds while a page is open, never otherwise; the "External sessions" switch in the bell turns it off. A session shows once its folder is trusted and is gone when it ends; its sub-agents, background work, context and the tool it runs do not show (only a session started in AgentHouse reports those).
-- **Conversation**: the switch in a pane header shows a Claude Code session's conversation instead of its terminal: prompts, replies, tool calls folded into one row (open one for its input and output), sub-agents, and model, effort and tokens per turn. Read-only. Going to the terminal and back keeps what you had opened and where you were reading. A session from before a host restart has only this left. ``Ctrl+` `` switches the active pane between its terminal and its conversation from anywhere on the page, the terminal included (the CLI never gets the key).
-- **Flow**: the last view in the switch shows when everything under a session worked, as a graph: a lane for the session, each of its sub-agents and the sessions grouped or delegated under it, in the tree's order, its name on its bars (filled: working, striped: waiting for you, outlined: done), up to an hour back. Who is under whom stays in the tree. Running keeps only what runs now and the lanes above it. Click a lane to open it in the same pane, a sub-agent's conversation or a session's terminal; ← in the pane header goes back, with the lane you came from marked.
-- **Sub-agents**: the agents a Claude Code session starts show under it in the tree, each under the agent that started it, with its kind and model; open one for its tokens and run time. Click one for its session's flow, with that agent marked; an agent in a conversation opens in the same pane, a chip in the pane header as a tab of that pane; or drag it onto a pane as you would a session. Many finished ones fold behind "Done N". Claude runs them in the background, so a session can be idle while its agents work.
-- **Background work and schedules**: the shell commands and Monitors a Claude Code session runs in the background, and the prompts it has scheduled (`/loop`, CronCreate, a wakeup), show under it in the tree. A task shows running, done or failed (with its exit code) and the latest line a Monitor read; a schedule shows in words ("every 1 min") with how often it has run; open a row for the command, the prompt and the next run. Many ended tasks fold behind "Done N". A scheduled prompt that runs is marked "Scheduled run" in the conversation.
-- **Skills and memory**: they are yours and a folder's, shared by every session and sub-agent there, so they have two buttons of their own at the foot of the session tree, Skills and Memory, each opening a window. It shows the folder of the session you are at, with a switch when sessions run in several folders. Skills lists the skills by where they come from (project, user, plugin, built in), with the ones the folder's sessions ran marked (a plugin's and the built-in ones show once a conversation has started there); a skill of the project or of your own opens its file (SKILL.md) to edit. Memory lists what Claude reads into a session by itself: instructions (your CLAUDE.md and the project's, what they import with `@`, rules, CLAUDE.local.md) and the notes of the project's auto memory. Each opens as the text it is, to edit and save (`Ctrl+S`); a file that changed on disk since it was opened is not overwritten, and is offered to load again.
-- **Terminal keys**: as in Windows Terminal, `Ctrl+C` copies a selection (without one it interrupts, as always) and `Ctrl+V` pastes; `Ctrl+Shift+C`/`V` too.
-- **Details**: the chevron on a row or pane shows CLI version, model, effort, context use, folder and PID.
-- **Ending**: "End session" in a session's details ends its CLI; the session stays listed, ended, with its conversation, like one that quit by itself. Ended sessions fold into one row at the end of the tree ("Ended N"; one shown in a pane or with sessions under it stays where it is). Open the row to see them, "Remove from list" in a session's details takes it off the list, and "Remove all" takes all the folded ones off at once.
-- **Resuming**: Resume in an ended Claude Code session's details starts it again in its folder, where the conversation stopped (`claude --resume`). It comes back as the same session: its place in the tree, its links and the panes showing it stay. Sessions that ended with the session host (a reboot, `pnpm stop`) are resumed the same way. A session whose conversation was never saved, or whose folder is gone, cannot be resumed.
-
-## Checks
-
-```sh
-pnpm typecheck
-pnpm test             # protocol, web, server (a fake agent stands in for the CLIs; no login needed)
-pnpm licenses:check   # dependency license allowlist
-pnpm canary:claude    # the built app against your installed Claude Code; sends no prompt (-- --turn: one short haiku prompt; -- --resume: one, then the session is ended, resumed and asked one more; -- --scenario: approve, deny, interrupt, sub-agents, /clear; -- --background: a background command, a /loop schedule, skills)
-pnpm ui:check         # the built app in your installed Chrome with the fake agent (headless; -- --out <folder> keeps screenshots and one page of them, index.html; --before <folder> puts an earlier run's next to them)
-```
-
-Working on the code with an AI agent: see [AGENTS.md](AGENTS.md).
+Working on the code: see [AGENTS.md](AGENTS.md).
 
 ## License
 
-[MIT](LICENSE).
-
-한국어 안내: [README.ko.md](README.ko.md)
+[MIT](LICENSE). AgentHouse is an independent project. It is not affiliated with or endorsed by Anthropic or OpenAI. "Claude Code" and "Codex" are used only to describe compatibility.

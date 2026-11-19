@@ -72,6 +72,7 @@ AgentHouse is three programs plus a browser app. Know which one a file runs in b
 - A change of looks never changes the size of a pane or its terminal, which would resize the PTY: height is a shadow, not a border. `pnpm ui:check` prints the pane's box and the terminal's size to compare. For the same reason a pane with a terminal is never hidden with `display: none`: what covers the workspace lies over it, and a pane under another tab is not drawn at all (its terminal is taken down, and put up again from the host's screen when its tab is picked). The head of a stack is as high with tabs as with one name, and what shows where a drop would land (the place of a tab in the head, half of the stack over it) moves nothing under it. Sizes that change while the user drags (a divider) are handed to the style sheet as values, not as a rule each.
 - Dependencies must pass `pnpm licenses:check`; never copy code from AGPL projects.
 - No real transcripts, company data or personal paths in the repository.
+- The README's pictures (`screenshots/`) are of the UI check's made-up sessions, never of a real screen, and show no path of the machine they were taken on: no details open, no environment check, no note in its editor.
 - Commits: one logical change each; no `Co-Authored-By` trailers.
 
 ## Local notes (not in the repository)
