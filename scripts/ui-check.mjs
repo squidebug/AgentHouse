@@ -61,6 +61,8 @@ const SCENES = {
   'split-drop': '자유 분할 · 끌어 놓는 중',
   split: '자유 분할',
   'split-narrow': '자유 분할 · 좁은 창',
+  english: '영어',
+  'english-environment': '영어 · 환경 점검',
   graph: '그래프 · 관계',
   'graph-point': '그래프 · 가리키면',
   'graph-lanes': '그래프 · 흐름',
@@ -117,7 +119,8 @@ const { url, port, key } = JSON.parse(await new Promise((resolve) => createInter
 const origin = `http://127.0.0.1:${port}`;
 const browser = await chromium.launch({ channel: 'chrome', headless: !process.argv.includes('--headed') });
 const errors = [];
-const page = await browser.newPage({ viewport: { width: 1360, height: 900 } });
+// The page speaks the browser's language, and the checks find things by their Korean names.
+const page = await browser.newPage({ viewport: { width: 1360, height: 900 }, locale: 'ko-KR' });
 
 try {
   await page.emulateMedia({ colorScheme: 'dark' });
@@ -157,7 +160,7 @@ try {
     [`${origin}/`, '로그인 필요'],
     [url, '로그인 링크 만료'],
   ]) {
-    const stranger = await browser.newPage({ viewport: { width: 800, height: 600 } });
+    const stranger = await browser.newPage({ viewport: { width: 800, height: 600 }, locale: 'ko-KR' });
     await stranger.emulateMedia({ colorScheme: 'dark' });
     await stranger.goto(address);
     await stranger.getByText(label).waitFor();
@@ -821,6 +824,67 @@ try {
   await toldCols('ui-check', (cols) => cols === colsWhole);
   check(sizedBefore === (await sizeNow()), 'a stack closed gives its room back: the pane that stays is the size it was', `${sizedBefore} → ${await sizeNow()}`);
   check(await stillUp('ui-check'), 'and its terminal stayed up through it');
+
+  // English. The button in the top bar says which language the page speaks; another one reads the page
+  // again in it, with the sessions and the panes as they were. What the server says comes in it too.
+  const speaks = () => page.evaluate(() => document.documentElement.lang);
+  const languageButton = page.getByRole('button', { name: '언어', exact: true });
+  check((await speaks()) === 'ko' && (await languageButton.innerText()).trim() === '한', 'the page speaks Korean where the browser does, and the button in the top bar says so');
+  await languageButton.click();
+  check((await page.getByRole('menuitemradio', { name: '한국어' }).getAttribute('aria-checked')) === 'true', 'its menu has the two languages, each in its own words, the one in use marked');
+  await page.getByRole('menuitemradio', { name: 'English' }).click();
+  const screensInEnglish = page.getByRole('navigation', { name: 'Screens' });
+  await screensInEnglish.getByRole('button', { name: 'Workspace' }).waitFor({ timeout: 20_000 });
+  await page.getByRole('region', { name: 'ui-check', exact: true }).locator('.xterm-screen').waitFor({ timeout: 10_000 });
+  check(
+    (await speaks()) === 'en' && (await page.getByRole('complementary', { name: 'Sessions' }).getByRole('button', { name: 'Open ui-check', exact: true }).isVisible()) && (await page.getByRole('textbox', { name: 'Message' }).count()) === 1,
+    'English chosen there: the page is read again in English, with its sessions and its pane as they were',
+  );
+  /** The words on the page that are still Korean: not what a CLI printed in a terminal. */
+  const koreanLeft = () =>
+    page.evaluate(() => {
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      const left = [];
+      while (walker.nextNode()) {
+        const node = walker.currentNode;
+        if (/[ㄱ-ㆎ가-힣]/.test(node.nodeValue ?? '') && !node.parentElement?.closest('.xterm')) left.push((node.nodeValue ?? '').trim().slice(0, 40));
+      }
+      for (const named of document.querySelectorAll('[aria-label], [placeholder], [title]')) {
+        for (const name of ['aria-label', 'placeholder', 'title']) if (/[ㄱ-ㆎ가-힣]/.test(named.getAttribute(name) ?? '')) left.push(`${name}: ${named.getAttribute(name).slice(0, 40)}`);
+      }
+      return left;
+    });
+  check((await koreanLeft()).length === 0, 'no Korean is left on the workspace: its words, the names of its buttons, its dates', (await koreanLeft()).join(' | '));
+  await settle();
+  await page.screenshot({ path: path.join(out, 'english-dark.png') });
+  await page.getByRole('button', { name: 'Light mode' }).click();
+  await settle();
+  await page.screenshot({ path: path.join(out, 'english-light.png') });
+  await page.getByRole('button', { name: 'Dark mode' }).click();
+  for (const name of ['Dashboard', 'Graph', 'Usage']) {
+    await screensInEnglish.getByRole('button', { name }).click();
+    await page.waitForTimeout(700);
+    check((await koreanLeft()).length === 0, `nor on the screen ${name}`, (await koreanLeft()).join(' | '));
+  }
+  await screensInEnglish.getByRole('button', { name: 'Workspace' }).click();
+  // The environment check is the server's sentences: in English for a page that speaks English.
+  await page.getByRole('button', { name: 'Environment check' }).click();
+  await page.getByRole('button', { name: 'Check again' }).waitFor({ timeout: 5000 });
+  await page.waitForTimeout(600);
+  const checkSaid = await page.locator('.MuiPopover-paper').innerText();
+  check(!/[ㄱ-ㆎ가-힣]/.test(checkSaid) && /Node /.test(checkSaid), 'what the server says of the environment is in English too', checkSaid.replace(/\s+/g, ' ').slice(0, 160));
+  await settle();
+  await page.screenshot({ path: path.join(out, 'english-environment-dark.png') });
+  await page.keyboard.press('Escape');
+  // The choice is kept for this browser; back to Korean for the scenes that follow.
+  await page.reload();
+  await screensInEnglish.getByRole('button', { name: 'Workspace' }).waitFor({ timeout: 20_000 });
+  check((await speaks()) === 'en', 'the choice is kept for this browser: a reload comes back in English');
+  await page.getByRole('button', { name: 'Language', exact: true }).click();
+  await page.getByRole('menuitemradio', { name: '한국어' }).click();
+  await screens.getByRole('button', { name: '워크스페이스' }).waitFor({ timeout: 20_000 });
+  await page.getByRole('region', { name: 'ui-check', exact: true }).locator('.xterm-screen').waitFor({ timeout: 10_000 });
+  check((await speaks()) === 'ko' && sizedBefore === (await sizeNow()), 'and back in Korean, the pane and its terminal the size they were', `${sizedBefore} → ${await sizeNow()}`);
   // The reload folded what was open in the tree; as it was, for the scenes that follow.
   await tree.getByRole('button', { name: 'ui-agents 세부 정보' }).click();
 

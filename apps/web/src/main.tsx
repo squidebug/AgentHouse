@@ -12,7 +12,7 @@ import { App } from './App';
 import { Boundary } from './components/Boundary';
 import { LoginGate } from './components/LoginGate';
 import { StartupCheck } from './components/StartupCheck';
-import { t } from './strings';
+import { lang, t } from './strings';
 import { theme } from './theme/theme';
 import { cssVars, motion, MOTION_VARS, STILL_VARS, TOKENS } from './theme/tokens';
 
@@ -35,6 +35,9 @@ const globalStyles = {
     '.ah-working': { animation: 'none' },
   },
 } as const;
+
+// The page says which language it is in: a screen reader reads it so, and the browser offers no translation of it.
+document.documentElement.lang = lang;
 
 const root = document.getElementById('root');
 if (!root) throw new Error('missing #root');

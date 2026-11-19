@@ -1,7 +1,7 @@
-import { Badge, Box, Button, ButtonBase, IconButton, Popover, Tooltip, Typography } from '@mui/material';
+import { Badge, Box, Button, ButtonBase, IconButton, Menu, MenuItem, Popover, Tooltip, Typography } from '@mui/material';
 import { useState } from 'react';
 import type { AccountLimits, EnvReport, SessionInfo, ThemeMode, Vendor } from '@agenthouse/protocol';
-import { t } from '../strings';
+import { chooseLang, lang, LANG_MARKS, LANG_NAMES, LANGS, t } from '../strings';
 import { v } from '../theme/tokens';
 import { SCREENS, type Screen } from '../workspace/dashboard';
 import { CliDialog, CliRows } from './CliChoice';
@@ -35,6 +35,7 @@ const LEVEL_COLOR = { error: v.error, warn: v.warn, info: v.on2 } as const;
 export function TopBar({ screen, onScreen, limits, env, envLoading, refreshEnv, mode, onToggleMode, waiting, onOpenSession, notifyDone, onNotifyDone, external, onExternal }: Props) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const [choosing, setChoosing] = useState<Vendor | null>(null);
+  const [speaking, setSpeaking] = useState<HTMLElement | null>(null);
   const messages = env?.messages ?? [];
   const attention = messages.some((m) => m.level !== 'info');
 
@@ -63,6 +64,29 @@ export function TopBar({ screen, onScreen, limits, env, envLoading, refreshEnv, 
           </Badge>
         </IconButton>
       </Tooltip>
+      {/* The language the page speaks, by its mark; another one reads the page again in it. */}
+      <Tooltip title={t.language}>
+        <IconButton aria-label={t.language} aria-haspopup="menu" onClick={(event) => setSpeaking(event.currentTarget)} sx={{ width: 40, height: 40, fontSize: 12, fontWeight: 600 }}>
+          {LANG_MARKS[lang]}
+        </IconButton>
+      </Tooltip>
+      <Menu open={Boolean(speaking)} anchorEl={speaking} onClose={() => setSpeaking(null)} anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }} transformOrigin={{ vertical: 'top', horizontal: 'right' }}>
+        {LANGS.map((one) => (
+          <MenuItem
+            key={one}
+            role="menuitemradio"
+            aria-checked={one === lang}
+            selected={one === lang}
+            lang={one}
+            onClick={() => {
+              setSpeaking(null);
+              chooseLang(one);
+            }}
+          >
+            {LANG_NAMES[one]}
+          </MenuItem>
+        ))}
+      </Menu>
       <Tooltip title={mode === 'dark' ? t.lightMode : t.darkMode}>
         <IconButton aria-label={mode === 'dark' ? t.lightMode : t.darkMode} onClick={onToggleMode} sx={{ width: 40, height: 40 }}>
           {mode === 'dark' ? <SunIcon /> : <MoonIcon />}

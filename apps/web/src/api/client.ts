@@ -23,6 +23,7 @@ import {
   type UsageHistory,
   type Vendor,
 } from '@agenthouse/protocol';
+import { lang } from '../strings';
 import { authToken, requireLogin } from './auth';
 
 export class RequestError extends Error {
@@ -38,7 +39,8 @@ export class RequestError extends Error {
 
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
   const token = authToken();
-  const headers: Record<string, string> = token ? { authorization: `Bearer ${token}` } : {};
+  // What the server says back to the user (a refusal, the environment check) is in the language the page speaks.
+  const headers: Record<string, string> = { 'accept-language': lang, ...(token ? { authorization: `Bearer ${token}` } : {}) };
   if (body !== undefined) headers['content-type'] = 'application/json';
   const res = await fetch(path, { method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
   const text = await res.text();

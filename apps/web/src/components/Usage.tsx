@@ -20,9 +20,9 @@ const TIP_ROOM = 190;
 
 const small = { fontSize: 12, lineHeight: '16px' } as const;
 
-const dayText = (time: number, month = true) => new Date(time).toLocaleDateString('ko-KR', month ? { month: 'long', day: 'numeric', weekday: 'short' } : { day: 'numeric', weekday: 'short' });
-const clockText = (time: number) => new Date(time).toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' });
-const hourText = (time: number) => new Date(time).toLocaleTimeString('ko-KR', { hour: 'numeric' });
+const dayText = (time: number, month = true) => new Date(time).toLocaleDateString(t.locale, month ? { month: 'long', day: 'numeric', weekday: 'short' } : { day: 'numeric', weekday: 'short' });
+const clockText = (time: number) => new Date(time).toLocaleTimeString(t.locale, { hour: 'numeric', minute: '2-digit' });
+const hourText = (time: number) => new Date(time).toLocaleTimeString(t.locale, { hour: 'numeric' });
 
 /**
  * The readings of the usage log the screen draws: asked for when it shows, when the live value

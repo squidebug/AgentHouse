@@ -1,252 +1,48 @@
-import { VENDOR_NAMES, type BackgroundTask, type DelegationInfo, type MemoryFile, type NoticeKind, type SkillInfo, type StatusValue, type ToolState } from '@agenthouse/protocol';
-import type { Screen } from './workspace/dashboard';
-import type { Side } from './workspace/state';
+// The page's words, in the language it speaks: Korean (strings/ko.ts) or
+// English (strings/en.ts). Which one is settled when the page loads, before
+// anything is drawn: the language chosen in this browser before, else the
+// browser's own. Modules read `t` as they load, so another choice reads the
+// page again; the sessions go on meanwhile.
+import { en } from './strings/en';
+import { ko, type Strings } from './strings/ko';
 
-// UI text in one place so an English catalog can be added later. A map of labels
-// is checked against the values it names (`satisfies`): a value added to the
-// protocol without its label does not compile.
-export const t = {
-  appName: 'AgentHouse',
-  // What the page shows under its top bar, and the switch between them.
-  screens: '화면',
-  screen: { workspace: '워크스페이스', dashboard: '대시보드', graph: '그래프', usage: '사용량' } satisfies Record<Screen, string>,
-  // A screen's own switch between the ways it shows the same thing, and the one that leaves out what does not run.
-  views: '보기',
-  filters: '거르기',
-  // The graph screen: who is under whom as cards tied by lines, or when each worked as lanes over time.
-  graphView: { map: '관계', lanes: '흐름' } satisfies Record<'map' | 'lanes', string>,
-  noSessions: '세션 없음',
-  // A session whose own conversation is idle while its sub-agents work.
-  agentsAtWork: '서브에이전트 작업 중',
-  // When a prompt set for a session ran last, and when it runs next.
-  ranAt: (time: string) => `마지막 ${time}`,
-  runsAt: (time: string) => `다음 ${time}`,
-  more: (n: number) => `+${n}`,
-  sessions: '세션',
-  newSession: '새 세션',
-  dropHere: '여기에 놓기',
-  openHere: '여기서 열기',
-  open: (name: string) => `${name} 열기`,
-  // Where what is dragged lands in a stack of panes: on a side of it, as a stack of its own, or among its tabs.
-  openSide: { left: '왼쪽에 열기', right: '오른쪽에 열기', top: '위에 열기', bottom: '아래에 열기' } satisfies Record<Side, string>,
-  addTab: '탭으로 추가',
-  tabs: '탭',
-  closeTab: '탭 닫기',
-  // The divider between two stacks, which shares their room anew.
-  resizePanes: '칸 크기',
-  addRecipient: '받는 세션 추가',
-  removeRecipient: (name: string) => `${name} 빼기`,
-  composer: '입력',
-  message: '메시지',
-  send: '보내기',
-  sendShortcut: '보내기 · Ctrl+Enter',
-  details: '세부 정보',
-  close: '닫기',
-  closePane: '칸 닫기',
-  endSession: '세션 종료',
-  resumeSession: '이어서 열기',
-  removeSession: '목록에서 제거',
-  endedSessions: (n: number) => `종료 ${n}`,
-  removeAll: '모두 제거',
-  removeEnded: (n: number) => `종료된 세션 ${n}개 제거`,
-  noScreen: '터미널 화면 없음',
-  cannotShow: '표시할 수 없음',
-  reload: '새로고침',
-  failure: { delegate: '위임 실패', deliver: '전달 실패', end: '종료 실패', resume: '이어서 열기 실패', remove: '제거 실패', link: '옮기기 실패', save: '저장 실패', load: '불러오기 실패', setting: '설정 실패' },
-  running: '실행 중',
-  exited: '종료',
-  lightMode: '라이트 모드',
-  darkMode: '다크 모드',
-  notifications: '알림',
-  // Sessions that wait for an approval or an answer, as the bell counts and lists them.
-  waiting: '승인·입력 대기',
-  waitingCount: (n: number) => `승인·입력 대기 ${n}`,
-  notifyDone: '완료 알림',
-  // A session started outside AgentHouse (a terminal, an editor) and only watched; the switch that watches them.
-  external: '외부',
-  externalSessions: '외부 세션',
-  notifyBlocked: '브라우저 알림 차단됨',
-  // What a notification says of a session whose work ended.
-  workDone: '작업 완료',
-  environment: '환경 점검',
-  recheck: '다시 확인',
-  copy: '복사',
-  copied: '복사됨',
-  disconnected: '서버 연결 끊김 · 다시 연결 중',
-  loginNeeded: '로그인 필요',
-  loginExpired: '로그인 링크 만료',
-  checking: '환경 점검 중',
-  continue: '계속',
-  change: '변경',
-  executable: '실행 파일',
-  shellDefault: '셸 기본',
-  chooseFile: '직접 지정',
-  fullPath: '전체 경로',
-  save: '저장',
-  chosen: '지정함',
-  chosenUnusable: '지정한 파일을 쓸 수 없음',
-  none: '없음',
-  // The start screen's one-line issues; the server's sentence shows on hover.
-  issue: {
-    noCli: 'Claude Code 또는 Codex 필요',
-    fileUnusable: (cli: string) => `${cli} 실행 파일을 쓸 수 없음`,
-    loggedOut: (cli: string) => `${cli} 로그인 필요`,
-    hooksBlocked: 'hook 막힘 · 관리 정책',
-    hooksOff: 'hook 꺼짐 · disableAllHooks',
-    noHookShell: 'hook 실행 셸 없음',
-    hostOutdated: '세션 호스트가 이전 코드',
-    hostOlder: '이전 버전 세션 호스트 실행 중',
-  },
-  openLink: '링크 열기',
-  cancel: '취소',
-  start: '시작',
-  launchTitle: '새 세션',
-  cli: 'CLI',
-  pid: 'PID',
-  title: '제목',
-  folder: '작업 폴더',
-  path: '경로',
-  size: '크기',
-  exitCode: '종료 코드',
-  model: '모델',
-  effort: 'effort',
-  permissionMode: '권한 모드',
-  default: '기본값',
-  notInstalled: '설치 필요',
-  noIssues: '문제 없음',
-  sentTo: (n: number) => `${n}개 세션에 보냄`,
-  delegatedTo: (n: number) => `${n}개 세션에 위임`,
-  failedFor: (n: number) => `${n}개 실패`,
-  heldFor: (n: number) => `${n}개 보류`,
-  pastedFor: (n: number) => `${n}개 입력란에 남음`,
-  status: {
-    starting: '시작 중',
-    unobserved: '관측 없음',
-    idle: '대기',
-    working: '작업 중',
-    awaiting_permission: '승인 대기',
-    awaiting_input: '입력 대기',
-    exited: '종료',
-  } satisfies Record<StatusValue, string>,
-  // Open: besides these, a reason is a tool's name or an error kind, shown as it is.
-  reason: { interrupted: '중단됨', cleared: '새 대화', question: '질문', plan: '계획 확인', elicitation: '입력 요청' } as Record<string, string>,
-  error: '오류',
-  statusLabel: '상태',
-  context: '컨텍스트',
-  cost: 'API 환산',
-  usage: '사용량',
-  fiveHour: '5시간',
-  sevenDay: '주간',
-  resetsAt: '초기화',
-  // The usage screen: the plan's windows over the last days, as graphs or as the same in rows.
-  usageView: { chart: '그래프', table: '표' } satisfies Record<'chart' | 'table', string>,
-  usageChart: { fiveHour: '5시간 창의 사용률', sevenDay: '주간 창의 사용률', daily: '하루에 쓴 양' },
-  usageHead: { window: '창', peak: '최고', end: '끝 값', day: '날', used: '쓴 양' },
-  // What a day took of the weekly limit, and the mean of the days that took any.
-  daily: '하루',
-  today: '오늘',
-  ofWeekly: '주간 한도 대비',
-  dailyMean: (pct: number) => `평균 ${pct}%`,
-  // Where the weekly window is heading at the rate it has gone: what it stands at when it starts over, or when it is full.
-  paceAtReset: (pct: number) => `이 속도면 초기화 때 ${pct}%`,
-  paceFull: (when: string) => `이 속도면 ${when}쯤 한도`,
-  noReadings: '기록 없음',
-  vendorName: VENDOR_NAMES,
-  terminal: '터미널',
-  conversation: '대화',
-  flow: '흐름',
-  withModeShortcut: (label: string) => `${label} · Ctrl+\``,
-  back: '뒤로',
-  filterAll: '전체',
-  filterRunning: '실행 중',
-  legend: { working: '작업 중', waiting: '승인 대기', done: '완료' } satisfies Record<'working' | 'waiting' | 'done', string>,
-  before: (span: string) => `${span} 전`,
-  later: (span: string) => `${span} 후`,
-  now: '지금',
-  justNow: '방금',
-  recent: (span: string) => `최근 ${span}`,
-  // Spans of time are put together where they are shown: 45초, 1분 30초, 1시간 5분.
-  unit: { day: '일', hour: '시간', minute: '분', second: '초' },
-  underSecond: '1초 미만',
-  underMinute: '1분 미만',
-  noConversation: '대화 없음',
-  earlierTurns: (n: number) => `이전 턴 ${n}개`,
-  tools: (n: number) => `도구 ${n}`,
-  thoughts: (n: number) => `생각 ${n}`,
-  failedCount: (n: number) => `실패 ${n}`,
-  thinking: '생각',
-  chars: (n: string) => `${n}자`,
-  turn: (n: number) => `턴 ${n}`,
-  subagent: '서브에이전트',
-  images: (n: number) => `이미지 ${n}`,
-  partial: '일부만 표시',
-  showAll: '전체 보기',
-  input: '입력',
-  output: '출력',
-  cacheRead: '캐시 읽기',
-  cacheWrite: '캐시 쓰기',
-  uncached: '캐시 없이',
-  apiCalls: 'API 호출',
-  toolState: { running: '실행 중', done: '완료', error: '오류', denied: '거부됨', interrupted: '중단됨' } satisfies Record<ToolState, string>,
-  agentState: { running: '작업 중', asking: '승인 대기', stopped: '완료' } satisfies Record<'running' | 'asking' | 'stopped', string>,
-  report: { done: '보고', error: '실패 보고', interrupted: '중단 보고', running: '보고', denied: '실패 보고' } satisfies Record<ToolState, string>,
-  finishedAgents: (n: number) => `완료 ${n}`,
-  foldAgents: '접기',
-  moreAgents: (n: number) => `+${n}`,
-  openConversation: '대화 열기',
-  agentType: '유형',
-  tokens: '토큰',
-  elapsed: '경과',
-  // What a session left running in the background, and the prompts set for later; any other kind of task shows as the CLI names it.
-  backgroundWork: '백그라운드 작업',
-  taskType: { shell: '셸', monitor: '모니터' } as Record<string, string>,
-  taskState: { running: '실행 중', done: '완료', failed: '실패', stopped: '중단됨' } satisfies Record<BackgroundTask['state'], string>,
-  command: '명령',
-  lastEvent: '마지막 출력',
-  scheduled: '예약',
-  scheduledPrompt: '예약 실행',
-  schedule: '일정',
-  everyMinutes: (n: number) => `${n}분마다`,
-  everyHours: (n: number) => `${n}시간마다`,
-  hourlyAt: (minute: number) => `매시 ${minute}분`,
-  dailyAt: (time: string) => `매일 ${time}`,
-  onceAt: (time: string) => `${time} 한 번`,
-  monthDay: (month: number, day: number) => `${month}월 ${day}일`,
-  nextRun: '다음 실행',
-  lastRun: '마지막 실행',
-  runCount: (n: number) => `${n}회`,
-  prompt: '프롬프트',
-  // Skills and memory are the user's and a folder's: at the foot of the tree, a window each.
-  library: '스킬·메모리',
-  skills: '스킬',
-  skillSource: { project: '프로젝트', user: '사용자', plugin: '플러그인', builtin: '기본' } satisfies Record<SkillInfo['source'], string>,
-  skillUsed: '사용함',
-  noSkills: '스킬 목록 없음',
-  // What Claude reads into a session by itself: the user's instructions, and the notes it keeps for the project.
-  memory: '메모리',
-  memoryKind: { instructions: '지침', memory: '자동 메모리' } satisfies Record<MemoryFile['kind'], string>,
-  memoryScope: { user: '사용자', project: '프로젝트', local: '로컬' } satisfies Record<MemoryFile['scope'], string>,
-  edit: (name: string) => `${name} 편집`,
-  changedOnDisk: '디스크에서 바뀜',
-  // A note that changed on disk, or anything that did not load: asked for again.
-  loadAgain: '다시 불러오기',
-  loading: '불러오는 중',
-  parentAgent: '상위',
-  session: '세션',
-  group: '묶음',
-  groupAction: '묶기',
-  toTop: '최상위로',
-  // Under another session without dragging: the session to go under, then how.
-  nest: '아래로 넣기',
-  nestUnder: '넣을 세션',
-  delegate: '위임',
-  delegateAction: '위임',
-  delegateShortcut: '위임 · Ctrl+Shift+Enter',
-  delegateTo: '위임할 세션',
-  deliver: '전달',
-  delegation: { running: '진행 중', done: '완료', interrupted: '중단됨', failed: '실패' } satisfies Record<DelegationInfo['status'], string>,
-  delivery: { queued: '대기열', sent: '전달됨', failed: '전달 실패' } satisfies Record<Exclude<DelegationInfo['delivery'], 'none'>, string>,
-  /** What the parent session gets in front of the delegate's answer. */
-  delegationResult: (title: string) => `[위임 결과 · ${title}]`,
-  notice: { interrupted: '중단됨', cleared: '새 대화', compacted: '대화 요약', api_error: 'API 오류' } satisfies Record<NoticeKind, string>,
-} as const;
+export type { Strings } from './strings/ko';
+
+export type Lang = 'ko' | 'en';
+export const LANGS: readonly Lang[] = ['ko', 'en'];
+/** Each language in its own words, and the mark of it on the button that changes it. */
+export const LANG_NAMES: Record<Lang, string> = { ko: '한국어', en: 'English' };
+export const LANG_MARKS: Record<Lang, string> = { ko: '한', en: 'EN' };
+
+const LANG_KEY = 'ah-lang';
+const CATALOGS: Record<Lang, Strings> = { ko, en };
+
+/** The language to speak: the one chosen before, else the browser's (Korean for Korean, English for any other); Korean where there is no browser. */
+export function pickLang(chosen: string | null | undefined, browser: string | null | undefined): Lang {
+  if (chosen === 'ko' || chosen === 'en') return chosen;
+  if (!browser) return 'ko';
+  return browser.toLowerCase().startsWith('ko') ? 'ko' : 'en';
+}
+
+function chosenBefore(): string | null {
+  try {
+    return globalThis.localStorage?.getItem(LANG_KEY) ?? null;
+  } catch {
+    // private windows and blocked storage: the browser's language, each time
+    return null;
+  }
+}
+
+// A test has no page: it reads the Korean words, whatever the machine it runs on speaks.
+export const lang: Lang = pickLang(chosenBefore(), typeof document === 'undefined' ? null : globalThis.navigator?.language);
+export const t: Strings = CATALOGS[lang];
+
+/** The user's choice: kept for this browser, and the page is read again in it. */
+export function chooseLang(next: Lang): void {
+  try {
+    globalThis.localStorage?.setItem(LANG_KEY, next);
+  } catch {
+    // nowhere to keep it: the page comes back in the browser's language
+  }
+  if (next !== lang) globalThis.location?.reload();
+}

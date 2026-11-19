@@ -12,13 +12,13 @@ export const tone = (pct: number) => (pct >= 90 ? v.error : pct >= 75 ? v.warn :
 
 export function resetText(at: number, now: number): string {
   const date = new Date(at);
-  const time = date.toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' });
-  const day = new Date(now).toDateString() === date.toDateString() ? '' : `${date.toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'short' })} `;
+  const time = date.toLocaleTimeString(t.locale, { hour: 'numeric', minute: '2-digit' });
+  const day = new Date(now).toDateString() === date.toDateString() ? '' : `${date.toLocaleDateString(t.locale, { month: 'long', day: 'numeric', weekday: 'short' })} `;
   const minutes = Math.max(0, Math.round((at - now) / 60_000));
   const hours = Math.floor(minutes / 60);
   const { day: days, hour, minute } = t.unit;
   const left = hours >= 24 ? `${Math.floor(hours / 24)}${days} ${hours % 24}${hour}` : hours ? `${hours}${hour} ${minutes % 60}${minute}` : `${minutes}${minute}`;
-  return `${day}${time} ${t.resetsAt} · ${t.later(left)}`;
+  return `${t.resetsAt(`${day}${time}`)} · ${t.later(left)}`;
 }
 
 /** A share of something as a thin bar, in the color of how near its limit it is; as wide as its row unless given a width. */
