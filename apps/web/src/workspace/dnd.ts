@@ -1,5 +1,5 @@
 import type { DragEvent } from 'react';
-import { accepts, dropEffect, type Action, type Drag, type DropContext, type DropTarget, type WorkspaceState } from './state';
+import { accepts, dropEffect, sameDrop, type Action, type Drag, type DropContext, type DropTarget, type WorkspaceState } from './state';
 
 /** Native HTML drag-and-drop wired to the workspace reducer. */
 export interface Dnd {
@@ -21,11 +21,7 @@ export interface DropRequests {
 }
 
 export function makeDnd(state: WorkspaceState, dispatch: (action: Action) => void, ctx: DropContext, requests: DropRequests): Dnd {
-  const isOver = (target: DropTarget) => {
-    const over = state.over;
-    if (!over || over.type !== target.type) return false;
-    return !('id' in over) || !('id' in target) || over.id === target.id;
-  };
+  const isOver = (target: DropTarget) => state.over !== null && sameDrop(state.over, target);
   return {
     dragging: state.drag,
     isOver,

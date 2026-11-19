@@ -40,9 +40,9 @@ export function App() {
   const ctxRef = useRef<DropContext>({ runningIds: [] });
   const [state, dispatch] = useReducer((s: WorkspaceState, a: Action) => reducer(s, a, ctxRef.current), undefined, () => loadWorkspace());
 
-  const { panes, active, nextPane, paneMode } = state;
+  const { panes, stacks, layout, active, nextPane, paneMode } = state;
   // Only what a reload brings back is saved, so only a change of that saves.
-  useEffect(() => saveWorkspace(state), [panes, active, nextPane, paneMode]);
+  useEffect(() => saveWorkspace(state), [panes, stacks, layout, active, nextPane, paneMode]);
 
   // What shows under the top bar: the workspace, or another screen laid over it (the dashboard, the graph, the plan's usage).
   const [screen, setScreen] = useState<Screen>(() => loadScreen());

@@ -1,5 +1,6 @@
 import { VENDOR_NAMES, type BackgroundTask, type DelegationInfo, type MemoryFile, type NoticeKind, type SkillInfo, type StatusValue, type ToolState } from '@agenthouse/protocol';
 import type { Screen } from './workspace/dashboard';
+import type { Side } from './workspace/state';
 
 // UI text in one place so an English catalog can be added later. A map of labels
 // is checked against the values it names (`satisfies`): a value added to the
@@ -26,7 +27,13 @@ export const t = {
   dropHere: '여기에 놓기',
   openHere: '여기서 열기',
   open: (name: string) => `${name} 열기`,
-  swap: '자리 바꾸기',
+  // Where what is dragged lands in a stack of panes: on a side of it, as a stack of its own, or among its tabs.
+  openSide: { left: '왼쪽에 열기', right: '오른쪽에 열기', top: '위에 열기', bottom: '아래에 열기' } satisfies Record<Side, string>,
+  addTab: '탭으로 추가',
+  tabs: '탭',
+  closeTab: '탭 닫기',
+  // The divider between two stacks, which shares their room anew.
+  resizePanes: '칸 크기',
   addRecipient: '받는 세션 추가',
   removeRecipient: (name: string) => `${name} 빼기`,
   composer: '입력',

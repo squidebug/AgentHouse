@@ -56,6 +56,11 @@ const SCENES = {
   memory: '메모리',
   dashboard: '대시보드',
   'dashboard-more': '대시보드 · 여러 세션',
+  'tabs-drop': '탭 · 끌어 놓는 중',
+  tabs: '탭',
+  'split-drop': '자유 분할 · 끌어 놓는 중',
+  split: '자유 분할',
+  'split-narrow': '자유 분할 · 좁은 창',
   graph: '그래프 · 관계',
   'graph-point': '그래프 · 가리키면',
   'graph-lanes': '그래프 · 흐름',
@@ -705,6 +710,119 @@ try {
   await page.getByRole('region', { name: 'ui-check', exact: true }).locator('.xterm-screen').waitFor({ timeout: 10_000 });
   await page.waitForTimeout(400);
   check(sizedBefore === (await sizeNow()), 'the pane and its terminal are the size they were before the usage screen', `${sizedBefore} → ${await sizeNow()}`);
+
+  // Tabs and free splits. A session dropped on the head of a stack is a tab of it: only the pane on top is
+  // drawn, and no terminal changes its size for it. Dropped at a side of a stack, it is a stack of its own there,
+  // and the room between two stacks is dragged to share their room anew.
+  const stackOf = (name) => page.getByRole('region', { name, exact: true });
+  const boxOf = async (name) => round(await stackOf(name).boundingBox());
+  const whole = await boxOf('ui-check');
+  const screenOf = async (name) => round(await stackOf(name).locator('.xterm-screen').boundingBox());
+  const screenWhole = await screenOf('ui-check');
+  // The terminal that is up is marked, to tell afterwards that it is still that one: not taken down and put up again.
+  const mark = (name) => stackOf(name).locator('.xterm').evaluate((element) => void (element.dataset.kept = 'yes'));
+  const stillUp = async (name) => (await stackOf(name).locator('.xterm[data-kept="yes"]').count()) === 1;
+  /** A row of the tree dragged by hand to a point of the page: where it would land shows while it is held there. */
+  const dragRow = async (title, to, held) => {
+    await row(title).hover();
+    await page.mouse.down();
+    await page.mouse.move(to.x - 24, to.y, { steps: 6 });
+    // Twice: the second move is what tells the place that something is over it.
+    await page.mouse.move(to.x, to.y, { steps: 3 });
+    await held();
+    await page.mouse.up();
+  };
+  await dragRow('ui-agents', { x: whole.x + whole.width / 2, y: whole.y + 24 }, async () => {
+    await stackOf('ui-check').getByText('탭으로 추가', { exact: true }).waitFor({ timeout: 5000 });
+    await page.screenshot({ path: path.join(out, 'tabs-drop-dark.png') });
+  });
+  const tabsOf = (name) => stackOf(name).getByRole('tablist', { name: '탭' });
+  await tabsOf('ui-agents').getByRole('tab', { name: 'ui-agents', exact: true, selected: true }).waitFor({ timeout: 5000 });
+  await stackOf('ui-agents').locator('.xterm-screen').waitFor({ timeout: 10_000 });
+  check((await tabsOf('ui-agents').getByRole('tab').count()) === 2 && JSON.stringify(await boxOf('ui-agents')) === JSON.stringify(whole), 'a session dropped on the head of a stack is a tab of it, on top, in the same box');
+  check((await page.locator('.xterm-screen').count()) === 1, 'only the pane on top is drawn: the terminal under the other tab is taken down');
+  await settle();
+  await page.screenshot({ path: path.join(out, 'tabs-dark.png') });
+  await page.getByRole('button', { name: '라이트 모드' }).click();
+  await settle();
+  await page.screenshot({ path: path.join(out, 'tabs-light.png') });
+  await page.getByRole('button', { name: '다크 모드' }).click();
+  await tabsOf('ui-agents').getByRole('tab', { name: 'ui-check', exact: true }).click();
+  await stackOf('ui-check').locator('.xterm-screen').waitFor({ timeout: 10_000 });
+  await page.waitForTimeout(600);
+  check(sizedBefore === (await sizeNow()), 'picked again, a tab puts its terminal up at the size it had', `${sizedBefore} → ${await sizeNow()}`);
+  check(JSON.stringify(await screenOf('ui-check')) === JSON.stringify(screenWhole), 'under the tabs a terminal has the box it had under the name of its pane', `${JSON.stringify(screenWhole)} → ${JSON.stringify(await screenOf('ui-check'))}`);
+
+  // At the right side of the stack: the pane that shows the session moves out into a stack of its own.
+  await mark('ui-check');
+  await dragRow('ui-agents', { x: whole.x + whole.width * 0.92, y: whole.y + whole.height / 2 }, async () => {
+    await stackOf('ui-check').getByText('오른쪽에 열기', { exact: true }).waitFor({ timeout: 5000 });
+    await page.screenshot({ path: path.join(out, 'split-drop-dark.png') });
+  });
+  await stackOf('ui-agents').locator('.xterm-screen').waitFor({ timeout: 10_000 });
+  const [leftHalf, rightHalf] = [await boxOf('ui-check'), await boxOf('ui-agents')];
+  check(
+    Math.abs(leftHalf.width - rightHalf.width) < 1 && Math.abs(leftHalf.width + 12 + rightHalf.width - whole.width) < 1 && rightHalf.x > leftHalf.x + leftHalf.width && leftHalf.height === whole.height,
+    'dropped at a side of a stack, it is a stack of its own there: the two share the room evenly',
+    `${leftHalf.width} + 12 + ${rightHalf.width} of ${whole.width}`,
+  );
+  check((await tabsOf('ui-check').count()) === 0, 'a stack left with one pane shows its name as before, without tabs');
+  check(await stillUp('ui-check'), 'the terminal of the stack that was there stays up while a stack is made beside it');
+  const colsOf = async (title) => (await named(title)).cols;
+  const colsWhole = Number(sizedBefore.split(' ').at(-1).split('×')[0]);
+  const toldCols = async (title, fits) => {
+    for (let tries = 0; tries < 60 && !fits(await colsOf(title)); tries += 1) await page.waitForTimeout(100);
+    return colsOf(title);
+  };
+  check((await toldCols('ui-check', (cols) => cols < colsWhole)) < colsWhole, 'its terminal tells the PTY its new width once the layout has settled', `${colsWhole} → ${await colsOf('ui-check')} columns`);
+  // The room between the two, dragged: one takes what the other gives. A double click shares it evenly again.
+  const divider = page.getByRole('separator', { name: '칸 크기' });
+  const grip = await divider.boundingBox();
+  await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(grip.x + grip.width / 2 + 160, grip.y + grip.height / 2, { steps: 8 });
+  await page.mouse.up();
+  const [wider, narrower] = [await boxOf('ui-check'), await boxOf('ui-agents')];
+  check(Math.abs(wider.width - leftHalf.width - 160) < 2 && Math.abs(narrower.width - rightHalf.width + 160) < 2, 'the room between two stacks is dragged to share their room anew', `${leftHalf.width} → ${wider.width}, ${rightHalf.width} → ${narrower.width}`);
+  await settle();
+  await page.screenshot({ path: path.join(out, 'split-dark.png') });
+  await page.getByRole('button', { name: '라이트 모드' }).click();
+  await settle();
+  await page.screenshot({ path: path.join(out, 'split-light.png') });
+  await page.getByRole('button', { name: '다크 모드' }).click();
+  await divider.dblclick();
+  check(Math.abs((await boxOf('ui-check')).width - leftHalf.width) < 1, 'a double click on it shares the room evenly again');
+  await divider.focus();
+  await page.keyboard.press('ArrowLeft');
+  check((await boxOf('ui-check')).width < leftHalf.width, 'and the arrow keys move it by a step');
+  // An area too narrow for stacks side by side has them one above the other, each as wide as the area.
+  const kept = [await boxOf('ui-check'), await boxOf('ui-agents')];
+  await page.setViewportSize({ width: 1000, height: 900 });
+  const [upper, lower] = [await boxOf('ui-check'), await boxOf('ui-agents')];
+  check(
+    upper.x === lower.x && upper.width === lower.width && upper.width > kept[0].width && Math.abs(lower.y - upper.y - upper.height - 12) < 1 && (await divider.isHidden()),
+    'in a window too narrow for them side by side, the stacks lie one above the other, each as wide as the area',
+    JSON.stringify([upper, lower]),
+  );
+  await settle();
+  await page.screenshot({ path: path.join(out, 'split-narrow-dark.png') });
+  await page.setViewportSize({ width: 1360, height: 900 });
+  check(JSON.stringify([await boxOf('ui-check'), await boxOf('ui-agents')]) === JSON.stringify(kept) && (await stillUp('ui-check')), 'and side by side again, as they were, once there is room');
+  // The layout is kept: a reload shows the same stacks at the same shares.
+  await page.reload();
+  await enter();
+  await stackOf('ui-agents').locator('.xterm-screen').waitFor({ timeout: 10_000 });
+  check(JSON.stringify([await boxOf('ui-check'), await boxOf('ui-agents')]) === JSON.stringify(kept), 'a reload shows the same stacks, each with the share it had');
+  // Closed, a stack gives its room back, and the terminal that stays is told its old size again.
+  await stackOf('ui-check').locator('.xterm-screen').waitFor({ timeout: 10_000 });
+  await mark('ui-check');
+  await stackOf('ui-agents').getByRole('button', { name: 'ui-agents 칸 닫기' }).click();
+  await stackOf('ui-agents').waitFor({ state: 'detached', timeout: 5000 });
+  await toldCols('ui-check', (cols) => cols === colsWhole);
+  check(sizedBefore === (await sizeNow()), 'a stack closed gives its room back: the pane that stays is the size it was', `${sizedBefore} → ${await sizeNow()}`);
+  check(await stillUp('ui-check'), 'and its terminal stayed up through it');
+  // The reload folded what was open in the tree; as it was, for the scenes that follow.
+  await tree.getByRole('button', { name: 'ui-agents 세부 정보' }).click();
 
   // Delegation: a session works for another; a piece of the lead's conversation goes to it, and its answer comes back.
   for (const title of ['ui-lead', 'ui-helper']) {

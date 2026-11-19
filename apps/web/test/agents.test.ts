@@ -61,8 +61,9 @@ test('a sub-agent opens in a pane of its own, apart from its session; dropped on
 
   s = run(s, { type: 'dragStart', drag: { kind: 'agent', id: 'a2', sessionId: 's1' } }, { type: 'drop', target: { type: 'composer' } });
   assert.deepEqual(s.targets, []);
-  s = run(s, { type: 'dragStart', drag: { kind: 'agent', id: 'a2', sessionId: 's1' } }, { type: 'drop', target: { type: 'slot' } });
+  s = run(s, { type: 'dragStart', drag: { kind: 'agent', id: 'a2', sessionId: 's1' } }, { type: 'drop', target: { type: 'edge', id: 's1', side: 'right' } });
   assert.deepEqual(s.panes.at(-1), { id: 'p3', sessionId: 's1', agentId: 'a2' });
+  assert.deepEqual(s.stacks.map((stack) => stack.panes), [['p1', 'p2'], ['p3']], 'dropped at a side of the stack: a stack of its own there');
   s = run(s, { type: 'dragStart', drag: { kind: 'session', id: 's2' } }, { type: 'drop', target: { type: 'pane', id: 'p3' } });
   assert.deepEqual(
     s.panes.at(-1),
