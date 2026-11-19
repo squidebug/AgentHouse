@@ -95,6 +95,15 @@ export interface AccountLimits {
   at: number;
 }
 
+/**
+ * GET /api/usage?since=<epoch ms>: plan usage as it went. A reading is what an
+ * account's windows stood at whenever the share used of either, or the time it
+ * starts over, changed; the oldest first, none from before `since`.
+ */
+export interface UsageHistory {
+  readings: AccountLimits[];
+}
+
 /** One conversation of a session in the CLI's own transcript file. Claude Code starts a new one on /clear. */
 export interface TranscriptSegment {
   /** The CLI's session id for this conversation. */

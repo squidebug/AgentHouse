@@ -1,5 +1,5 @@
-// What the web server takes from a request: the bodies of the API, the address
-// of a sub-agent, and the messages of a terminal socket.
+// What the web server takes from a request: the bodies of the API, what an
+// address asks for (a sub-agent, a time), and the messages of a terminal socket.
 import { z } from 'zod';
 import type { ChooseCliRequest, ComposeRequest, ExternalRequest, LaunchOptions, LoginRequest, TerminalClientMessage } from '@agenthouse/protocol';
 import { AGENT_ID } from '../../claude/agents';
@@ -70,6 +70,12 @@ export function agentParam(url: URL): string | null | undefined {
   const value = url.searchParams.get('agent');
   if (value === null) return null;
   return AGENT_ID.test(value) ? value : undefined;
+}
+
+/** The time an address asks from (`?since=`, epoch milliseconds); undefined when it names none. */
+export function sinceParam(url: URL): number | undefined {
+  const value = url.searchParams.get('since');
+  return value !== null && /^\d{1,15}$/.test(value) ? Number(value) : undefined;
 }
 
 // Each message of the protocol as the host may get it: what parses here is passed on, anything else is dropped.

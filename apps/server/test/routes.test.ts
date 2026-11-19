@@ -25,6 +25,7 @@ const services = {
     list: () => [...sessions.values()],
     create: async (options: unknown) => note('create', options),
     end: async (id: string) => note('end', id),
+    usageSince: async (from: number) => note('usageSince', from),
   },
   conversations: { detail: async (...call: unknown[]) => (note('detail', ...call), { truncated: false }) },
   delegations: {},
@@ -68,6 +69,13 @@ describe('the API as a table of routes', () => {
     await assert.rejects(ask('PUT', '/api/external', { on: true, padding: 'x'.repeat(2000) }), refused(413), 'larger than this route takes');
     assert.deepEqual((await ask('PUT', '/api/external', { on: false })).body, { on: false });
     assert.deepEqual(asked.at(-1), ['external', false]);
+  });
+
+  test('plan usage is asked for since a time, which the address must name', async () => {
+    assert.deepEqual(await ask('GET', '/api/usage?since=1763430000000'), { status: 200, body: { readings: ['usageSince', 1763430000000] } });
+    for (const address of ['/api/usage', '/api/usage?since=', '/api/usage?since=yesterday', '/api/usage?since=-5', '/api/usage?since=1e3', '/api/usage?since=1763430000000.5']) {
+      await assert.rejects(ask('GET', address), refused(400, 'INVALID_REQUEST'), address);
+    }
   });
 
   test('every line is under /api/, where the door asks for a login first, and no two lines are for the same request', () => {

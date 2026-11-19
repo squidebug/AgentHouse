@@ -3,7 +3,7 @@
 // what it refuses. Who may ask at all (Host, login, Origin) is decided before a
 // request gets here, in server.ts.
 import type { IncomingMessage } from 'node:http';
-import type { ApiError, ComposeResult, SessionInfo, TextFile } from '@agenthouse/protocol';
+import type { ApiError, ComposeResult, SessionInfo, TextFile, UsageHistory } from '@agenthouse/protocol';
 import { memoryFiles } from '../../claude/memory';
 import { FileError, MAX_FILE_BYTES, readText, writeText } from '../../claude/notes';
 import { claudeConfigDir } from '../../claude/settings';
@@ -16,7 +16,7 @@ import { CliChoiceError, type EnvService } from '../doctor';
 import { HostUnavailableError } from '../host-client';
 import { LinkError } from '../links';
 import type { SessionManager } from '../manager';
-import { agentParam, ChooseCliBody, ComposeBody, DelegateBody, DeliverBody, ExternalBody, LaunchBody, LinkBody, NoteBody, ResumeBody } from './schemas';
+import { agentParam, ChooseCliBody, ComposeBody, DelegateBody, DeliverBody, ExternalBody, LaunchBody, LinkBody, NoteBody, ResumeBody, sinceParam } from './schemas';
 
 /** A request refused for what it asks, with the status that says so. */
 export class HttpError extends Error {
@@ -197,6 +197,12 @@ export function apiRoutes({ env, manager, conversations, delegations, setExterna
       const { on } = await body(ExternalBody, 1024);
       setExternal(on);
       return { on };
+    }),
+    // Plan usage as it went since a time, from the usage log: what the usage screen draws.
+    route('GET', '/api/usage', async ({ url }): Promise<UsageHistory> => {
+      const since = sinceParam(url);
+      if (since === undefined) throw new HttpError(400, '요청 값이 올바르지 않습니다.', 'INVALID_REQUEST');
+      return { readings: await manager.usageSince(since) };
     }),
 
     route('GET', '/api/sessions', () => manager.list()),

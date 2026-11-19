@@ -139,6 +139,11 @@ export class SessionManager extends EventEmitter {
     return [...newest.values()].map((entry) => stillValid(entry)).filter((entry): entry is AccountLimits => entry !== null);
   }
 
+  /** Plan usage as it changed since a time, the oldest first, as the usage log has it. */
+  usageSince(from: number): Promise<AccountLimits[]> {
+    return this.usage.since(from);
+  }
+
   create(opts: LaunchOptions): Promise<SessionInfo> {
     return this.start(opts, randomUUID());
   }

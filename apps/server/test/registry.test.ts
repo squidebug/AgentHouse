@@ -197,4 +197,33 @@ describe('usage log', () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  test('the readings since a time, the oldest first, from the files of the months since then; a month back at most', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'agenthouse-usage-'));
+    try {
+      const day = 24 * 3_600_000;
+      const now = Date.UTC(2026, 11, 3, 12);
+      const reading = (at: number, used: number): AccountLimits => ({ vendor: 'claude', fiveHour: window(used, at + 3_600_000), sevenDay: window(40, now + day), at });
+      const line = (entry: object) => `${JSON.stringify({ v: 1, ...entry })}\n`;
+      const [old, earlier, week, lately, latest] = [reading(now - 40 * day, 1), reading(now - 20 * day, 2), reading(now - 5 * day, 3), reading(now - 2 * day, 4), reading(now - 3_600_000, 5)] as const;
+      // Its windows are not windows, or have no time to start over: the line counts, with what can be read of it.
+      const odd = { vendor: 'claude', fiveHour: { usedPct: '12', resetsAt: 5 }, sevenDay: { usedPct: 12, resetsAt: 'soon' }, at: week.at + 1 };
+      writeFileSync(path.join(dir, 'limits-2026-10.jsonl'), line(old));
+      writeFileSync(
+        path.join(dir, 'limits-2026-11.jsonl'),
+        [line(earlier), '{"v":1,"vendor":"claude","at":', '\n\n', line({ ...week, v: 2 }), line({ ...week, vendor: 'other' }), line({ ...week, at: 'then' }), 'null\n', line(week), line(odd)].join(''),
+      );
+      // This month's file as the log writes it, the later reading first.
+      const log = new LimitsLog(dir);
+      log.append([latest]);
+      log.append([lately]);
+
+      assert.deepEqual(await log.since(now - 6 * day, now), [week, { vendor: 'claude', fiveHour: null, sevenDay: window(12, null), at: odd.at }, lately, latest], 'from two files, in the order of their times');
+      assert.deepEqual((await log.since(0, now)).map((entry) => entry.at), [earlier.at, week.at, odd.at, lately.at, latest.at], 'nothing from more than a month back, and no line that is none');
+      assert.deepEqual(await log.since(now - 1000, now), []);
+      assert.deepEqual(await new LimitsLog(path.join(dir, 'none')).since(0, now), [], 'no log yet');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
