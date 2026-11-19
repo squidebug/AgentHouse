@@ -13,7 +13,8 @@ import { switchSide, switchTrack } from './switch';
 // The time track sits this far in from a lane's edges; the axis lines up with it.
 const INSET = 8;
 
-const BAR_SX: Record<BarKind, object> = {
+/** How a stretch of time shows by what went on in it: filled while at work, striped while waiting for the user, an outline once done. */
+export const BAR_SX: Record<BarKind, object> = {
   working: { bgcolor: v.primary },
   waiting: { background: `repeating-linear-gradient(135deg, ${v.warn} 0 4px, ${v.warnContainer} 4px 7px)` },
   done: { border: `1.5px solid ${v.done}` },
@@ -33,7 +34,8 @@ function useNow(ticking: boolean): number {
   return ticking ? tick : Date.now();
 }
 
-function Legend() {
+/** What the three kinds of bar mean. */
+export function Legend() {
   return (
     <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px', fontSize: 12, lineHeight: '16px', color: v.on2 }}>
       {(['working', 'waiting', 'done'] as const).map((kind) => (
@@ -46,7 +48,8 @@ function Legend() {
   );
 }
 
-function Axis({ window }: { window: TimeWindow }) {
+/** The marks of a window of time over its lanes: how long ago, up to now. */
+export function Axis({ window }: { window: TimeWindow }) {
   return (
     <Box aria-hidden sx={{ position: 'relative', height: 16, fontSize: 12, lineHeight: '16px', color: v.on2, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
       {ticks(window).map(({ pct, ago: before }) => (
