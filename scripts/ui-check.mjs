@@ -885,6 +885,15 @@ try {
   const nested = await deep.locator('ul ul ul').count();
   check(nested === 0 && (await deep.innerText()).includes('- - - '), 'an answer nested too deep to draw shows as plain text', `nested lists: ${nested}`);
   check(await tree.isVisible(), 'and the rest of the app stays');
+  // Drawn anew (the pane to its terminal and back), it is not parsed again: the parser gives up only
+  // once the stack is full, and each try holds the page for seconds.
+  await lead.getByRole('button', { name: /^터미널/ }).click();
+  await lead.locator('.xterm-screen').waitFor({ timeout: 10_000 });
+  const redrawnAt = Date.now();
+  await lead.getByRole('button', { name: '대화', exact: true }).click();
+  await deep.waitFor({ timeout: 40_000 });
+  const redrawnIn = Date.now() - redrawnAt;
+  check(redrawnIn < 2500, 'drawn anew, it is plain text at once: the parser is not tried a second time', `${redrawnIn} ms`);
 
   // Ended from AgentHouse, a session stays listed, ended, with its conversation.
   const agentsDetails = tree.getByRole('button', { name: 'ui-agents 세부 정보' });
@@ -990,6 +999,10 @@ try {
   check(false, 'the check ran to the end', error.message.split('\n')[0]);
   await page.screenshot({ path: path.join(out, 'failed.png') }).catch(() => {});
   console.log(`INFO  where it stopped: ${path.join(out, 'failed.png')}`);
+  // What it was waiting for, and the line of this file that waited.
+  const waited = error.message.split('\n').slice(1).filter((line) => line.trim());
+  const line = error.stack?.split('\n').find((frame) => frame.includes('ui-check.mjs'));
+  for (const said of [...waited, ...(line ? [line.trim()] : [])]) console.log(`INFO  ${said}`);
 } finally {
   await browser.close();
   server.kill();

@@ -19,12 +19,28 @@ const components: Components = {
 
 const plugins = [remarkGfm];
 
+// Replies the parser could not take, the latest of them. The parser fails only once the stack is
+// full, which takes seconds: such a reply is not tried again each time its conversation is drawn
+// anew (a pane back from its terminal, another pane that shows it).
+const untaken = new Set<string>();
+const MAX_UNTAKEN = 32;
+
+function remember(text: string): void {
+  untaken.delete(text);
+  untaken.add(text);
+  for (const oldest of untaken) {
+    if (untaken.size <= MAX_UNTAKEN) break;
+    untaken.delete(oldest);
+  }
+}
+
 /**
  * An agent's reply. Headings stay at body sizes: the type scale is 12, 13, 14
  * and 18 only. Parsed again only when its text changes, not on every session
  * update. A reply the parser cannot take (nested too deep) shows as plain text.
  */
 export const MarkdownText = memo(function MarkdownText({ text }: { text: string }) {
+  const plain = <Box sx={{ whiteSpace: 'pre-wrap' }}>{text}</Box>;
   return (
     <Box
       sx={{
@@ -48,11 +64,15 @@ export const MarkdownText = memo(function MarkdownText({ text }: { text: string 
         '& hr': { border: 0, borderTop: `1px solid ${v.outline}`, my: '10px' },
       }}
     >
-      <Boundary resetKey={text} fallback={<Box sx={{ whiteSpace: 'pre-wrap' }}>{text}</Box>}>
-        <Markdown remarkPlugins={plugins} components={components}>
-          {text}
-        </Markdown>
-      </Boundary>
+      {untaken.has(text) ? (
+        plain
+      ) : (
+        <Boundary resetKey={text} fallback={plain} onFail={() => remember(text)}>
+          <Markdown remarkPlugins={plugins} components={components}>
+            {text}
+          </Markdown>
+        </Boundary>
+      )}
     </Box>
   );
 });

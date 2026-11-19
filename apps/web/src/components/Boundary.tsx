@@ -5,6 +5,8 @@ interface Props {
   fallback: ReactNode;
   /** When this changes, the children get another try (another session, another mode). */
   resetKey?: unknown;
+  /** Told when the children failed to render, for whoever would rather not try the same again. */
+  onFail?: () => void;
   children: ReactNode;
 }
 
@@ -22,6 +24,10 @@ export class Boundary extends Component<Props, { failed: boolean; key: unknown }
 
   static getDerivedStateFromProps(props: Props, state: { failed: boolean; key: unknown }) {
     return props.resetKey === state.key ? null : { failed: false, key: props.resetKey };
+  }
+
+  componentDidCatch(): void {
+    this.props.onFail?.();
   }
 
   render(): ReactNode {
