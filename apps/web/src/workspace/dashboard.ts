@@ -4,16 +4,17 @@ import { isAgentBusy, isAsking, isTaskRunning, type AgentInfo, type BackgroundTa
 import { t } from '../strings';
 import { agentRows } from './agents';
 
-/** What the page shows under its top bar: the tree and the panes, or the dashboard. */
-export type Screen = 'workspace' | 'dashboard';
-export const SCREENS: readonly Screen[] = ['workspace', 'dashboard'];
+/** What the page shows under its top bar: the tree and the panes, or over them the dashboard or the plan's usage. */
+export type Screen = 'workspace' | 'dashboard' | 'usage';
+export const SCREENS: readonly Screen[] = ['workspace', 'dashboard', 'usage'];
 
 const SCREEN_KEY = 'ah-screen';
 
 /** The screen this browser showed last, so a reload shows it again. */
 export function loadScreen(storage: Pick<Storage, 'getItem'> | undefined = globalThis.localStorage): Screen {
   try {
-    return storage?.getItem(SCREEN_KEY) === 'dashboard' ? 'dashboard' : 'workspace';
+    const kept = storage?.getItem(SCREEN_KEY);
+    return SCREENS.find((screen) => screen === kept) ?? 'workspace';
   } catch {
     return 'workspace';
   }
@@ -21,7 +22,7 @@ export function loadScreen(storage: Pick<Storage, 'getItem'> | undefined = globa
 
 export function saveScreen(screen: Screen, storage: Pick<Storage, 'setItem' | 'removeItem'> | undefined = globalThis.localStorage): void {
   try {
-    if (screen === 'dashboard') storage?.setItem(SCREEN_KEY, screen);
+    if (screen !== 'workspace') storage?.setItem(SCREEN_KEY, screen);
     else storage?.removeItem(SCREEN_KEY);
   } catch {
     // private windows and blocked storage: the workspace next time

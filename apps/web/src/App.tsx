@@ -12,6 +12,7 @@ import { LaunchDialog } from './components/LaunchDialog';
 import { PaneGrid } from './components/PaneGrid';
 import { SessionTree } from './components/SessionTree';
 import { TopBar } from './components/TopBar';
+import { Usage } from './components/Usage';
 import { t } from './strings';
 import { v } from './theme/tokens';
 import { loadScreen, saveScreen, type Screen } from './workspace/dashboard';
@@ -42,7 +43,7 @@ export function App() {
   // Only what a reload brings back is saved, so only a change of that saves.
   useEffect(() => saveWorkspace(state), [panes, active, nextPane, paneMode]);
 
-  // What shows under the top bar: the workspace, or the dashboard laid over it.
+  // What shows under the top bar: the workspace, or another screen laid over it (the dashboard, the plan's usage).
   const [screen, setScreen] = useState<Screen>(() => loadScreen());
   useEffect(() => saveScreen(screen), [screen]);
   // A session asked for from outside the workspace (the bell, a notification, a card of the dashboard) shows there.
@@ -131,7 +132,7 @@ export function App() {
   latest.current = { state, byId, screen };
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      // Under the dashboard no pane is in sight to switch.
+      // Under another screen no pane is in sight to switch.
       if (!isModeShortcut(event) || latest.current.screen !== 'workspace') return;
       event.preventDefault();
       event.stopPropagation();
@@ -205,7 +206,7 @@ export function App() {
 
       <Box sx={{ position: 'relative', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <Box
-          // Under the dashboard the workspace stays as it is, out of sight and out of reach, with every
+          // Under another screen the workspace stays as it is, out of sight and out of reach, with every
           // pane at its size. Taken out of the layout instead, a terminal would be fitted again to a box
           // without a size (a few cells) and would tell its PTY so.
           inert={screen !== 'workspace'}
@@ -276,10 +277,10 @@ export function App() {
             <Composer state={state} dispatch={dispatch} dnd={dnd} sessionById={sessionById} activeSession={activeSession} delegates={delegates} />
           </Box>
         </Box>
-        {screen === 'dashboard' && (
+        {screen !== 'workspace' && (
           // Over the workspace, with the page's own face: whatever lies under it is covered.
           <Box sx={{ position: 'absolute', inset: 0, overflowY: 'auto', scrollbarWidth: 'thin', bgcolor: v.bg }}>
-            <Dashboard sessions={[...byId.values()]} links={links} limits={limits} onOpen={openSession} onNew={() => setLaunchOpen(true)} />
+            {screen === 'dashboard' ? <Dashboard sessions={[...byId.values()]} links={links} limits={limits} onOpen={openSession} onNew={() => setLaunchOpen(true)} /> : <Usage limits={limits} />}
           </Box>
         )}
       </Box>

@@ -20,6 +20,7 @@ import {
   type SkillInfo,
   type TextFile,
   type ThemeMode,
+  type UsageHistory,
   type Vendor,
 } from '@agenthouse/protocol';
 import { authToken, requireLogin } from './auth';
@@ -78,6 +79,8 @@ export const api = {
   deliver: (id: string, header: string) => call<DelegationInfo>('POST', `/api/delegations/${encodeURIComponent(id)}/deliver`, { header }),
   /** Watches the sessions started outside AgentHouse from now on, or stops: the same for every page. */
   watchExternal: (on: boolean) => call<{ on: boolean }>('PUT', '/api/external', { on } satisfies ExternalRequest),
+  /** Plan usage as it went since a time (epoch ms), the oldest reading first: what the usage log has of it. */
+  usage: (since: number) => call<UsageHistory>('GET', `/api/usage?since=${since}`),
   /** What a session was last asked and what it last said, as a few plain words. */
   latest: (id: string) => call<LatestWords>('GET', `/api/sessions/${encodeURIComponent(id)}/latest`),
   /** The skills a session's conversation was given, with the ones it ran marked. */

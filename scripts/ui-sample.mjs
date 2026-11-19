@@ -1,6 +1,8 @@
-// A made-up ended Claude Code session for the UI check: a registry entry as an
-// earlier session host would have left it in sessions.json, and its two
-// transcripts (before and after /clear) in Claude's format. Synthetic content only.
+// What the UI check shows that the fake agent cannot make. A made-up ended
+// Claude Code session: a registry entry as an earlier session host would have
+// left it in sessions.json, and its two transcripts (before and after /clear) in
+// Claude's format. Made-up sessions started outside AgentHouse, and a made-up
+// month of plan usage. Synthetic content only.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
@@ -89,6 +91,79 @@ export function writeOutsideSessions({ config, cwd, other }) {
   mkdirSync(config, { recursive: true });
   writeFileSync(path.join(config, 'agents.json'), JSON.stringify(list));
   return list;
+}
+
+/**
+ * A made-up month of plan usage in the state folder, as the usage log keeps it (a line whenever the
+ * share used of either window changes): the fake agent reports none. Working days with their hours,
+ * 5-hour windows that begin with the first use, a weekly window that starts over on a Friday morning.
+ * All of it is moved in time so that it ends a moment ago, forty minutes before its 5-hour window
+ * starts over. Returns what the two windows stand at.
+ */
+export function writeUsageLog({ home }) {
+  const HOUR = 3_600_000;
+  const DAY = 24 * HOUR;
+  // The afternoon the made-up month ends on, a Wednesday.
+  const end = new Date(2026, 10, 18, 14, 20).getTime();
+  const dayStart = (time) => new Date(time).setHours(0, 0, 0, 0);
+  let seed = 341;
+  const rand = () => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296;
+  const from = dayStart(end) - 31 * DAY;
+  const friday = new Date(from);
+  friday.setHours(9, 0, 0, 0);
+  while (friday.getDay() !== 5 || friday.getTime() <= from) friday.setDate(friday.getDate() + 1);
+  let week = { resetsAt: friday.getTime(), pct: 0 };
+  let five = null;
+  let day = -1;
+  let hours = [];
+  const readings = [];
+  for (let time = from; time <= end; time += 10 * 60_000) {
+    const date = new Date(time);
+    if (dayStart(time) !== day) {
+      // The hours worked on this day, and how hard.
+      day = dayStart(time);
+      const weekend = date.getDay() === 0 || date.getDay() === 6;
+      const strength = 0.45 + rand() * 0.75;
+      hours = [];
+      if (!weekend) {
+        hours.push([9.5 + rand() * 0.8, 12 + rand() * 0.5, strength], [13 + rand() * 0.7, 17.5 + rand() * 1.8, strength]);
+        const late = 20 + rand();
+        if (rand() < 0.3) hours.push([late, late + 1.5 + rand() * 1.5, strength * 0.5]);
+      } else {
+        const start = 10 + rand() * 4;
+        if (rand() < 0.45) hours.push([start, start + 2 + rand() * 2, 0.4 + rand() * 0.4]);
+      }
+    }
+    if (five && time >= five.resetsAt) five = null;
+    if (time >= week.resetsAt) week = { resetsAt: week.resetsAt + 7 * DAY, pct: 0 };
+    const hour = date.getHours() + date.getMinutes() / 60;
+    const working = hours.find(([start, stop]) => hour >= start && hour < stop);
+    const burst = rand() < 0.75 ? 0.3 + rand() * 1.6 : 0;
+    if (!working || !burst) continue;
+    // At a limit nothing more is used until that window starts over.
+    if ((five && five.pct >= 100) || week.pct >= 100) continue;
+    if (!five) five = { resetsAt: new Date(time).setMinutes(0, 0, 0) + 5 * HOUR, pct: 0 };
+    const before = `${Math.floor(five.pct)} ${Math.floor(week.pct)}`;
+    const used = working[2] * 5.6 * burst;
+    five.pct = Math.min(100, five.pct + used);
+    week.pct = Math.min(100, week.pct + used * 0.085);
+    const reading = { at: time, fiveHour: { usedPct: Math.floor(five.pct), resetsAt: five.resetsAt }, sevenDay: { usedPct: Math.floor(week.pct), resetsAt: week.resetsAt } };
+    if (`${reading.fiveHour.usedPct} ${reading.sevenDay.usedPct}` !== before || !readings.length) readings.push(reading);
+  }
+
+  // To the minute, so that the times to start over stay on one.
+  const moved = Math.floor((Date.now() - end) / 60_000) * 60_000;
+  const files = new Map();
+  for (const { at, fiveHour, sevenDay } of readings) {
+    const line = { v: 1, vendor: 'claude', fiveHour: { ...fiveHour, resetsAt: fiveHour.resetsAt + moved }, sevenDay: { ...sevenDay, resetsAt: sevenDay.resetsAt + moved }, at: at + moved };
+    // A file per month, by the month of the reading in UTC, as the log names them.
+    const month = new Date(line.at).toISOString().slice(0, 7);
+    files.set(month, `${files.get(month) ?? ''}${JSON.stringify(line)}\n`);
+  }
+  mkdirSync(path.join(home, 'usage'), { recursive: true });
+  for (const [month, text] of files) writeFileSync(path.join(home, 'usage', `limits-${month}.jsonl`), text);
+  const last = readings.at(-1);
+  return { fiveHour: last.fiveHour.usedPct, sevenDay: last.sevenDay.usedPct };
 }
 
 export function writeSampleSession({ home, config, cwd }) {

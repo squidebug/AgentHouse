@@ -3,9 +3,10 @@
 // with the fake agent: the login, a session in a pane, a message through the
 // composer and its turn in the pane's conversation view, an ended session that
 // an earlier session host left in sessions.json (ui-sample.mjs), sub-agents,
-// groups, the dashboard (and the panes' size after it), delegation, a session
-// ended and started again where it stopped, and sessions started outside
-// AgentHouse, which the fake agent lists in Claude's place (ui-sample.mjs).
+// groups, the dashboard and the usage screen (and the panes' size after each),
+// delegation, a session ended and started again where it stopped, and sessions
+// started outside AgentHouse, which the fake agent lists in Claude's place
+// (ui-sample.mjs, which also writes the usage log the usage screen draws).
 // Light and dark screenshots go to the output folder, and with --out one page
 // of them all (index.html): light next to dark, and before next to after when
 // --before names the folder an earlier run was given as --out.
@@ -20,7 +21,7 @@ import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
 import { writePage } from './ui-page.mjs';
-import { writeOutsideSessions, writeSampleSession } from './ui-sample.mjs';
+import { writeOutsideSessions, writeSampleSession, writeUsageLog } from './ui-sample.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const main = path.join(root, 'apps/server/dist/main.js');
@@ -54,6 +55,9 @@ const SCENES = {
   memory: '메모리',
   dashboard: '대시보드',
   'dashboard-more': '대시보드 · 여러 세션',
+  usage: '사용량',
+  'usage-point': '사용량 · 가리키면',
+  'usage-table': '사용량 · 표',
   delegate: '위임',
   'composer-delegate': '입력창 위임',
   resume: '이어서 열기',
@@ -71,6 +75,8 @@ const work = path.join(scratch, 'work');
 mkdirSync(work, { recursive: true });
 const env = { ...process.env, AGENTHOUSE_HOME: home, CLAUDE_CONFIG_DIR: config };
 writeSampleSession({ home, config, cwd: work });
+// Plan usage for the top bar's chip and the usage screen: what its two windows stand at.
+const used = writeUsageLog({ home });
 // The user's own notes for Claude in the session folder: a skill of the project, and its instructions.
 const skillPath = path.join(work, '.claude', 'skills', 'ping-pong', 'SKILL.md');
 mkdirSync(path.dirname(skillPath), { recursive: true });
@@ -635,6 +641,66 @@ try {
   check(sizedBefore === sizedAfter, 'the pane and its terminal are the size they were before the dashboard', `${sizedBefore} → ${sizedAfter}`);
   // The reload folded what was open in the tree; as it was, for the scenes that follow.
   await tree.getByRole('button', { name: 'ui-agents 세부 정보' }).click();
+
+  // The plan's usage over the last seven days, drawn from the usage log (a made-up one: the fake agent
+  // reports no limits). It lies over the workspace as the dashboard does.
+  await screens.getByRole('button', { name: '사용량' }).click();
+  const usage = page.getByRole('region', { name: '사용량' });
+  const windowOf = (name) => usage.getByRole('group', { name, exact: true });
+  const graph = (name) => usage.getByRole('img', { name });
+  await graph('5시간 창의 사용률').waitFor({ timeout: 10_000 });
+  check(!(await tree.isVisible()), 'the workspace is out of sight under the usage screen');
+  const stands = async (name) => Number(await windowOf(name).getByRole('meter', { name }).getAttribute('aria-valuenow'));
+  check(
+    (await stands('5시간')) === used.fiveHour && (await stands('주간')) === used.sevenDay,
+    'each window says what it stands at now: the last reading of the log',
+    `5시간 ${await stands('5시간')}% (${used.fiveHour}), 주간 ${await stands('주간')}% (${used.sevenDay})`,
+  );
+  check(await page.getByRole('button', { name: `사용량 5시간 ${used.fiveHour}%` }).isVisible(), 'the same number the chip in the top bar has');
+  check(await windowOf('주간').getByText(/^이 속도면 /).isVisible(), 'the weekly window says where it is heading');
+  // A window is a line of its own with a wash under it; a day is a column.
+  const marks = async (name) => graph(name).locator('path').count();
+  check((await marks('5시간 창의 사용률')) >= 6 && (await marks('주간 창의 사용률')) >= 2 && (await marks('하루에 쓴 양')) >= 3, 'the graphs draw the windows and the days of the log');
+  await settle();
+  await page.screenshot({ path: path.join(out, 'usage-dark.png') });
+  await page.getByRole('button', { name: '라이트 모드' }).click();
+  await settle();
+  await page.screenshot({ path: path.join(out, 'usage-light.png') });
+  // Pointed at, a time is marked in both graphs over time, and the one under the pointer says what both windows stood at.
+  const plotBox = await graph('5시간 창의 사용률').boundingBox();
+  await page.mouse.move(plotBox.x + plotBox.width * 0.62, plotBox.y + plotBox.height * 0.5);
+  const told = windowOf('5시간').getByRole('tooltip');
+  await told.waitFor({ timeout: 5000 });
+  check(/5시간/.test(await told.innerText()) && /주간/.test(await told.innerText()), 'a time pointed at in a graph: what both windows stood at then');
+  check((await windowOf('주간').getByRole('tooltip').count()) === 0 && (await graph('주간 창의 사용률').locator('line[stroke="var(--ah-on-2)"]').count()) === 1, 'the other graph marks the same time');
+  const dayBox = await graph('하루에 쓴 양').boundingBox();
+  await page.mouse.move(dayBox.x + dayBox.width * 0.5, dayBox.y + dayBox.height * 0.5);
+  check(/\d+%\s*주간 한도 대비/.test(await windowOf('하루').getByRole('tooltip').innerText()), 'a day pointed at: what it took of the weekly limit');
+  await page.mouse.move(plotBox.x + plotBox.width * 0.62, plotBox.y + plotBox.height * 0.5);
+  await told.waitFor({ timeout: 5000 });
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: path.join(out, 'usage-point-light.png') });
+  await page.getByRole('button', { name: '다크 모드' }).click();
+  await page.mouse.move(plotBox.x + plotBox.width * 0.62, plotBox.y + plotBox.height * 0.5 + 1);
+  await told.waitFor({ timeout: 5000 });
+  await page.waitForTimeout(700);
+  await page.screenshot({ path: path.join(out, 'usage-point-dark.png') });
+  // The same in rows.
+  await usage.getByRole('group', { name: '보기' }).getByRole('button', { name: '표' }).click();
+  const dayRows = windowOf('하루').getByRole('table').getByRole('row');
+  await dayRows.first().waitFor({ timeout: 5000 });
+  check((await dayRows.count()) === 8 && (await windowOf('5시간').getByRole('table').getByRole('row').count()) > 2, 'as rows: a window a row, and a row for each of the seven days');
+  await settle();
+  await page.screenshot({ path: path.join(out, 'usage-table-dark.png') });
+  await page.getByRole('button', { name: '라이트 모드' }).click();
+  await settle();
+  await page.screenshot({ path: path.join(out, 'usage-table-light.png') });
+  await page.getByRole('button', { name: '다크 모드' }).click();
+  await usage.getByRole('group', { name: '보기' }).getByRole('button', { name: '그래프' }).click();
+  await screens.getByRole('button', { name: '워크스페이스' }).click();
+  await page.getByRole('region', { name: 'ui-check', exact: true }).locator('.xterm-screen').waitFor({ timeout: 10_000 });
+  await page.waitForTimeout(400);
+  check(sizedBefore === (await sizeNow()), 'the pane and its terminal are the size they were before the usage screen', `${sizedBefore} → ${await sizeNow()}`);
 
   // Delegation: a session works for another; a piece of the lead's conversation goes to it, and its answer comes back.
   for (const title of ['ui-lead', 'ui-helper']) {

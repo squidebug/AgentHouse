@@ -74,12 +74,14 @@ test('how long something has been as it is, to the minute', () => {
   );
 });
 
-test('the screen shown last is shown again: the workspace unless the dashboard was', () => {
+test('the screen shown last is shown again: the workspace unless the dashboard or the usage was', () => {
   const kept = new Map<string, string>();
   const storage = { getItem: (key: string) => kept.get(key) ?? null, setItem: (key: string, value: string) => void kept.set(key, value), removeItem: (key: string) => void kept.delete(key) };
   assert.equal(loadScreen(storage), 'workspace');
   saveScreen('dashboard', storage);
   assert.equal(loadScreen(storage), 'dashboard');
+  saveScreen('usage', storage);
+  assert.equal(loadScreen(storage), 'usage');
   saveScreen('workspace', storage);
   assert.equal(loadScreen(storage), 'workspace');
   assert.equal(kept.size, 0, 'the workspace leaves nothing behind');

@@ -6,9 +6,9 @@ import type { Screen } from './workspace/dashboard';
 // protocol without its label does not compile.
 export const t = {
   appName: 'AgentHouse',
-  // What the page shows under its top bar, and the switch between the two.
+  // What the page shows under its top bar, and the switch between them.
   screens: '화면',
-  screen: { workspace: '워크스페이스', dashboard: '대시보드' } satisfies Record<Screen, string>,
+  screen: { workspace: '워크스페이스', dashboard: '대시보드', usage: '사용량' } satisfies Record<Screen, string>,
   noSessions: '세션 없음',
   // A session whose own conversation is idle while its sub-agents work.
   agentsAtWork: '서브에이전트 작업 중',
@@ -126,6 +126,20 @@ export const t = {
   fiveHour: '5시간',
   sevenDay: '주간',
   resetsAt: '초기화',
+  // The usage screen: the plan's windows over the last days, as graphs or as the same in rows.
+  usageViews: '보기',
+  usageView: { chart: '그래프', table: '표' } satisfies Record<'chart' | 'table', string>,
+  usageChart: { fiveHour: '5시간 창의 사용률', sevenDay: '주간 창의 사용률', daily: '하루에 쓴 양' },
+  usageHead: { window: '창', peak: '최고', end: '끝 값', day: '날', used: '쓴 양' },
+  // What a day took of the weekly limit, and the mean of the days that took any.
+  daily: '하루',
+  today: '오늘',
+  ofWeekly: '주간 한도 대비',
+  dailyMean: (pct: number) => `평균 ${pct}%`,
+  // Where the weekly window is heading at the rate it has gone: what it stands at when it starts over, or when it is full.
+  paceAtReset: (pct: number) => `이 속도면 초기화 때 ${pct}%`,
+  paceFull: (when: string) => `이 속도면 ${when}쯤 한도`,
+  noReadings: '기록 없음',
   vendorName: VENDOR_NAMES,
   terminal: '터미널',
   conversation: '대화',
