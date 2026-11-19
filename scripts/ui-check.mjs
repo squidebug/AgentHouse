@@ -4,7 +4,8 @@
 // composer and its turn in the pane's conversation view, an ended session that
 // an earlier session host left in sessions.json (ui-sample.mjs), sub-agents,
 // groups, the dashboard and the usage screen (and the panes' size after each),
-// delegation, a session ended and started again where it stopped, and sessions
+// delegation, the graph of all sessions (who is under whom, and when each
+// worked), a session ended and started again where it stopped, and sessions
 // started outside AgentHouse, which the fake agent lists in Claude's place
 // (ui-sample.mjs, which also writes the usage log the usage screen draws).
 // Light and dark screenshots go to the output folder, and with --out one page
@@ -55,6 +56,9 @@ const SCENES = {
   memory: '메모리',
   dashboard: '대시보드',
   'dashboard-more': '대시보드 · 여러 세션',
+  graph: '그래프 · 관계',
+  'graph-point': '그래프 · 가리키면',
+  'graph-lanes': '그래프 · 흐름',
   usage: '사용량',
   'usage-point': '사용량 · 가리키면',
   'usage-table': '사용량 · 표',
@@ -647,8 +651,8 @@ try {
   await screens.getByRole('button', { name: '사용량' }).click();
   const usage = page.getByRole('region', { name: '사용량' });
   const windowOf = (name) => usage.getByRole('group', { name, exact: true });
-  const graph = (name) => usage.getByRole('img', { name });
-  await graph('5시간 창의 사용률').waitFor({ timeout: 10_000 });
+  const chart = (name) => usage.getByRole('img', { name });
+  await chart('5시간 창의 사용률').waitFor({ timeout: 10_000 });
   check(!(await tree.isVisible()), 'the workspace is out of sight under the usage screen');
   const stands = async (name) => Number(await windowOf(name).getByRole('meter', { name }).getAttribute('aria-valuenow'));
   check(
@@ -659,7 +663,7 @@ try {
   check(await page.getByRole('button', { name: `사용량 5시간 ${used.fiveHour}%` }).isVisible(), 'the same number the chip in the top bar has');
   check(await windowOf('주간').getByText(/^이 속도면 /).isVisible(), 'the weekly window says where it is heading');
   // A window is a line of its own with a wash under it; a day is a column.
-  const marks = async (name) => graph(name).locator('path').count();
+  const marks = async (name) => chart(name).locator('path').count();
   check((await marks('5시간 창의 사용률')) >= 6 && (await marks('주간 창의 사용률')) >= 2 && (await marks('하루에 쓴 양')) >= 3, 'the graphs draw the windows and the days of the log');
   await settle();
   await page.screenshot({ path: path.join(out, 'usage-dark.png') });
@@ -667,13 +671,13 @@ try {
   await settle();
   await page.screenshot({ path: path.join(out, 'usage-light.png') });
   // Pointed at, a time is marked in both graphs over time, and the one under the pointer says what both windows stood at.
-  const plotBox = await graph('5시간 창의 사용률').boundingBox();
+  const plotBox = await chart('5시간 창의 사용률').boundingBox();
   await page.mouse.move(plotBox.x + plotBox.width * 0.62, plotBox.y + plotBox.height * 0.5);
   const told = windowOf('5시간').getByRole('tooltip');
   await told.waitFor({ timeout: 5000 });
   check(/5시간/.test(await told.innerText()) && /주간/.test(await told.innerText()), 'a time pointed at in a graph: what both windows stood at then');
-  check((await windowOf('주간').getByRole('tooltip').count()) === 0 && (await graph('주간 창의 사용률').locator('line[stroke="var(--ah-on-2)"]').count()) === 1, 'the other graph marks the same time');
-  const dayBox = await graph('하루에 쓴 양').boundingBox();
+  check((await windowOf('주간').getByRole('tooltip').count()) === 0 && (await chart('주간 창의 사용률').locator('line[stroke="var(--ah-on-2)"]').count()) === 1, 'the other graph marks the same time');
+  const dayBox = await chart('하루에 쓴 양').boundingBox();
   await page.mouse.move(dayBox.x + dayBox.width * 0.5, dayBox.y + dayBox.height * 0.5);
   check(/\d+%\s*주간 한도 대비/.test(await windowOf('하루').getByRole('tooltip').innerText()), 'a day pointed at: what it took of the weekly limit');
   await page.mouse.move(plotBox.x + plotBox.width * 0.62, plotBox.y + plotBox.height * 0.5);
@@ -791,6 +795,86 @@ try {
   await page.getByRole('button', { name: '라이트 모드' }).click();
   await screens.getByRole('button', { name: '워크스페이스' }).click();
   check((await cards.nth(3).getByText('fake answer: list the open questions').isVisible()) && (await box.inputValue()) === '', 'back by the switch, the conversation the pane showed is where it was');
+
+  // The graph: every session with what runs under it. Who is under whom as cards tied by lines, then
+  // when each worked as lanes over time. It lies over the workspace as the dashboard does.
+  await screens.getByRole('button', { name: '그래프' }).click();
+  const graph = page.getByRole('region', { name: '그래프' });
+  const map = graph.getByRole('group', { name: '관계' });
+  const node = (name) => map.getByRole('button', { name: `${name} 열기`, exact: true });
+  await node('ui-helper').waitFor({ timeout: 10_000 });
+  check(!(await tree.isVisible()), 'the workspace is out of sight under the graph');
+  const endsAt = async (name) => {
+    const at = await node(name).boundingBox();
+    return at.x + at.width;
+  };
+  const startsAt = async (name) => (await node(name).boundingBox()).x;
+  check(
+    (await startsAt('ui-helper')) > (await endsAt('ui-lead')) && (await startsAt('Plan the change')) > (await endsAt('ui-agents')) && (await startsAt('Check the tests')) > (await endsAt('Plan the change')),
+    'the graph: what is under a session is to its right, and what a sub-agent started further right',
+  );
+  check((await node('Wait for the build').isVisible()) && (await node('check the deploy').isVisible()), 'what a session runs by itself is there too: a command in the background, a prompt set for it');
+  check((await node('Run the tests').count()) === 0 && (await node('readme-cleanup').count()) === 0, 'a command that ended is not, and an ended session is folded away');
+  check(await map.getByText('완료', { exact: true }).isVisible(), 'the line of a delegation says how the work handed over stands');
+  const under = (await map.getByRole('button', { name: /열기$/ }).count()) - 3;
+  check((await map.locator('svg path[fill="none"]').count()) === under && under >= 7, 'every node under another is tied to it by a line', `${under} under the three sessions at the top`);
+  await settle();
+  await page.screenshot({ path: path.join(out, 'graph-light.png') });
+  await page.getByRole('button', { name: '다크 모드' }).click();
+  await settle();
+  await page.screenshot({ path: path.join(out, 'graph-dark.png') });
+  // Pointed at, a node shows with what it is under and what is under it; the rest steps back.
+  await node('Plan the change').hover();
+  await page.waitForTimeout(400);
+  const shows = (name) => node(name).evaluate((element) => Number(getComputedStyle(element).opacity));
+  check((await shows('ui-agents')) === 1 && (await shows('Check the tests')) === 1 && (await shows('Look around')) < 1 && (await shows('ui-lead')) < 1, 'a node pointed at: what is above and under it stays, the rest steps back');
+  await page.screenshot({ path: path.join(out, 'graph-point-dark.png') });
+  await page.getByRole('button', { name: '라이트 모드' }).click();
+  await node('Plan the change').hover();
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: path.join(out, 'graph-point-light.png') });
+  // Only what runs: a session all of whose sub-agents are done goes, one with a command still running stays.
+  const filters = graph.getByRole('group', { name: '거르기' });
+  await filters.getByRole('button', { name: '실행 중' }).click();
+  await node('ui-agents').waitFor({ state: 'detached', timeout: 5000 });
+  check((await node('ui-check').isVisible()) && (await node('Wait for the build').isVisible()) && (await node('ui-lead').count()) === 0, 'only what runs: what is busy now, with what it is under');
+  await filters.getByRole('button', { name: '전체' }).click();
+  // The ended sessions come back from their fold.
+  await graph.getByRole('button', { name: /^종료 \d+$/ }).click();
+  await node('readme-cleanup').waitFor({ timeout: 5000 });
+  await graph.getByRole('button', { name: /^종료 \d+$/ }).click();
+  await node('readme-cleanup').waitFor({ state: 'detached', timeout: 5000 });
+  check(true, 'ended sessions fold away at the end, and come back from there');
+  // The same over time: a lane each, all sessions on one sheet.
+  await graph.getByRole('group', { name: '보기' }).getByRole('button', { name: '흐름' }).click();
+  const lanes = graph.getByRole('list', { name: '흐름' });
+  await lanes.getByRole('button', { name: 'ui-helper 열기' }).waitFor({ timeout: 10_000 });
+  check((await lanes.getByRole('listitem').count()) === (await lanes.getByRole('button', { name: /열기$/ }).count()) && (await lanes.getByRole('listitem').count()) >= 10, 'the lanes: a row for every node of the graph, in the order of the tree');
+  // A session's turns come from its transcript: its bars are there once they were read.
+  // A lane is its name, then its track: the bars lie in the track, between the marks of the time.
+  const barsOf = (name) => lanes.getByRole('button', { name: `${name} 열기`, exact: true }).locator(':scope > span:nth-child(2) > span:not([aria-hidden])');
+  await barsOf('ui-lead').first().waitFor({ timeout: 10_000 });
+  for (const [name, turns] of [['ui-helper', 3], ['ui-lead', 2], ['ui-check', 3], ['ui-agents', 2]]) await barsOf(name).nth(turns - 1).waitFor({ timeout: 10_000 });
+  check(
+    (await barsOf('ui-lead').count()) >= 2 && (await barsOf('ui-helper').count()) >= 3 && (await barsOf('Wait for the build').count()) === 1 && (await barsOf('check the deploy').count()) === 0,
+    'a session has a bar for each of its turns, a running command one that grows, a prompt set for later none',
+    `ui-lead ${await barsOf('ui-lead').count()}, ui-helper ${await barsOf('ui-helper').count()}`,
+  );
+  await settle();
+  await page.screenshot({ path: path.join(out, 'graph-lanes-light.png') });
+  await page.getByRole('button', { name: '다크 모드' }).click();
+  await settle();
+  await page.screenshot({ path: path.join(out, 'graph-lanes-dark.png') });
+  await page.getByRole('button', { name: '라이트 모드' }).click();
+  // A lane opens its node in the workspace: a sub-agent in its session's flow, pointed out.
+  await lanes.getByRole('button', { name: 'Look around 열기' }).click();
+  const pointedOut = page.getByRole('region', { name: 'ui-agents' }).getByRole('list', { name: 'ui-agents 흐름' }).locator('[aria-current="true"]');
+  await pointedOut.waitFor({ timeout: 10_000 });
+  check((await pointedOut.innerText()).trim() === 'Look around' && (await screens.getByRole('button', { name: '워크스페이스' }).getAttribute('aria-pressed')) === 'true', 'a node opens in the workspace: a sub-agent in the flow of its session, pointed out');
+  // As it was for the scenes that follow: the lead's conversation in the pane.
+  await tree.getByRole('button', { name: 'ui-lead 열기', exact: true }).click();
+  await lead.getByRole('button', { name: '대화', exact: true }).click();
+  await cards.nth(3).waitFor({ timeout: 10_000 });
 
   // An answer nested too deep for the markdown parser shows as plain text, and the rest of the app stays.
   await box.fill(`deep\n${'- '.repeat(5000)}end`);

@@ -8,6 +8,7 @@ import { Composer } from './components/Composer';
 import { CopyCommand } from './components/CopyCommand';
 import { Dashboard } from './components/Dashboard';
 import { statusText } from './components/Details';
+import { Graph } from './components/Graph';
 import { LaunchDialog } from './components/LaunchDialog';
 import { PaneGrid } from './components/PaneGrid';
 import { SessionTree } from './components/SessionTree';
@@ -43,12 +44,17 @@ export function App() {
   // Only what a reload brings back is saved, so only a change of that saves.
   useEffect(() => saveWorkspace(state), [panes, active, nextPane, paneMode]);
 
-  // What shows under the top bar: the workspace, or another screen laid over it (the dashboard, the plan's usage).
+  // What shows under the top bar: the workspace, or another screen laid over it (the dashboard, the graph, the plan's usage).
   const [screen, setScreen] = useState<Screen>(() => loadScreen());
   useEffect(() => saveScreen(screen), [screen]);
-  // A session asked for from outside the workspace (the bell, a notification, a card of the dashboard) shows there.
+  // A session asked for from outside the workspace (the bell, a notification, a card of the dashboard, a node of the graph) shows there.
   const openSession = useCallback((sessionId: string) => {
     dispatch({ type: 'open', sessionId });
+    setScreen('workspace');
+  }, []);
+  // A sub-agent asked for there shows as it does from the tree: its session's flow, with it pointed out.
+  const openAgent = useCallback((sessionId: string, agentId: string) => {
+    dispatch({ type: 'open', sessionId, mode: 'flow', focusAgent: agentId });
     setScreen('workspace');
   }, []);
 
@@ -280,7 +286,9 @@ export function App() {
         {screen !== 'workspace' && (
           // Over the workspace, with the page's own face: whatever lies under it is covered.
           <Box sx={{ position: 'absolute', inset: 0, overflowY: 'auto', scrollbarWidth: 'thin', bgcolor: v.bg }}>
-            {screen === 'dashboard' ? <Dashboard sessions={[...byId.values()]} links={links} limits={limits} onOpen={openSession} onNew={() => setLaunchOpen(true)} /> : <Usage limits={limits} />}
+            {screen === 'dashboard' && <Dashboard sessions={[...byId.values()]} links={links} limits={limits} onOpen={openSession} onNew={() => setLaunchOpen(true)} />}
+            {screen === 'graph' && <Graph sessions={[...byId.values()]} links={links} delegations={delegations} onOpen={openSession} onOpenAgent={openAgent} />}
+            {screen === 'usage' && <Usage limits={limits} />}
           </Box>
         )}
       </Box>

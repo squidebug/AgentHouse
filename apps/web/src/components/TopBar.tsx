@@ -12,7 +12,7 @@ import { Notifications } from './Notifications';
 import { switchSide, switchTrack } from './switch';
 
 interface Props {
-  /** What shows under the bar (the workspace, the dashboard, the plan's usage), and the switch between them. */
+  /** What shows under the bar (the workspace, the dashboard, the graph, the plan's usage), and the switch between them. */
   screen: Screen;
   onScreen: (screen: Screen) => void;
   limits: AccountLimits[];

@@ -488,7 +488,7 @@ export function Usage({ limits }: { limits: AccountLimits[] }) {
         </Typography>
         <Box sx={{ flex: 1 }} />
         {/* On the page, so its track has the page's fill. */}
-        <Box role="group" aria-label={t.usageViews} sx={{ ...switchTrack, bgcolor: v.bg2 }}>
+        <Box role="group" aria-label={t.views} sx={{ ...switchTrack, bgcolor: v.bg2 }}>
           {VIEWS.map((one) => (
             <ButtonBase key={one} aria-pressed={view === one} onClick={() => setView(one)} sx={{ ...switchSide(view === one), height: 28, px: '12px', fontSize: 13, fontWeight: 500 }}>
               {t.usageView[one]}

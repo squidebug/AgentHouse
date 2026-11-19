@@ -4,9 +4,9 @@ import { isAgentBusy, isAsking, isTaskRunning, type AgentInfo, type BackgroundTa
 import { t } from '../strings';
 import { agentRows } from './agents';
 
-/** What the page shows under its top bar: the tree and the panes, or over them the dashboard or the plan's usage. */
-export type Screen = 'workspace' | 'dashboard' | 'usage';
-export const SCREENS: readonly Screen[] = ['workspace', 'dashboard', 'usage'];
+/** What the page shows under its top bar: the tree and the panes, or over them the dashboard, the graph or the plan's usage. */
+export type Screen = 'workspace' | 'dashboard' | 'graph' | 'usage';
+export const SCREENS: readonly Screen[] = ['workspace', 'dashboard', 'graph', 'usage'];
 
 const SCREEN_KEY = 'ah-screen';
 
