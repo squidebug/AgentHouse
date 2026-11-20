@@ -14,6 +14,8 @@ const ALLOW = new Set(['A', 'OA', 'XA', 'ZA']);
 
 /** The accounts other than the user and TRUSTED that an allow entry of this security descriptor (SDDL) lets in. */
 export function othersAllowed(sddl: string, userSid: string): string[] {
+  // A folder without a list of who may enter (written `NO_ACCESS_CONTROL`) lets everyone in.
+  if (/D:[^(]*NO_ACCESS_CONTROL/.test(sddl)) return ['WD'];
   const dacl = sddl.match(/D:[^(]*((?:\([^)]*\))*)/)?.[1] ?? '';
   const others = new Set<string>();
   for (const [, type, sid] of dacl.matchAll(/\(([A-Z]+);[^;]*;[^;]*;[^;]*;[^;]*;([^;)]+)/g)) {
@@ -25,8 +27,12 @@ export function othersAllowed(sddl: string, userSid: string): string[] {
 /** Windows: the accounts besides the user, SYSTEM and Administrators that this folder lets in; null if it cannot tell. */
 export function windowsOthers(dir: string): Promise<string[] | null> {
   const powershell = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-  // The path goes in through the environment, never into the script text.
-  const script = '(Get-Acl -LiteralPath $env:AGENTHOUSE_CHECK_DIR).Sddl; [Security.Principal.WindowsIdentity]::GetCurrent().User.Value';
+  // The path goes in through the environment, never into the script text. .NET is asked directly,
+  // not Get-Acl: a cmdlet is loaded from PSModulePath, and started from PowerShell 7 (a terminal, a
+  // CI step) this Windows PowerShell inherits a path with PowerShell 7's modules first, cannot load
+  // them, and the check could tell nothing.
+  const script =
+    "[IO.Directory]::GetAccessControl($env:AGENTHOUSE_CHECK_DIR).GetSecurityDescriptorSddlForm('Access'); [Security.Principal.WindowsIdentity]::GetCurrent().User.Value";
   return new Promise((resolve) => {
     execFile(
       powershell,

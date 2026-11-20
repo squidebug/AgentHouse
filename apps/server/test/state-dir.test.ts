@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { chmodSync, statSync } from 'node:fs';
+import { chmodSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -17,6 +17,9 @@ test('a folder only the user, SYSTEM and Administrators get into lets no one els
 test('anyone else an allow entry names is reported; deny entries are not', () => {
   const shared = `O:BAG:SYD:AI(A;OICIID;FA;;;BA)(A;OICIID;0x1200a9;;;BU)(A;OICIIOID;SDGXGWGR;;;AU)(A;OICIID;FA;;;${me})(D;OICI;FA;;;WD)(A;;FR;;;S-1-5-21-9-9-9-1002)`;
   assert.deepEqual(othersAllowed(shared, me), ['BU', 'AU', 'S-1-5-21-9-9-9-1002']);
+  // No list of who may enter at all is everyone, not no one.
+  assert.deepEqual(othersAllowed(`O:${me}G:${me}D:NO_ACCESS_CONTROL`, me), ['WD']);
+  assert.deepEqual(othersAllowed(`O:${me}G:${me}D:P`, me), [], 'an empty list is no one');
 });
 
 test('POSIX: the state folder loses group and other access', { skip: process.platform === 'win32' }, async () => {
@@ -39,6 +42,32 @@ test('Windows: the folder\'s own permissions are read, and an account let in is 
     execFileSync(path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'icacls.exe'), [dir, '/grant', '*S-1-5-32-545:(OI)(CI)R'], { stdio: 'ignore' });
     assert.deepEqual(await windowsOthers(dir), ['BU']);
   } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('Windows: they are read when AgentHouse was started from PowerShell 7 too', { skip: process.platform !== 'win32' }, async () => {
+  const dir = await tempStateDir();
+  const modulePath = process.env.PSModulePath;
+  try {
+    // What a program started from PowerShell 7 inherits: a module path with PowerShell 7's modules
+    // first. Windows PowerShell finds Get-Acl in the one made like this, and cannot load it: its
+    // type file says again what Windows PowerShell has built in.
+    const module = path.join(dir, 'modules', 'Microsoft.PowerShell.Security');
+    mkdirSync(module, { recursive: true });
+    writeFileSync(
+      path.join(module, 'Microsoft.PowerShell.Security.psd1'),
+      '@{ GUID="A94C8C7E-9810-47C0-B8AF-65089C13A35A"; ModuleVersion="7.0.0.0"; CmdletsToExport="Get-Acl"; NestedModules="Microsoft.PowerShell.Security.dll"; TypesToProcess="Security.types.ps1xml" }',
+    );
+    writeFileSync(
+      path.join(module, 'Security.types.ps1xml'),
+      '<Types><Type><Name>System.Security.AccessControl.ObjectSecurity</Name><Members><ScriptProperty><Name>Sddl</Name><GetScriptBlock>$null</GetScriptBlock></ScriptProperty></Members></Type></Types>',
+    );
+    process.env.PSModulePath = `${path.join(dir, 'modules')};${modulePath ?? ''}`;
+    assert.deepEqual(await windowsOthers(dir), []);
+  } finally {
+    if (modulePath === undefined) delete process.env.PSModulePath;
+    else process.env.PSModulePath = modulePath;
     await rm(dir, { recursive: true, force: true });
   }
 });
