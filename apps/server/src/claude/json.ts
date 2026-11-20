@@ -18,8 +18,15 @@ export const text = (value: unknown, max = TEXT_CHARS): string | null => (typeof
 /** Claude's ids for sub-agents, tasks and scheduled prompts: short, of letters, digits, `_` and `-`. */
 export const SHORT_ID = /^[A-Za-z0-9_-]{1,64}$/;
 
-/** What stands between `<name>` and `</name>` in a text, as it is; null without such a pair. */
+/**
+ * What stands between `<name>` and `</name>` in a text, as it is; null without such a pair. The
+ * text is whatever a command printed or someone pasted, so it is looked through once: a pattern
+ * would start over at every `<name>` of a text that never closes one.
+ */
 export function tag(block: string, name: string): string | null {
-  const match = block.match(new RegExp(`<${name}>([\\s\\S]*?)</${name}>`));
-  return match ? (match[1] ?? '') : null;
+  const open = `<${name}>`;
+  const from = block.indexOf(open);
+  if (from < 0) return null;
+  const to = block.indexOf(`</${name}>`, from + open.length);
+  return to < 0 ? null : block.slice(from + open.length, to);
 }

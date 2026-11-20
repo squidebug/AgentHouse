@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import { isAsking, type AgentInfo, type BackgroundTask, type ScheduledPrompt, type SessionStatus, type SessionTelemetry, type StatusValue, type TranscriptSegment } from '@agenthouse/protocol';
 import { AgentTracker, agentTranscript, type AgentAsk } from '../claude/agents';
 import { BackgroundTracker } from '../claude/background';
+import { SHORT_ID } from '../claude/json';
 import { askSessions, listedSessions, type ListedSession } from '../claude/sessions';
 import { claudeConfigDir } from '../claude/settings';
 import {
@@ -27,6 +28,12 @@ import { readTail } from '../shared/tail';
 const FIRST_HOOK_WAIT_MS = 30_000;
 
 const BUSY = new Set<StatusValue>(['working', 'awaiting_permission', 'awaiting_input']);
+
+/**
+ * The id of a conversation as a hook names it. Whatever holds the session's hook token can send a
+ * payload, and the id goes to every browser and into sessions.json: only what is an id is kept.
+ */
+const conversationId = (value: unknown): string | null => (typeof value === 'string' && SHORT_ID.test(value) ? value : null);
 
 /**
  * What a session's CLI reports about itself: its status and telemetry.
@@ -162,8 +169,9 @@ export class ClaudeObserver extends Observer {
     clearTimeout(this.hookWait);
     const at = Date.now();
     let changed = this.noteTranscript(event);
-    if (event.hook_event_name === 'SessionStart' && typeof event.session_id === 'string' && event.session_id !== this.vendorSessionId) {
-      this.vendorSessionId = event.session_id;
+    const named = conversationId(event.session_id);
+    if (event.hook_event_name === 'SessionStart' && named !== null && named !== this.vendorSessionId) {
+      this.vendorSessionId = named;
       changed = true;
     }
     if (this.telemetry.level !== 'full') {
@@ -250,7 +258,7 @@ export class ClaudeObserver extends Observer {
     const last = this.transcripts.at(-1);
     if (typeof file !== 'string' || (last && (event.hook_event_name !== 'SessionStart' || last.path === file))) return false;
     if (!isClaudeTranscript(file, claudeConfigDir(this.options.env))) return false;
-    const vendorSessionId = typeof event.session_id === 'string' ? event.session_id : this.vendorSessionId;
+    const vendorSessionId = conversationId(event.session_id) ?? this.vendorSessionId;
     this.transcripts = [...this.transcripts, { vendorSessionId, path: file, since: Date.now() }];
     return true;
   }

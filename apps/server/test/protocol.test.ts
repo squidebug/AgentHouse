@@ -81,11 +81,16 @@ describe('host protocol', () => {
         ],
       );
       assert.equal(client.get(info.id)?.vendorSessionId, 'second');
+      // What is no id is not taken for one: it would go to every browser and into sessions.json as it came.
+      await hook({ hook_event_name: 'SessionStart', source: 'resume', session_id: 'x'.repeat(5000), transcript_path: path.join(projects, 'second.jsonl') });
+      await hook({ hook_event_name: 'SessionStart', source: 'resume', session_id: '../../third', transcript_path: path.join(projects, 'fourth.jsonl') });
+      assert.ok(await waitFor(() => transcripts().length === 3, 2000));
+      assert.deepEqual([client.get(info.id)?.vendorSessionId, transcripts().at(-1)?.vendorSessionId], ['second', 'second'], 'the conversation is named as before');
       // A path outside Claude's projects folder is never taken (the host would open it).
       await hook({ hook_event_name: 'SessionStart', source: 'resume', session_id: 'third', transcript_path: path.join(os.tmpdir(), 'elsewhere.jsonl') });
       await hook({ hook_event_name: 'Stop' });
       assert.ok(await waitFor(() => client.get(info.id)?.status.value === 'idle', 2000));
-      assert.equal(transcripts().length, 2);
+      assert.equal(transcripts().length, 3);
       await client.closeSession(info.id);
     } finally {
       client.close();

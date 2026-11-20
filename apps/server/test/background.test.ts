@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { BackgroundTracker, slashName } from '../src/claude/background';
+import { tag } from '../src/claude/json';
 
 // Payloads as Claude Code 2.1.325 sent them (a probe with logging hooks), cut to what is read.
 const bash = (taskId: string, input: object = {}) => ({
@@ -55,6 +56,31 @@ test('a command that ends with another exit code, or is reported as failed, has 
       ['failed', null],
     ],
   );
+});
+
+test('a status Claude has no word for ends a task as done, whatever every object has under that name', () => {
+  const tracker = new BackgroundTracker();
+  tracker.onHook(bash('odd'), 1);
+  tracker.onHook(ended('odd', 'Background command "x" ended', 'constructor'), 2);
+  assert.deepEqual(
+    tracker.list().map((t) => t.state),
+    ['done'],
+  );
+});
+
+test('what stands between a pair of tags is found in one pass over the text', () => {
+  assert.equal(tag('a <x>one</x> b <x>two</x>', 'x'), 'one');
+  assert.equal(tag('</x> <x>in</x>', 'x'), 'in');
+  assert.equal(tag('<x><x>inner</x></x>', 'x'), '<x>inner');
+  assert.equal(tag('<x></x>', 'x'), '');
+  assert.equal(tag('<x>never closed', 'x'), null);
+  assert.equal(tag('nothing', 'x'), null);
+  // What a command printed or someone pasted may open a tag again and again and never close it. A
+  // pattern starts over at each one: four times as long for twice the text, seconds for this megabyte
+  // and minutes for the eight a hook may bring.
+  const started = Date.now();
+  assert.equal(tag('<status> a line of a log\n'.repeat(40_000), 'status'), null);
+  assert.ok(Date.now() - started < 1000, `took ${Date.now() - started} ms`);
 });
 
 test('a monitor is known by what started it though Stop lists it as a shell; its lines show, then its end', () => {

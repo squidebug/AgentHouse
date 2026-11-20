@@ -223,6 +223,9 @@ describe('conversation from a Claude Code transcript', () => {
     assert.equal(builder.entry(agent.id)?.kind === 'agent' && (builder.entry(agent.id) as { state: string }).state, 'error');
     const nested = build([prompt('[SYSTEM NOTIFICATION - NOT USER INPUT]\n\n' + report('a9', 'toolu_9', 'completed', 'beta'), { ...fromTask, isMeta: true })]);
     assert.deepEqual(kinds(nested.snapshot().entries), ['task']);
+    // A status Claude has no word for is an end like any other, whatever every object has under that name.
+    const odd = build([prompt(report('a7', 'toolu_5', 'constructor', 'gamma'), fromTask)]).snapshot().entries[0];
+    assert.equal(odd?.kind === 'task' && odd.state, 'done');
   });
 
   test('tool summaries', () => {

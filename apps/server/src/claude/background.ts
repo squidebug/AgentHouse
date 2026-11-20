@@ -244,7 +244,8 @@ export class BackgroundTracker {
     if (!this.tasks.has(taskId)) return false;
     const code = summary.match(/exit code (-?\d+)/i);
     const exitCode = code ? Number(code[1]) : null;
-    const state = ENDED[status] ?? 'done';
+    // A word of the table only: `constructor` is in every object, and is no state.
+    const state = Object.hasOwn(ENDED, status) ? ENDED[status]! : 'done';
     return this.update(taskId, { state: state === 'done' && exitCode !== null && exitCode !== 0 ? 'failed' : state, exitCode, endedAt: at });
   }
 

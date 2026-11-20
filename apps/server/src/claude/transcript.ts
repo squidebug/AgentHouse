@@ -118,7 +118,8 @@ function taskReport(content: string): TaskReport | null {
   return {
     agentId: field('task-id'),
     toolUseId: field('tool-use-id'),
-    state: (status && TASK_STATES[status]) || 'done',
+    // A word of the table only: `constructor` is in every object, and is no state.
+    state: status && Object.hasOwn(TASK_STATES, status) ? TASK_STATES[status]! : 'done',
     summary: field('summary'),
     result: field('result'),
     tokens: count('subagent_tokens'),
