@@ -56,12 +56,17 @@ describe('session host', () => {
       assert.ok(isAlive(session.pid), 'the CLI keeps running without a web server');
       await sleep(2500);
 
-      // Logins are bound to the port and to the host's secret: back on the same port, they still hold.
+      // A login ends with the web server that gave it. A page left open sends its token to whatever
+      // has the port next, so the next web server, even at the same port and over the same host,
+      // takes neither that token nor the key of the one before: the page logs in again.
       const second = await webServer(stateDir, first.app.port);
       servers.push(second);
-      assert.equal(second.app.key, first.app.key, 'the key comes from the host and the port');
-      const listed = await request(second.app.port, 'GET', '/api/sessions', { headers: { authorization: first.authorization } });
-      assert.equal(listed.status, 200, 'the browser stays logged in');
+      assert.notEqual(second.app.key, first.app.key, 'a key of its own');
+      for (const old of [first.authorization, `Bearer ${first.app.key}`]) {
+        assert.equal((await request(second.app.port, 'GET', '/api/sessions', { headers: { authorization: old } })).status, 401);
+      }
+      const listed = await request(second.app.port, 'GET', '/api/sessions', { headers: second.headers });
+      assert.equal(listed.status, 200, 'the sessions are there for the page that logged in to it');
       assert.deepEqual(
         (listed.json as SessionInfo[]).map((s) => s.id),
         [session.id],

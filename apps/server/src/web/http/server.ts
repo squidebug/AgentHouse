@@ -2,6 +2,7 @@
 // and what a request that failed is told. Behind it are the API (routes.ts) and
 // the page's sockets (sockets.ts); this file makes what they work with and
 // connects them.
+import { randomBytes } from 'node:crypto';
 import http, { type ServerResponse } from 'node:http';
 import { AUTH_REQUIRED, LOGIN_EXPIRED, type ApiError, type LoginResult } from '@agenthouse/protocol';
 import { webLogger } from '../../shared/state';
@@ -41,6 +42,13 @@ export interface ServerOptions {
   stopCommand?: string;
   /** How the user gets a new login address, for a page that is not logged in (default `pnpm start`). */
   startCommand?: string;
+  /**
+   * What logins are made with. By default a secret of this web server's own, so a login ends with
+   * the server that gave it: a page left open sends its token to whatever has the port afterwards,
+   * and by then the token opens nothing. The dev runner gives the session host's, which lasts: its
+   * server starts again at every change, and the page would be logged out each time.
+   */
+  loginSecret?: string;
 }
 
 export interface AgentHouseServer {
@@ -97,8 +105,8 @@ async function listenOn(server: http.Server, ports: number[]): Promise<number> {
 }
 
 export async function createAgentHouseServer(options: ServerOptions): Promise<AgentHouseServer> {
-  // The host keeps its login secret for as long as it runs, so logins outlive web server restarts.
-  const access = new AccessControl(options.host.webToken, options.devOrigins ?? []);
+  // A login lasts as long as this web server does (ServerOptions.loginSecret).
+  const access = new AccessControl(options.loginSecret ?? randomBytes(32).toString('base64url'), options.devOrigins ?? []);
   const startCommand = options.startCommand ?? 'pnpm start';
   // Called once the server listens, when the port is known.
   const loginAddress = (code: string) => `http://127.0.0.1:${port}/?code=${code}`;

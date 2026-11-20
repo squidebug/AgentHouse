@@ -30,10 +30,12 @@ function socketToken(req: IncomingMessage): string | null {
  * and a credential for the API and the sockets. The page itself holds no secret
  * and is served to anyone who passes the Host check.
  *
- * Credentials derive from the session host's login secret, which never leaves the
- * server processes: a page's token, traded for a one-time login code, and the key
- * local tools use (web.json, --json). Both are bound to this port, so neither works
- * at another one, and both stay good across web server restarts while the host runs.
+ * Credentials derive from a secret the web server makes when it starts and keeps to
+ * itself: a page's token, traded for a one-time login code, and the key local tools
+ * use (web.json, --json). Both are bound to this port, so neither works at another
+ * one, and both end with this server: the next one has a secret of its own, and a
+ * page logs in again with the address its start opens. (The dev runner's server has
+ * the session host's secret instead, which lasts while it starts again and again.)
  */
 export class AccessControl {
   private hosts = new Set<string>();

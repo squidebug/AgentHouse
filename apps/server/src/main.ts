@@ -121,6 +121,8 @@ async function main(): Promise<void> {
     ...(args.port === null ? { fallbackPorts: FALLBACK_PORTS } : {}),
     host,
     devOrigins: args.devOrigins,
+    // The dev server starts again at every change: its page stays logged in by the host's secret.
+    ...(dev ? { loginSecret: host.webToken } : {}),
     stopCommand: dev ? 'pnpm dev:stop' : 'pnpm stop',
     startCommand: dev ? 'pnpm dev' : 'pnpm start',
     defaultCwd: args.cwd ?? process.cwd(),

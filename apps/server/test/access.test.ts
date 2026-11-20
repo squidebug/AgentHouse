@@ -27,23 +27,25 @@ test('codes nobody used are dropped oldest first beyond twenty', () => {
   assert.ok(access.redeem(codes[20]!, 1000));
 });
 
-test('tokens and the key hold at their own port, with their own host, across web server restarts', () => {
+test('tokens and the key hold at their own port and with the secret they were made with', () => {
   const access = bound('host secret', 7357);
   const token = access.redeem(access.issueCode())!;
   assert.ok(access.valid(token));
   assert.ok(access.valid(access.key));
 
+  // The dev runner's server, started again with the secret its host keeps.
   const restarted = bound('host secret', 7357);
-  assert.ok(restarted.valid(token), 'a new web server of the same host, at the same port');
+  assert.ok(restarted.valid(token), 'the same secret, at the same port');
   assert.equal(restarted.key, access.key);
 
   const otherPort = bound('host secret', 7359);
   assert.equal(otherPort.valid(token), false, 'another port is another origin');
   assert.equal(otherPort.valid(access.key), false);
 
-  const newHost = bound('another secret', 7357);
-  assert.equal(newHost.valid(token), false, 'a new host');
-  assert.equal(newHost.valid(access.key), false);
+  // Any other web server: each makes a secret of its own when it starts.
+  const next = bound('another secret', 7357);
+  assert.equal(next.valid(token), false, 'a secret of its own');
+  assert.equal(next.valid(access.key), false);
 
   const [nonce, signature] = token.split('.');
   for (const forged of [`${nonce}.`, `.${signature}`, `${nonce}.${signature}.x`, nonce!, 'host secret', '']) {
