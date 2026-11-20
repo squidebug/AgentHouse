@@ -186,7 +186,8 @@ describe('sessions started outside AgentHouse', () => {
     ];
     external.watch(true);
     await external.ready(5000);
-    assert.deepEqual(external.list().map((session) => session.pid), [64]);
+    // Only Windows has such folders: elsewhere `//host/share/project` is the machine's own /host/share/project.
+    assert.deepEqual(external.list().map((session) => session.pid), process.platform === 'win32' ? [64] : [63, 64]);
   });
 
   test('one nobody has asked anything yet has a name, a folder and a state', async () => {
