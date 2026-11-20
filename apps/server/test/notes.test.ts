@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
@@ -42,6 +42,18 @@ describe('a note of the user is saved whole, and only over what the page loaded'
     assert.equal((await readText(file)).version, saved.version, 'the version stands for the content');
     assert.equal(await code(() => writeText(path.join(work, 'gone.md'), 'x', saved.version)), 'NOT_FOUND');
     assert.equal(await code(() => readText(path.join(work, 'gone.md'))), 'NOT_FOUND');
+  });
+
+  test('it is written beside itself under a name nobody can know beforehand', async () => {
+    const file = put(path.join(work, 'guessed.md'), 'before\n');
+    // The name the temporary file used to have. A project's folder is its repository's to fill, and a
+    // link waiting under a name that can be worked out would be written through.
+    const guessed = put(`${file}.${process.pid}.agenthouse.tmp`, 'not a temporary file');
+    await writeText(file, 'after\n', (await readText(file)).version);
+    assert.equal(readFileSync(file, 'utf8'), 'after\n');
+    assert.equal(readFileSync(guessed, 'utf8'), 'not a temporary file');
+    const beside = readdirSync(work).filter((name) => name.startsWith('guessed.md'));
+    assert.deepEqual(beside.sort(), ['guessed.md', path.basename(guessed)], 'and nothing of its own is left');
   });
 
   test('its line ends and its byte order mark stay as they were', async () => {

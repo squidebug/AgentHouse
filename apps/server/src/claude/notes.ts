@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { open, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { TextFile } from '@agenthouse/protocol';
@@ -109,8 +109,11 @@ export async function writeText(file: string, text: string, version: string): Pr
   const bytes = hasBom(before) ? Buffer.concat([BOM, body]) : body;
   if (bytes.length > MAX_FILE_BYTES) throw new FileError('파일이 너무 큽니다.', 'TOO_LARGE');
   const { mode } = await stat(file);
-  const temp = `${file}.${process.pid}.agenthouse.tmp`;
-  await writeFile(temp, bytes, { mode });
+  // The folder may be a project's, with whatever its repository put there: a name nobody can
+  // know beforehand, and made new or not at all (`wx`), so that a link waiting under the name is
+  // never written through.
+  const temp = `${file}.${randomBytes(8).toString('hex')}.agenthouse.tmp`;
+  await writeFile(temp, bytes, { mode, flag: 'wx' });
   try {
     await renameOver(temp, file);
   } catch (error) {
