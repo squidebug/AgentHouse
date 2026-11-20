@@ -21,7 +21,7 @@
 //       time, and it is gone once it ends.
 //       These run in a folder of their own in the temp folder; the first run tells Claude to trust it.
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
@@ -483,7 +483,14 @@ let session = null;
 try {
   // The scenario and the resumed conversation stay out of this repository's own Claude history.
   const apart = scenario || withResume || background || external;
-  if (apart) mkdirSync(work, { recursive: true });
+  if (apart) {
+    mkdirSync(work, { recursive: true, mode: 0o700 });
+    // Claude is told to trust this folder and the scenario empties it, and on Linux the temp folder
+    // is everyone's: a folder another account made there, or a link to some other folder, is not it.
+    const made = lstatSync(work);
+    const others = typeof process.getuid === 'function' && (made.uid !== process.getuid() || (made.mode & 0o022) !== 0);
+    if (!made.isDirectory() || others) throw new Error(`${work} is not a folder of this user's alone: remove it and run again`);
+  }
   if (scenario) for (const name of readdirSync(work)) rmSync(path.join(work, name), { recursive: true, force: true });
   const options = {
     vendor: 'claude',
