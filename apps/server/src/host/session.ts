@@ -1,5 +1,7 @@
 import { EventEmitter } from 'node:events';
+import { chmodSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import path from 'node:path';
 import pty, { type IPty } from 'node-pty';
 import type { WebSocket } from 'ws';
 import {
@@ -20,6 +22,32 @@ import type { Observer } from './observer';
 const require = createRequire(import.meta.url);
 const { Terminal: HeadlessTerminal } = require('@xterm/headless') as typeof import('@xterm/headless');
 const { SerializeAddon } = require('@xterm/addon-serialize') as typeof import('@xterm/addon-serialize');
+
+/**
+ * On macOS node-pty starts every program through a helper of its own, and the helper that comes
+ * in its package (1.1.0) may not be run: a file of mode 644, so each spawn fails with "posix_spawnp
+ * failed". It is made runnable wherever node-pty would take it from; one node-pty built on this
+ * machine is runnable already, and one that is not there or not the user's is left to the spawn to
+ * report. `root` is node-pty's folder.
+ */
+export function allowSpawnHelper(root: string): void {
+  for (const dir of ['build/Release', 'build/Debug', `prebuilds/darwin-${process.arch}`]) {
+    const helper = path.join(root, dir, 'spawn-helper');
+    try {
+      if (!(statSync(helper).mode & 0o100)) chmodSync(helper, 0o755);
+    } catch {
+      // no helper there
+    }
+  }
+}
+
+if (process.platform === 'darwin') {
+  try {
+    allowSpawnHelper(path.dirname(require.resolve('node-pty/package.json')));
+  } catch {
+    // node-pty laid out another way: the spawn itself says what is wrong
+  }
+}
 
 /** How far a viewer may fall behind before it stops receiving live output, and when it is resynchronised from a snapshot. */
 export interface ViewerBacklog {

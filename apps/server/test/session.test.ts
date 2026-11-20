@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
-import { appendFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { appendFile, chmod, mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import type { SessionInfo } from '@agenthouse/protocol';
 import { createSessionHost, type SessionHost } from '../src/host/server';
+import { allowSpawnHelper } from '../src/host/session';
 import { childEnv } from '../src/shared/child-env';
 import { isAlive } from '../src/shared/kill-tree';
 import { HostClient } from '../src/web/host-client';
@@ -153,4 +154,26 @@ describe('a session in the host', () => {
       await client.closeSession(info.id);
     }
   });
+});
+
+// Windows has no such right to give: a file there runs or not by its name.
+test("macOS: node-pty's helper, shipped as a file that may not be run, is made runnable", { skip: process.platform === 'win32' }, async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'agenthouse-pty-'));
+  try {
+    const shipped = path.join(root, 'prebuilds', `darwin-${process.arch}`, 'spawn-helper');
+    const built = path.join(root, 'build', 'Release', 'spawn-helper');
+    for (const file of [shipped, built]) {
+      await mkdir(path.dirname(file), { recursive: true });
+      await writeFile(file, '');
+    }
+    await chmod(shipped, 0o644);
+    await chmod(built, 0o700);
+    allowSpawnHelper(root);
+    assert.equal((await stat(shipped)).mode & 0o777, 0o755);
+    assert.equal((await stat(built)).mode & 0o777, 0o700, 'one that can be run is left as it is');
+    // No helper at all (node-pty laid out another way): nothing to do, and nothing thrown.
+    allowSpawnHelper(path.join(root, 'nowhere'));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
