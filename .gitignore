@@ -10,6 +10,10 @@ Thumbs.db
 .env
 .env.*
 
+# Claude Code's own files for this checkout: local settings (they name folders of this machine)
+# and the worktrees of its agents
+.claude/
+
 # Raw transcripts copied for local debugging; only sanitized fixtures are committed
 fixtures/raw/
 
