@@ -142,7 +142,14 @@ export async function createAgentHouseServer(options: ServerOptions): Promise<Ag
         send(res, 403, 'host not allowed');
         return;
       }
-      const url = new URL(req.url ?? '/', 'http://localhost');
+      let url: URL;
+      try {
+        url = new URL(req.url ?? '/', 'http://localhost');
+      } catch {
+        // Not an address (`//`). Anyone can send one without a login, so it is no fault to write down.
+        send(res, 400, 'bad request');
+        return;
+      }
       // A local tool (a second start) asks for an address to open.
       if (url.pathname === '/auth/code' && req.method === 'POST') {
         if (!access.isLocalTool(req)) {

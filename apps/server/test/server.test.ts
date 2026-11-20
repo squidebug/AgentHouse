@@ -79,6 +79,15 @@ describe('access control', () => {
     assert.equal(res.status, 403);
   });
 
+  test('what is no address is refused as that: no fault of the server, and no line in its log', async () => {
+    // Anyone can send it, without a login: `//` is an address with a host and no name for it.
+    const log = () => (existsSync(webLogFile(app.stateDir)) ? readFileSync(webLogFile(app.stateDir), 'utf8') : '');
+    const written = log();
+    const reply = await request(app.port, 'GET', '//');
+    assert.equal(reply.status, 400);
+    assert.equal(log(), written);
+  });
+
   test('a Host outside the allowlist is refused (DNS rebinding)', async () => {
     const res = await request(app.port, 'GET', '/api/sessions', { headers: { host: `evil.example:${app.port}`, authorization } });
     assert.equal(res.status, 403);
