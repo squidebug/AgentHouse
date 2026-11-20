@@ -114,6 +114,9 @@ describe('hook relay', () => {
     assert.deepEqual([named.code, named.stdout], [0, '']);
     const bare = await runRelay('status', config, '{}', { SHELL: undefined, CLAUDE_CODE_GIT_BASH_PATH: path.basename(process.execPath) });
     assert.deepEqual([bare.code, bare.stdout], [0, 'installed-bash'], 'a bare name is not run: it could be a file of the current folder');
+    // SHELL as Cygwin sets it. Windows would look for it on the current drive, where any account may put a file.
+    const driveless = await runRelay('status', config, '{}', { SHELL: '/usr/bin/bash', CLAUDE_CODE_GIT_BASH_PATH: undefined });
+    assert.deepEqual([driveless.code, driveless.stdout], [0, 'installed-bash'], 'nor a path without its drive');
   });
 
   test('without a status line of the user it prints nothing', async () => {

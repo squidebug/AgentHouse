@@ -57,13 +57,17 @@ function post(path, body) {
 // user named for Claude in CLAUDE_CODE_GIT_BASH_PATH, else where Git installs
 // it; PowerShell when it is missing), sh elsewhere. Always by absolute path,
 // never a bare name that could run a same-named file from the current folder.
+// On Windows that is a path with its drive: `/usr/bin/bash` (SHELL as Cygwin sets
+// it) would be looked for on the current drive, where any account may put a file.
+const whole = (file) => (process.platform === 'win32' ? /^[A-Za-z]:[\\/]/.test(file) : path.isAbsolute(file));
+
 function shellFor(command) {
-  if (process.env.SHELL && path.isAbsolute(process.env.SHELL)) return [process.env.SHELL, ['-c', command]];
+  if (process.env.SHELL && whole(process.env.SHELL)) return [process.env.SHELL, ['-c', command]];
   if (process.platform !== 'win32') return ['/bin/sh', ['-c', command]];
   const named = process.env.CLAUDE_CODE_GIT_BASH_PATH;
   const bases = [process.env.ProgramFiles, process.env['ProgramFiles(x86)'], process.env.LOCALAPPDATA && `${process.env.LOCALAPPDATA}\\Programs`];
   const installed = bases.filter(Boolean).map((base) => `${base}\\Git\\bin\\bash.exe`);
-  const bash = [...(named && path.isAbsolute(named) ? [named] : []), ...installed].find((file) => fs.existsSync(file));
+  const bash = [...(named && whole(named) ? [named] : []), ...installed].find((file) => fs.existsSync(file));
   if (bash) return [bash, ['-c', command]];
   const powershell = `${process.env.SystemRoot || 'C:\\Windows'}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
   return [powershell, ['-NoProfile', '-NonInteractive', '-Command', command]];
