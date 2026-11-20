@@ -262,6 +262,29 @@ describe('staying up', () => {
     }
   });
 
+  test('of what answers at a recorded port only a login code is taken: the address to open is made here', async () => {
+    const dir = await tempStateDir();
+    // A record left behind whose process id is alive again, and something else listening at its port.
+    let answer: object = {};
+    const other = http.createServer((_req, res) => res.end(JSON.stringify(answer)));
+    await new Promise<void>((resolve) => other.listen(0, '127.0.0.1', resolve));
+    const { port } = other.address() as { port: number };
+    try {
+      writeFileSync(webServerFile(dir), JSON.stringify({ pid: process.ppid, port, url: `http://127.0.0.1:${port}/`, key: 'a-key' }));
+      // The start hands the address to the system to open, and the system would run a program as well.
+      answer = { url: 'C:\\Users\\Public\\run-me.exe' };
+      assert.equal(await runningWebServer(dir), null, 'an address it names is not taken');
+      answer = { code: '../../run-me', url: 'file:///C:/Users/Public/run-me.exe' };
+      assert.equal(await runningWebServer(dir), null, 'nor is what is no code made into one');
+      answer = { code: 'A'.repeat(32), url: 'file:///C:/Users/Public/run-me.exe' };
+      assert.equal((await runningWebServer(dir))?.loginUrl, `http://127.0.0.1:${port}/?code=${'A'.repeat(32)}`);
+    } finally {
+      other.closeAllConnections();
+      await new Promise((resolve) => other.close(resolve));
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   test('--stop ends the web server of the state folder, asking it only whether it is there', async () => {
     const dir = await tempStateDir();
     // A stand-in web server in a process of its own: it prints what it is asked, and takes one key.

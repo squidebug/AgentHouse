@@ -29,7 +29,15 @@ function read(stateDir: string): WebServerRecord | null {
   }
 }
 
-/** An address that logs a browser in to the web server on this port, if one listens there and takes this key. */
+// A login code as a web server makes one (access.ts): nothing but letters, digits, `-` and `_`.
+const LOGIN_CODE = /^[A-Za-z0-9_-]{16,128}$/;
+
+/**
+ * An address that logs a browser in to the web server on this port, if one listens there and takes
+ * this key. Whatever listens there is the port of a record that may be old, so of its answer only a
+ * login code is taken, and the address is made here: the start hands it to the system to open, which
+ * opens a program as readily as a page.
+ */
 function loginAddress(port: number, key: string): Promise<string | null> {
   return new Promise((resolve) => {
     const req = http.request({ host: '127.0.0.1', port, method: 'POST', path: '/auth/code', headers: { authorization: `Bearer ${key}` }, timeout: 2000 }, (res) => {
@@ -37,8 +45,8 @@ function loginAddress(port: number, key: string): Promise<string | null> {
       res.on('data', (chunk: Buffer) => chunks.push(chunk));
       res.on('end', () => {
         try {
-          const url = (JSON.parse(Buffer.concat(chunks).toString('utf8')) as { url?: unknown }).url;
-          resolve(res.statusCode === 200 && typeof url === 'string' ? url : null);
+          const code = (JSON.parse(Buffer.concat(chunks).toString('utf8')) as { code?: unknown }).code;
+          resolve(res.statusCode === 200 && typeof code === 'string' && LOGIN_CODE.test(code) ? `http://127.0.0.1:${port}/?code=${code}` : null);
         } catch {
           resolve(null);
         }
