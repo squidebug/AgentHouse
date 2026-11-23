@@ -14,8 +14,9 @@ const ALLOW = new Set(['A', 'OA', 'XA', 'ZA']);
 
 /** The accounts other than the user and TRUSTED that an allow entry of this security descriptor (SDDL) lets in. */
 export function othersAllowed(sddl: string, userSid: string): string[] {
-  // A folder without a list of who may enter (written `NO_ACCESS_CONTROL`) lets everyone in.
-  if (/D:[^(]*NO_ACCESS_CONTROL/.test(sddl)) return ['WD'];
+  // A folder without a list of who may enter lets everyone in. Read through .NET its descriptor has
+  // no `D:` part at all; Windows itself writes one that says `NO_ACCESS_CONTROL`.
+  if (!sddl.includes('D:') || /D:[^(]*NO_ACCESS_CONTROL/.test(sddl)) return ['WD'];
   const dacl = sddl.match(/D:[^(]*((?:\([^)]*\))*)/)?.[1] ?? '';
   const others = new Set<string>();
   for (const [, type, sid] of dacl.matchAll(/\(([A-Z]+);[^;]*;[^;]*;[^;]*;[^;]*;([^;)]+)/g)) {
@@ -31,16 +32,21 @@ export function windowsOthers(dir: string): Promise<string[] | null> {
   // not Get-Acl: a cmdlet is loaded from PSModulePath, and started from PowerShell 7 (a terminal, a
   // CI step) this Windows PowerShell inherits a path with PowerShell 7's modules first, cannot load
   // them, and the check could tell nothing.
+  // Each answer says what it is. A folder without a list of who may enter answers with nothing:
+  // on a line of its own that could not be told from a folder that was not read at all.
   const script =
-    "[IO.Directory]::GetAccessControl($env:AGENTHOUSE_CHECK_DIR).GetSecurityDescriptorSddlForm('Access'); [Security.Principal.WindowsIdentity]::GetCurrent().User.Value";
+    "'acl=' + [IO.Directory]::GetAccessControl($env:AGENTHOUSE_CHECK_DIR).GetSecurityDescriptorSddlForm('Access'); 'me=' + [Security.Principal.WindowsIdentity]::GetCurrent().User.Value";
   return new Promise((resolve) => {
     execFile(
       powershell,
       ['-NoProfile', '-NonInteractive', '-Command', script],
       { env: { ...process.env, AGENTHOUSE_CHECK_DIR: dir }, windowsHide: true, timeout: 20_000 },
       (error, stdout) => {
-        const [sddl, sid] = String(stdout).trim().split(/\r?\n/).map((line) => line.trim());
-        resolve(error || !sddl?.includes('D:') || !sid?.startsWith('S-') ? null : othersAllowed(sddl, sid));
+        const lines = String(stdout).split(/\r?\n/).map((line) => line.trim());
+        const said = (name: string) => lines.find((line) => line.startsWith(name))?.slice(name.length);
+        const sddl = said('acl=');
+        const sid = said('me=');
+        resolve(error || sddl === undefined || !sid?.startsWith('S-') ? null : othersAllowed(sddl, sid));
       },
     );
   });

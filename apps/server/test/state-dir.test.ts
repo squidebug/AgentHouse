@@ -17,7 +17,9 @@ test('a folder only the user, SYSTEM and Administrators get into lets no one els
 test('anyone else an allow entry names is reported; deny entries are not', () => {
   const shared = `O:BAG:SYD:AI(A;OICIID;FA;;;BA)(A;OICIID;0x1200a9;;;BU)(A;OICIIOID;SDGXGWGR;;;AU)(A;OICIID;FA;;;${me})(D;OICI;FA;;;WD)(A;;FR;;;S-1-5-21-9-9-9-1002)`;
   assert.deepEqual(othersAllowed(shared, me), ['BU', 'AU', 'S-1-5-21-9-9-9-1002']);
-  // No list of who may enter at all is everyone, not no one.
+  // No list of who may enter at all is everyone, not no one. .NET leaves the part out; Windows itself writes it so.
+  assert.deepEqual(othersAllowed('', me), ['WD']);
+  assert.deepEqual(othersAllowed(`O:${me}G:${me}`, me), ['WD']);
   assert.deepEqual(othersAllowed(`O:${me}G:${me}D:NO_ACCESS_CONTROL`, me), ['WD']);
   assert.deepEqual(othersAllowed(`O:${me}G:${me}D:P`, me), [], 'an empty list is no one');
 });
@@ -42,6 +44,33 @@ test('Windows: the folder\'s own permissions are read, and an account let in is 
     execFileSync(path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'icacls.exe'), [dir, '/grant', '*S-1-5-32-545:(OI)(CI)R'], { stdio: 'ignore' });
     assert.deepEqual(await windowsOthers(dir), ['BU']);
   } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('Windows: a folder with no list of who may enter is everyone\'s, and one that cannot be read is not', { skip: process.platform !== 'win32' }, async () => {
+  const dir = await tempStateDir();
+  const profile = process.env.USERPROFILE;
+  try {
+    assert.equal(await windowsOthers(path.join(dir, 'gone')), null, 'nothing to read: it cannot tell');
+    // The list is taken off the way the check reads it: Windows PowerShell and .NET, no module.
+    execFileSync(
+      path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        "$none = New-Object Security.AccessControl.DirectorySecurity; $none.SetSecurityDescriptorSddlForm('D:NO_ACCESS_CONTROL', 'Access'); [IO.Directory]::SetAccessControl($env:AGENTHOUSE_CHECK_DIR, $none)",
+      ],
+      { env: { ...process.env, AGENTHOUSE_CHECK_DIR: dir }, stdio: 'ignore' },
+    );
+    assert.deepEqual(await windowsOthers(dir), ['WD']);
+    // And as a start asks: of a folder that is not in the user's profile.
+    process.env.USERPROFILE = path.join(dir, 'profile');
+    assert.match((await stateDirProblem(dir)) ?? '', /WD/);
+  } finally {
+    if (profile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = profile;
     await rm(dir, { recursive: true, force: true });
   }
 });
